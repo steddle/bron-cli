@@ -129,10 +129,15 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
 /// the line because the parser puts it there, so asking for `sub b` costs no
 /// schema and no second address space.
 ///
-/// What it does not do is narrow the span. An item has no byte range in this
-/// corpus: offsets are held per article and per lid, and inventing one for an
-/// item would be an offset nobody measured. So the excerpt stays the lid's and
-/// the answer is honest about what it points at.
+/// Narrowing to a lid narrows what the answer points at with it: the excerpt,
+/// the Juriconnect reference and the label all become the lid's, because an
+/// answer about lid 2 that cites the article's bytes is coarser than the claim
+/// it supports.
+///
+/// An item is where that stops. It has no byte range in this corpus: offsets
+/// are held per article and per lid, and inventing one for an item would be an
+/// offset nobody measured. So `--item` leaves the excerpt at the lid's, which
+/// is a concession the answer makes plainly rather than quietly.
 fn narrow(
     articles: Vec<wire::Article>,
     paragraph: Option<&str>,
@@ -177,7 +182,15 @@ fn narrow(
             lid.content = line.to_string();
         }
 
+        // The answer is now about a lid, so everything that says what it points
+        // at has to be the lid's. Dutch practice cites 'art. 6:162 lid 2 BW',
+        // and an answer to that which reports the article's byte range is one
+        // level coarser than the claim it is supporting. The offsets were
+        // measured and stored per lid; only the reporting threw them away.
         article.content = lid.content.clone();
+        article.excerpt = lid.excerpt.clone();
+        article.jci = lid.jci.clone();
+        article.label = article.label.map(|label| format!("{label} lid {number}"));
         article.leden = vec![lid];
         narrowed.push(article);
     }
@@ -1405,23 +1418,26 @@ mod narrow_tests {
             path: None,
             content: leden.iter().map(|(_, c)| *c).collect::<Vec<_>>().join("\n"),
             excerpt: Excerpt {
-                start: 0,
-                end: 1,
+                start: 1000,
+                end: 2000,
                 text: "<artikel/>".into(),
                 rendered: String::new(),
             },
+            // Distinct spans per lid, because the whole point of narrowing is
+            // that the answer stops pointing at the article's range.
             leden: leden
                 .iter()
-                .map(|(number, content)| Lid {
+                .enumerate()
+                .map(|(i, (number, content))| Lid {
                     number: Some((*number).into()),
                     content: (*content).to_string(),
                     excerpt: Excerpt {
-                        start: 0,
-                        end: 1,
+                        start: 1100 + i as u32 * 100,
+                        end: 1150 + i as u32 * 100,
                         text: "<lid/>".into(),
                         rendered: String::new(),
                     },
-                    jci: None,
+                    jci: Some(format!("jci1.3:c:BWBR0005289&artikel=3&lid={number}")),
                 })
                 .collect(),
             amended_by: None,
@@ -1446,6 +1462,41 @@ mod narrow_tests {
                 "2. Een natuurlijke verbintenis bestaat:\na. wanneer de wet dat bepaalt;\nb. wanneer een morele plicht bestaat.",
             ),
         ])
+    }
+
+    /// Dutch practice cites 'art. 6:162 lid 2 BW'. An answer to that which
+    /// reports the article's byte range is one level coarser than the claim it
+    /// supports, and the lid's range was measured and stored all along.
+    #[test]
+    fn a_lid_answer_points_at_the_lid_and_not_at_the_article() {
+        let narrowed = narrow(vec![items()], Some("2"), None).unwrap();
+        let answer = &narrowed[0];
+
+        assert_eq!(answer.excerpt.start, 1200);
+        assert_eq!(answer.excerpt.end, 1250);
+        assert_eq!(
+            answer.jci.as_deref(),
+            Some("jci1.3:c:BWBR0005289&artikel=3&lid=2")
+        );
+        assert_eq!(answer.label.as_deref(), Some("Artikel 3 lid 2"));
+    }
+
+    /// An item has no byte range in this corpus, so the answer stays at the
+    /// lid's rather than inventing one nobody measured.
+    #[test]
+    fn an_item_answer_points_at_the_lid_that_holds_it() {
+        let narrowed = narrow(vec![items()], Some("2"), Some("b")).unwrap();
+
+        assert_eq!(narrowed[0].excerpt.start, 1200);
+        assert_eq!(narrowed[0].excerpt.end, 1250);
+    }
+
+    #[test]
+    fn an_article_answered_whole_still_points_at_the_article() {
+        let narrowed = narrow(vec![items()], None, None).unwrap();
+
+        assert_eq!(narrowed[0].excerpt.start, 1000);
+        assert_eq!(narrowed[0].label.as_deref(), Some("Artikel 3"));
     }
 
     #[test]

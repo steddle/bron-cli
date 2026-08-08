@@ -94,6 +94,14 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     article.provenance.blob, article.excerpt.start, article.excerpt.end
                 )?;
                 writeln!(out, "{}", article.provenance.url)?;
+                // The register's own citation string for exactly what is
+                // printed above, carrying this rendition's zicht and geldigheid
+                // dates. It is what Dutch practice already cites with, so a
+                // reader needs no mapping from ours, and it was being stored
+                // and thrown away at the last step.
+                if let Some(jci) = &article.jci {
+                    writeln!(out, "{jci}")?;
+                }
                 if let Some(act) = &article.amended_by {
                     let effect = article.effect.as_deref().unwrap_or("wijziging");
                     writeln!(out, "in force through {act} ({effect})")?;
