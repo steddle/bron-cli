@@ -62,14 +62,14 @@ A 404 from upstream is a 2, not a 3. It's the service answering, and reporting i
 
 ## Reading through a mirror
 
-By default bron fetches bytes through `https://api.steddle.com/bron/v1`, which already holds most of them and spares both you and the publisher a request. The mirror only ever serves bytes, and only bytes that hash to the digest the publisher stated in its own manifest, which bron reads from the publisher either way. A mirror that altered a text would fail that hash.
+By default bron fetches bytes through `https://bron.steddle.com/api/v1`, which already holds most of them and spares both you and the publisher a request. The mirror only ever serves bytes, and only bytes that hash to the digest the publisher stated in its own manifest, which bron reads from the publisher either way. A mirror that altered a text would fail that hash.
 
 Every answer names which of the two served it in `resolved_via`, because a dossier must not be able to hide that its text came through an intermediary.
 
 ```
 bron law show BWBR0005289 --article 162 --direct   # this run, publisher only
 BRON_MIRROR=                                       # opt out for good
-BRON_MIRROR=https://mirror.example.org/v1          # somewhere else entirely
+BRON_MIRROR=https://mirror.example.org/api/v1          # somewhere else entirely
 ```
 
 Dates are never resolved through a mirror. Which version applied on a day is read from validity windows that hang on nothing verifiable, so that answer always comes from the publisher's own manifest.

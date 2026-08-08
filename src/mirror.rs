@@ -40,7 +40,7 @@ const ENV: &str = "BRON_MIRROR";
 /// change what a law says. Every answer names the route it took in
 /// `resolved_via`. And `--direct`, or `BRON_MIRROR=`, takes it out of the path
 /// entirely.
-const DEFAULT: &str = "https://api.steddle.com/bron/v1";
+const DEFAULT: &str = "https://bron.steddle.com/api/v1";
 
 /// Which of the two answered, so a stored answer can say where its bytes came
 /// from. A dossier may not be able to hide that it read through an intermediary.
@@ -187,7 +187,7 @@ impl Mirror {
     /// rather than an identifier. A question in a URL is a question in every
     /// access log the request passes.
     pub fn search(&self, client: &Client, request: &SearchRequest) -> Result<SearchAnswer> {
-        let url = format!("{}/v1/search", self.base);
+        let url = format!("{}/api/v1/search", self.base);
         let fetched = client
             .fetch(client.post(&url).json(request))
             .context("cannot reach the corpus to search it")?;
@@ -225,7 +225,7 @@ impl Mirror {
 
     /// Which blob holds a version, according to the service.
     fn digest_of(&self, client: &Client, law: &BwbId, version: &str) -> Result<Option<String>> {
-        let url = format!("{}/v1/regulations/{law}/expressions", self.base);
+        let url = format!("{}/api/v1/regulations/{law}/expressions", self.base);
         let fetched = client
             .fetch_url(&url)
             .with_context(|| format!("cannot read expressions for {law} from the mirror"))?;
@@ -241,7 +241,7 @@ impl Mirror {
             bail!("the mirror named a blob that is not a sha-256 digest: {digest}");
         }
 
-        let url = format!("{}/v1/blobs/{digest}", self.base);
+        let url = format!("{}/api/v1/blobs/{digest}", self.base);
         client
             .fetch_url(&url)
             .with_context(|| format!("cannot read blob {digest} from the mirror"))
@@ -250,15 +250,15 @@ impl Mirror {
 
 /// Trims a configured base down to what the paths below are appended to.
 ///
-/// The service versions itself in the path and bron adds `/v1` itself, so a
-/// base copied out of a browser with `/v1` already on the end would ask for
-/// `/v1/v1` and get a 404. That failure is the quiet kind: the mirror is
+/// The service versions itself in the path and bron adds `/api/v1` itself, so a
+/// base copied out of a browser with `/api/v1` already on the end would ask for
+/// `/api/v1/api/v1` and get a 404. That failure is the quiet kind: the mirror is
 /// skipped, the publisher answers, and the only trace is `resolved_via` saying
 /// `publisher` when someone expected `mirror`. Cheaper to accept both spellings
 /// than to make everyone find out once.
 fn normalise(base: &str) -> String {
     let base = base.trim().trim_end_matches('/');
-    base.strip_suffix("/v1")
+    base.strip_suffix("/api/v1")
         .unwrap_or(base)
         .trim_end_matches('/')
         .to_string()
@@ -306,15 +306,15 @@ mod tests {
         let mirror = with_env(None, || Mirror::resolve(false));
         assert_eq!(
             mirror.expect("the default").base(),
-            "https://api.steddle.com/bron"
+            "https://bron.steddle.com"
         );
     }
 
     #[test]
     fn the_default_is_normalised_like_any_other_base() {
-        // It is written with the /v1 a reader would paste, and must not end up
-        // asking for /v1/v1 any more than a hand-set value would.
-        assert_eq!(normalise(DEFAULT), "https://api.steddle.com/bron");
+        // It is written with the /api/v1 a reader would paste, and must not end up
+        // asking for /api/v1/api/v1 any more than a hand-set value would.
+        assert_eq!(normalise(DEFAULT), "https://bron.steddle.com");
     }
 
     #[test]
@@ -328,23 +328,23 @@ mod tests {
     #[test]
     fn a_configured_mirror_is_used_and_its_trailing_slash_is_not() {
         let mirror = with_env(Some("https://bron.test/"), || Mirror::resolve(false));
-        // Joined with "/v1/..." below, so a kept slash would ask for "//v1".
+        // Joined with "/api/v1/..." below, so a kept slash would ask for "//api/v1".
         assert_eq!(mirror.expect("a mirror").base(), "https://bron.test");
     }
 
     #[test]
     fn a_base_that_already_names_the_api_version_is_accepted() {
         // The obvious thing to paste is the URL you were just reading, and that
-        // one ends in /v1. Both spellings have to land on the same place.
+        // one ends in /api/v1. Both spellings have to land on the same place.
         assert_eq!(
-            normalise("https://api.steddle.com/bron/v1"),
-            "https://api.steddle.com/bron"
+            normalise("https://bron.steddle.com/api/v1"),
+            "https://bron.steddle.com"
         );
         assert_eq!(
-            normalise("https://api.steddle.com/bron/v1/"),
-            "https://api.steddle.com/bron"
+            normalise("https://bron.steddle.com/api/v1/"),
+            "https://bron.steddle.com"
         );
-        assert_eq!(normalise("https://bron.test/v1"), "https://bron.test");
+        assert_eq!(normalise("https://bron.test/api/v1"), "https://bron.test");
         assert_eq!(normalise("https://bron.test"), "https://bron.test");
     }
 
