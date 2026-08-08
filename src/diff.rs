@@ -21,7 +21,11 @@ pub enum Change {
     Amended,
     /// Present in the later version only.
     Added,
-    /// Marked `vervallen` in the later version.
+    /// Marked `vervallen` in the later version and not in the earlier one.
+    ///
+    /// The register keeps a repealed article in every rendition after the one
+    /// that repealed it, so the earlier side has to be read too. Without it a
+    /// repeal from 1989 is reported as a change in every window since.
     Repealed,
     /// Present in the earlier version only, and gone without being marked.
     ///
@@ -91,7 +95,21 @@ pub fn compare(before: &FetchedLaw, after: &FetchedLaw) -> Vec<ArticleChange> {
 
         let change = match was {
             None => Change::Added,
-            Some(_) if article.effect.as_deref() == Some("vervallen") => Change::Repealed,
+
+            // Repealed in this window, not repealed at some point before it.
+            // The register keeps a repealed article in every later rendition,
+            // still carrying `vervallen`, so testing the new side alone counts
+            // a standing repeal as a fresh one every time. BW2 between January
+            // and July 2026 reported 69, among them article 31 through
+            // stb-1989-541: an attribution that was right about the act and
+            // wrong about the window.
+            Some(previous)
+                if article.effect.as_deref() == Some("vervallen")
+                    && previous.effect.as_deref() != Some("vervallen") =>
+            {
+                Change::Repealed
+            }
+
             Some(previous) if previous.content != article.content => Change::Amended,
             Some(_) => Change::Unchanged,
         };
@@ -169,6 +187,34 @@ mod tests {
             articles,
             skipped_articles: 0,
         }
+    }
+
+    /// The register keeps a repealed article in every rendition after the one
+    /// that repealed it, still carrying `vervallen` and still empty. Counting
+    /// it again each time is an attribution that is right about the act and
+    /// wrong about the window: BW2 between January and July 2026 reported 69
+    /// repeals, among them article 31 through stb-1989-541.
+    #[test]
+    fn a_repeal_that_already_stood_is_not_a_change_in_this_window() {
+        let before = law("2026-01-01", vec![article("31", "31", "", "vervallen")]);
+        let after = law("2026-07-01", vec![article("31", "31", "", "vervallen")]);
+
+        let changes = compare(&before, &after);
+
+        assert_eq!(changes[0].change, Change::Unchanged);
+    }
+
+    #[test]
+    fn a_repeal_within_the_window_is_still_reported() {
+        let before = law(
+            "2026-01-01",
+            vec![article("31", "31", "Geldt nog.", "wijziging")],
+        );
+        let after = law("2026-07-01", vec![article("31", "31", "", "vervallen")]);
+
+        let changes = compare(&before, &after);
+
+        assert_eq!(changes[0].change, Change::Repealed);
     }
 
     #[test]
