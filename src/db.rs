@@ -28,7 +28,12 @@ use crate::sources::{
 
 /// Bumped whenever `schema.sql` changes in a way an older database cannot
 /// absorb by re-running it.
-const SCHEMA_VERSION: i32 = 4;
+///
+/// One, because nothing has ever shipped. The counter is here to tell two
+/// shapes apart, not to record how often this one was reshaped before anyone
+/// held it, and a number that implies versions nobody ever ran is a history
+/// that did not happen.
+const SCHEMA_VERSION: i32 = 1;
 
 /// Row id of a stored law version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
