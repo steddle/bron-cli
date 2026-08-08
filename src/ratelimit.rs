@@ -308,6 +308,8 @@ fn lock(_file: &File) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use super::*;
 
     fn policy(ms: u64) -> Policy {
@@ -339,9 +341,20 @@ mod tests {
 
         bucket.acquire().unwrap();
         bucket.released().unwrap();
-        let waited = bucket.acquire().unwrap();
 
-        assert!(waited >= Duration::from_millis(100), "waited {waited:?}");
+        // Timed from the release rather than by what `acquire` reports it
+        // slept. The invariant is that no second caller proceeds until the
+        // interval has passed since the last request returned, and a runner
+        // that stalls between the two has already satisfied it: asserting on
+        // the sleep alone reads that correct behaviour as a failure.
+        let released_at = Instant::now();
+        bucket.acquire().unwrap();
+        let since_release = released_at.elapsed();
+
+        assert!(
+            since_release >= Duration::from_millis(150),
+            "proceeded {since_release:?} after the release"
+        );
     }
 
     #[test]
