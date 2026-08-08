@@ -351,8 +351,12 @@ mod tests {
         bucket.acquire().unwrap();
         let since_release = released_at.elapsed();
 
+        // The bucket stamps whole milliseconds, so the moment it recorded can
+        // sit up to one before the release actually happened and the observable
+        // wait falls that much short. The tolerance is the clock's resolution,
+        // not slack: at 149.31ms this failed having found nothing wrong.
         assert!(
-            since_release >= Duration::from_millis(150),
+            since_release >= Duration::from_millis(149),
             "proceeded {since_release:?} after the release"
         );
     }
