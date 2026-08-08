@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: test, clippy, fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Formatting first: it needs no build, so a formatting failure reports in
+      # seconds rather than after a full compile.
+      - run: cargo fmt --check
+
+      - run: cargo clippy --all-targets -- -D warnings
+
+      # The default feature set only. `live-tests` hits the real Internet
+      # Archive, so it belongs on a manual or nightly trigger and never on a
+      # run that a pull request can fire at will.
+      - run: cargo test

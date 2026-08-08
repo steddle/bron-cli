@@ -1,0 +1,90 @@
+[package]
+name = "bron"
+# 0.0.0 until the first tag. The changelog states the JSON contract is not
+# stable until there is a v0.1.0, and a manifest claiming that version before
+# the tag exists would make it false.
+version = "0.0.0"
+edition = "2024"
+# Edition 2024 needs 1.85, which is also what the README promises. Stated here
+# so cargo enforces the claim rather than the prose carrying it alone.
+rust-version = "1.85"
+description = "Dutch primary legal sources on your disk: wetgeving, rechtspraak, kamerstukken"
+repository = "https://github.com/mischasigtermans/bron"
+readme = "README.md"
+keywords = ["law", "netherlands", "legal", "citation", "archive"]
+categories = ["command-line-utilities", "parser-implementations", "database"]
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+# The CDX index digest is base32 over SHA-1, which is the archive's own hash and
+# not a choice: verifying a capture against it is how bron learns whether the
+# replay it was served is the crawl the index recorded.
+data-encoding = "2"
+sha1 = "0.10"
+dirs = "5"
+# An archived page is whatever encoding the site served in whatever year it
+# served it, and the label is often wrong or missing. encoding_rs is the WHATWG
+# algorithm every browser implements, so bron reads a capture the way the
+# browser that saw it did.
+encoding_rs = "0.8"
+# The archive replays a capture in the encoding the crawl stored, so a gzip
+# body arrives as gzip. Decompressing is not reqwest's `gzip` feature's job
+# here: that decodes transparently, and bron must hash what the WARC stored
+# before anything unpacks it.
+flate2 = "1"
+indicatif = "0.17"
+# flock(2) for the cross-process rate-limit bucket, which other languages
+# reach through the same call.
+libc = "0.2"
+# rustls rather than the house default of native-tls: bron is installed on
+# developer machines and CI images, and native-tls needs OpenSSL headers present
+# at build time on Linux. rustls has no system dependency on either platform.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "charset",
+    "http2",
+    # Native roots rather than the bundled Mozilla set, because BRON_MIRROR
+    # points at a service whose certificate is issued by whatever CA that
+    # deployment trusts, including a local development CA. Reading the platform
+    # trust store needs no OpenSSL headers, so the reason rustls was chosen over
+    # native-tls still holds.
+    "rustls-tls-native-roots",
+] }
+# roxmltree over the house quick-xml: it is the only one of the two that gives a
+# byte range per node, which is what lets every stored field point back at the
+# characters in the frozen document that state it.
+roxmltree = "0.21"
+rusqlite = { version = "0.32", features = ["bundled", "backup", "chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+# Word-level diffing, for rendering only. The JSON contract always carries
+# both full texts so a consumer never has to trust our diff.
+similar = "3.1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+# The transport's refusal, retry-after and freeze-before-decode paths cannot be
+# proved against a fixture file: they need a server that misbehaves on cue.
+wiremock = "0.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[features]
+# Tier 2: hits the real services. Manual and nightly only.
+#
+# Guards one test, and only one is warranted: bron pins the CDX column set and
+# asserts the header it gets back, and that is the single contract in this crate
+# the archive can break on its own with nothing local to notice.
+live-tests = []
+
+[profile.release]
+strip = true
+lto = true

@@ -1,0 +1,39 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock is committed on purpose: bron ships a binary, so a build should
+# resolve to the versions that were tested.
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+
+# Claude Code settings
+.claude/settings.json
+.claude/settings.local.json
+.claude/secrets.json
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# A corpus built inside the checkout, when BRON_HOME points here during
+# development. It is rebuildable from the sources and the blobs are large.
+/bron-home/
+*.db
+*.db-wal
+*.db-shm

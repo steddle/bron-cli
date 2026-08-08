@@ -1,0 +1,76 @@
+//! The binary.
+//!
+//! Every command produces one value. Rendering is a match at the very edge, so
+//! `--json` and human output cannot drift apart: there is one code path and two
+//! ways of writing its result down.
+//!
+//! On failure with `--json`, the error still goes to stdout as JSON and the
+//! human sentence goes to stderr. A caller that has to grep stderr to tell a
+//! missing article from a dead network will get it wrong eventually.
+
+mod cli;
+mod render;
+mod run;
+
+use std::io::{self, IsTerminal, Write};
+use std::process::ExitCode;
+
+use clap::Parser;
+
+use bron::error::Fault;
+use bron::wire::{Envelope, Grade};
+
+use cli::Cli;
+use run::Answer;
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    // Progress is never written when it could be mistaken for output, and never
+    // when nobody is watching.
+    let quiet = cli.quiet || cli.json || !io::stderr().is_terminal();
+
+    match run::execute(&cli, quiet) {
+        Ok(answer) => {
+            if let Err(e) = emit(&answer, cli.json) {
+                eprintln!("bron: cannot write output: {e}");
+                return ExitCode::from(bron::error::exit::CORPUS);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(fault) => {
+            // The lane is known from the command even when the answer failed,
+            // so the grade is read off it rather than defaulted.
+            report(&fault, cli.json, cli.command.grade());
+            fault.exit_code()
+        }
+    }
+}
+
+fn emit(answer: &Answer, json: bool) -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    if json {
+        answer.to_json(&mut out)?;
+        out.write_all(b"\n")
+    } else {
+        answer.render(&mut out)
+    }
+}
+
+fn report(fault: &Fault, json: bool, grade: Grade) {
+    if json {
+        // Still JSON on stdout, so a consumer parses one shape either way.
+        if let Ok(text) = serde_json::to_string(&Envelope::failed(fault, grade)) {
+            println!("{text}");
+        }
+    }
+
+    let chain = fault.chain();
+    eprintln!(
+        "bron: {}",
+        chain.first().map(String::as_str).unwrap_or("failed")
+    );
+    for line in chain.iter().skip(1) {
+        eprintln!("  caused by: {line}");
+    }
+}

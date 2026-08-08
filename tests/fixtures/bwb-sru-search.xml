@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/"
+                        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                        xsi:schemaLocation="http://www.loc.gov/zing/srw/ http://www.loc.gov/standards/sru/xmlFiles/srw-types.xsd">
+   <version>1.2</version>
+   <numberOfRecords>2482</numberOfRecords>
+   <records>
+      <record>
+         <recordSchema>http://standaarden.overheid.nl/sru/</recordSchema>
+         <recordPacking>xml</recordPacking>
+         <recordData>
+            <gzd xmlns="http://standaarden.overheid.nl/sru"
+                 xmlns:dcterms="http://purl.org/dc/terms/"
+                 xmlns:overheid="http://standaarden.overheid.nl/owms/terms/"
+                 xmlns:overheidbwb="http://standaarden.overheid.nl/bwb/terms/"
+                 xsi:schemaLocation="http://standaarden.overheid.nl/sru http://standaarden.overheid.nl/sru/gzd.xsd">
+               <originalData>
+                  <overheidbwb:meta>
+                     <owmskern>
+                        <dcterms:identifier>BWBR0002761</dcterms:identifier>
+                        <dcterms:title>Burgerlijk Wetboek Boek 4</dcterms:title>
+                        <dcterms:type>wet</dcterms:type>
+                        <dcterms:language>nl</dcterms:language>
+                        <overheid:authority>Veiligheid en Justitie</overheid:authority>
+                        <dcterms:creator>Ministerie van Binnenlandse Zaken en Koninkrijksrelaties</dcterms:creator>
+                        <dcterms:modified>2016-01-12</dcterms:modified>
+                     </owmskern>
+                     <owmsmantel>
+                        <dcterms:created>2015-07-01</dcterms:created>
+                     </owmsmantel>
+                     <bwbipm>
+                        <overheidbwb:toestand>http://wetten.overheid.nl/id/BWBR0002761/2002-01-01/0</overheidbwb:toestand>
+                        <overheidbwb:rechtsgebied>Personen- en familierecht</overheidbwb:rechtsgebied>
+                        <overheidbwb:rechtsgebied>Erfrecht</overheidbwb:rechtsgebied>
+                        <overheidbwb:overheidsdomein>Familie, jeugd en gezin</overheidbwb:overheidsdomein>
+                        <overheidbwb:geldigheidsperiode_startdatum>2002-01-01</overheidbwb:geldigheidsperiode_startdatum>
+                        <overheidbwb:geldigheidsperiode_einddatum>2002-12-31</overheidbwb:geldigheidsperiode_einddatum>
+                        <overheidbwb:zichtperiode_startdatum>2002-01-01</overheidbwb:zichtperiode_startdatum>
+                        <overheidbwb:zichtperiode_einddatum>9999-12-31</overheidbwb:zichtperiode_einddatum>
+                     </bwbipm>
+                  </overheidbwb:meta>
+               </originalData>
+               <enrichedData>
+                  <overheidbwb:locatie_toestand>https://repository.officiele-overheidspublicaties.nl/bwb/BWBR0002761/2002-01-01_0/xml/BWBR0002761_2002-01-01_0.xml</overheidbwb:locatie_toestand>
+                  <overheidbwb:locatie_wti>https://repository.officiele-overheidspublicaties.nl/bwb/BWBR0002761/BWBR0002761.WTI</overheidbwb:locatie_wti>
+                  <overheidbwb:locatie_manifest>https://repository.officiele-overheidspublicaties.nl/bwb/BWBR0002761/manifest.xml</overheidbwb:locatie_manifest>
+               </enrichedData>
+            </gzd>
+         </recordData>
+         <recordPosition>1</recordPosition>
+      </record>
+      <record>
+         <recordSchema>http://standaarden.overheid.nl/sru/</recordSchema>
+         <recordPacking>xml</recordPacking>
+         <recordData>
+            <gzd xmlns="http://standaarden.overheid.nl/sru"
+                 xmlns:dcterms="http://purl.org/dc/terms/"
+                 xmlns:overheid="http://standaarden.overheid.nl/owms/terms/"
+                 xmlns:overheidbwb="http://standaarden.overheid.nl/bwb/terms/"
+                 xsi:schemaLocation="http://standaarden.overheid.nl/sru http://standaarden.overheid.nl/sru/gzd.xsd">
+               <originalData>
+                  <overheidbwb:meta>
+                     <owmskern>
+                        <dcterms:identifier>BWBR0002761</dcterms:identifier>
+                        <dcterms:title>Burgerlijk Wetboek Boek 4</dcterms:title>
+                        <dcterms:type>wet</dcterms:type>
+                        <dcterms:language>nl</dcterms:language>
+                        <overheid:authority>Veiligheid en Justitie</overheid:authority>
+                        <dcterms:creator>Ministerie van Binnenlandse Zaken en Koninkrijksrelaties</dcterms:creator>
+                        <dcterms:modified>2023-04-13</dcterms:modified>
+                     </owmskern>
+                     <owmsmantel>
+                        <dcterms:created>2015-07-01</dcterms:created>
+                     </owmsmantel>
+                     <bwbipm>
+                        <overheidbwb:toestand>http://wetten.overheid.nl/id/BWBR0002761/2003-01-01/0</overheidbwb:toestand>
+                        <overheidbwb:rechtsgebied>Personen- en familierecht</overheidbwb:rechtsgebied>
+                        <overheidbwb:rechtsgebied>Erfrecht</overheidbwb:rechtsgebied>
+                        <overheidbwb:overheidsdomein>Familie, jeugd en gezin</overheidbwb:overheidsdomein>
+                        <overheidbwb:geldigheidsperiode_startdatum>2003-01-01</overheidbwb:geldigheidsperiode_startdatum>
+                        <overheidbwb:geldigheidsperiode_einddatum>2004-04-30</overheidbwb:geldigheidsperiode_einddatum>
+                        <overheidbwb:zichtperiode_startdatum>2003-01-01</overheidbwb:zichtperiode_startdatum>
+                        <overheidbwb:zichtperiode_einddatum>9999-12-31</overheidbwb:zichtperiode_einddatum>
+                     </bwbipm>
+                  </overheidbwb:meta>
+               </originalData>
+               <enrichedData>
+                  <overheidbwb:locatie_toestand>https://repository.officiele-overheidspublicaties.nl/bwb/BWBR0002761/2003-01-01_0/xml/BWBR0002761_2003-01-01_0.xml</overheidbwb:locatie_toestand>
+                  <overheidbwb:locatie_wti>https://repository.officiele-overheidspublicaties.nl/bwb/BWBR0002761/BWBR0002761.WTI</overheidbwb:locatie_wti>
+                  <overheidbwb:locatie_manifest>https://repository.officiele-overheidspublicaties.nl/bwb/BWBR0002761/manifest.xml</overheidbwb:locatie_manifest>
+               </enrichedData>
+            </gzd>
+         </recordData>
+         <recordPosition>2</recordPosition>
+      </record>
+   </records>
+   <nextRecordPosition>3</nextRecordPosition>
+</searchRetrieveResponse>
+
