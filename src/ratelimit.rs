@@ -320,8 +320,16 @@ mod tests {
     #[test]
     fn a_fresh_bucket_does_not_wait() {
         let dir = tempfile::tempdir().unwrap();
-        let bucket = Bucket::new(dir.path(), "example.invalid", policy(50));
-        assert!(bucket.acquire().unwrap() < Duration::from_millis(50));
+        let bucket = Bucket::new(dir.path(), "example.invalid", policy(10_000));
+
+        // `acquire` reports elapsed time, which on a fresh bucket is the lock
+        // and the two file operations rather than a sleep. Measured against an
+        // interval of its own size, a cold runner's disk reads as a wait. The
+        // interval is ten seconds and the bound one, so the gap between 'did
+        // not sleep' and 'slept' is wider than any I/O this test can do.
+        let elapsed = bucket.acquire().unwrap();
+
+        assert!(elapsed < Duration::from_secs(1), "elapsed {elapsed:?}");
     }
 
     #[test]
