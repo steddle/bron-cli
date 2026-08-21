@@ -1,33 +1,57 @@
-//! Comparing two versions of a law.
+//! Comparing two renditions of a law.
 //!
 //! Articles are matched on `stam-id`, upstream's own identity for an article
-//! across versions. Numbers repeat within a law and structural paths move when
-//! a law is restructured; the stam-id does neither, so a match here is an
+//! across renditions. Numbers repeat within a law and structural paths move
+//! when a law is restructured; the stam-id does neither, so a match here is an
 //! identity rather than a guess.
+//!
+//! [`Article`] is this module's own shape rather than the one the service
+//! sends. The rule that decides what changed must not move when the wire does,
+//! and `content` is what bron prints rather than a field that happens to sit on
+//! a transport type.
+//!
+//! Nothing that cannot be matched is quietly dropped. An article with no
+//! identity, and a stam-id the register used twice inside one rendition, are
+//! both counted and reported, because a comparison that leaves them out of its
+//! own totals answers 'nothing changed' where the answer is 'this could not be
+//! compared'.
 //!
 //! Nothing in this module decides what a change means. Whether an amendment
 //! reaches conduct from before it is a question of transitional law, and the
 //! act that made the change is named so a reader can go and settle it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::sources::{FetchedArticle, FetchedLaw};
+/// One article, in the terms a comparison is made in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Article {
+    /// Upstream's identity for this article across renditions.
+    pub stam_id: Option<String>,
+    pub number: String,
+    pub label: Option<String>,
+    pub path: Option<String>,
+    /// What bron prints for this article.
+    pub content: String,
+    /// Upstream's vocabulary, unmapped: `nieuwe-regeling`, `wijziging`,
+    /// `nieuw`, `vervallen`.
+    pub effect: Option<String>,
+}
 
-/// What happened to one article between two versions.
+/// What happened to one article between two renditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Change {
     Unchanged,
     /// The text differs.
     Amended,
-    /// Present in the later version only.
+    /// Present in the later rendition only.
     Added,
-    /// Marked `vervallen` in the later version and not in the earlier one.
+    /// Marked `vervallen` in the later rendition and not in the earlier one.
     ///
     /// The register keeps a repealed article in every rendition after the one
     /// that repealed it, so the earlier side has to be read too. Without it a
     /// repeal from 1989 is reported as a change in every window since.
     Repealed,
-    /// Present in the earlier version only, and gone without being marked.
+    /// Present in the earlier rendition only, and gone without being marked.
     ///
     /// Distinct from [`Change::Repealed`]: upstream said nothing, so all that
     /// can be reported is that it is no longer there.
@@ -51,49 +75,85 @@ impl Change {
 }
 
 /// One article, as it stood on both sides of the comparison.
+///
+/// Each side is the position of the article in the slice it came from, so the
+/// caller keeps whatever it built these from: a span, a raw slice, the act that
+/// produced the text. Copying those through here would make this module carry a
+/// shape it does not read.
 #[derive(Debug, Clone)]
 pub struct ArticleChange {
     pub change: Change,
     pub number: String,
     pub label: Option<String>,
     pub path: Option<String>,
-    /// The article as it was. Absent when it did not exist yet.
-    pub before: Option<FetchedArticle>,
-    /// The article as it is. Absent when it is gone.
-    pub after: Option<FetchedArticle>,
+    /// Where it sits in the earlier rendition. Absent when it did not exist yet.
+    pub before: Option<usize>,
+    /// Where it sits in the later one. Absent when it is gone.
+    pub after: Option<usize>,
 }
 
-impl ArticleChange {
-    fn of(change: Change, before: Option<&FetchedArticle>, after: Option<&FetchedArticle>) -> Self {
-        let shape = after.or(before).expect("a change has at least one side");
-        Self {
-            change,
-            number: shape.number.clone(),
-            label: shape.label.clone(),
-            path: shape.path.clone(),
-            before: before.cloned(),
-            after: after.cloned(),
-        }
+/// Articles carrying no `stam-id`, counted once per rendition they stand in.
+///
+/// Not one total across the two, because nothing identifies them: whether the
+/// one in the earlier rendition is the one in the later is exactly what a
+/// missing stam-id refuses to say, and matching them on a number or a path
+/// would be the guess this module exists to avoid. So the count is of sides,
+/// and it says so.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Unidentified {
+    pub before: u32,
+    pub after: u32,
+}
+
+impl Unidentified {
+    pub fn any(self) -> bool {
+        self.before > 0 || self.after > 0
     }
 }
 
-/// Compares two versions of one law, in document order of the later version.
+/// A comparison, and what it could not place.
+#[derive(Debug, Default)]
+pub struct Comparison {
+    pub changes: Vec<ArticleChange>,
+    pub unidentified: Unidentified,
+    /// stam-ids the register used more than once inside one rendition. Every
+    /// article under one of them is left out, on both sides.
+    pub repeated: Vec<String>,
+}
+
+impl Comparison {
+    /// Whether anything was left out of the comparison.
+    pub fn is_whole(&self) -> bool {
+        !self.unidentified.any() && self.repeated.is_empty()
+    }
+}
+
+/// Compares two renditions of one law, in document order of the later one.
 ///
-/// Articles the later version does not carry are appended, so nothing that
-/// existed on either side is left out of the report.
-pub fn compare(before: &FetchedLaw, after: &FetchedLaw) -> Vec<ArticleChange> {
-    let old: HashMap<&str, &FetchedArticle> = index(before);
-    let new: HashMap<&str, &FetchedArticle> = index(after);
+/// Articles the later rendition does not carry are appended, so nothing that
+/// existed on either side and could be identified is left out of the report.
+pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
+    let (old, old_twice) = index(before);
+    let (new, new_twice) = index(after);
+
+    let ambiguous: HashSet<&str> = old_twice.union(&new_twice).copied().collect();
+    let mut repeated: Vec<String> = ambiguous.iter().map(|id| (*id).to_string()).collect();
+    repeated.sort();
+
+    let unidentified = Unidentified {
+        before: nameless(before),
+        after: nameless(after),
+    };
 
     let mut changes = Vec::new();
 
-    for article in &after.articles {
-        let Some(key) = article.stam_id.as_deref() else {
+    for (index, article) in after.iter().enumerate() {
+        let Some(key) = article.stam_id.as_deref().filter(|id| !ambiguous.contains(id)) else {
             continue;
         };
         let was = old.get(key).copied();
 
-        let change = match was {
+        let change = match was.map(|i| &before[i]) {
             None => Change::Added,
 
             // Repealed in this window, not repealed at some point before it.
@@ -114,79 +174,88 @@ pub fn compare(before: &FetchedLaw, after: &FetchedLaw) -> Vec<ArticleChange> {
             Some(_) => Change::Unchanged,
         };
 
-        changes.push(ArticleChange::of(change, was, Some(article)));
+        changes.push(shaped(change, article, was, Some(index)));
     }
 
-    for article in &before.articles {
-        let Some(key) = article.stam_id.as_deref() else {
+    for (index, article) in before.iter().enumerate() {
+        let Some(key) = article.stam_id.as_deref().filter(|id| !ambiguous.contains(id)) else {
             continue;
         };
         if !new.contains_key(key) {
-            changes.push(ArticleChange::of(Change::Withdrawn, Some(article), None));
+            changes.push(shaped(Change::Withdrawn, article, Some(index), None));
         }
     }
 
-    changes
+    Comparison {
+        changes,
+        unidentified,
+        repeated,
+    }
 }
 
-fn index(law: &FetchedLaw) -> HashMap<&str, &FetchedArticle> {
-    law.articles
-        .iter()
-        .filter_map(|a| Some((a.stam_id.as_deref()?, a)))
-        .collect()
+fn nameless(articles: &[Article]) -> u32 {
+    articles.iter().filter(|a| a.stam_id.is_none()).count() as u32
+}
+
+/// How a change is named, which is how the side that still exists names it.
+fn shaped(
+    change: Change,
+    shape: &Article,
+    before: Option<usize>,
+    after: Option<usize>,
+) -> ArticleChange {
+    ArticleChange {
+        change,
+        number: shape.number.clone(),
+        label: shape.label.clone(),
+        path: shape.path.clone(),
+        before,
+        after,
+    }
+}
+
+/// Where each identity sits, and which identities were used more than once.
+///
+/// A map keeps the last of a repeated key and says nothing, which would report
+/// one of two articles as unchanged and lose the other without a trace.
+fn index(articles: &[Article]) -> (HashMap<&str, usize>, HashSet<&str>) {
+    let mut at = HashMap::new();
+    let mut twice = HashSet::new();
+
+    for (index, article) in articles.iter().enumerate() {
+        let Some(key) = article.stam_id.as_deref() else {
+            continue;
+        };
+        if at.insert(key, index).is_some() {
+            twice.insert(key);
+        }
+    }
+
+    (at, twice)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blob::BlobId;
-    use crate::model::{Span, Validity};
-    use crate::sources::Provenance;
 
-    fn article(stam: &str, number: &str, text: &str, effect: &str) -> FetchedArticle {
-        FetchedArticle {
+    fn article(stam: &str, number: &str, text: &str, effect: &str) -> Article {
+        Article {
             stam_id: Some(stam.into()),
             number: number.into(),
             label: Some(format!("Artikel {number}")),
-            title: None,
             path: Some(format!("/Boek6/Artikel{number}")),
             content: text.into(),
-            span: Span {
-                start: 0,
-                end: text.len() as u32,
-            },
-            leden: Vec::new(),
-            amended_by: None,
             effect: Some(effect.into()),
-            in_force_from: None,
-            tables: 0,
-            jci: None,
-            illustrations: 0,
-            versie_id: Some(format!("v-{stam}")),
-            status: Some("goed".into()),
         }
     }
 
-    fn law(version: &str, articles: Vec<FetchedArticle>) -> FetchedLaw {
-        FetchedLaw {
-            id: "BWBR0005289".parse().unwrap(),
-            title: "Burgerlijk Wetboek Boek 6".into(),
-            law_type: Some("wet".into()),
-            version: version.into(),
-            in_force: Validity {
-                from: "2020-01-01".parse().unwrap(),
-                until: None,
-            },
-            visible: None,
-            upstream_hash: None,
-            provenance: Provenance {
-                blob: BlobId::of(version.as_bytes()),
-                url: "https://example.invalid/x.xml".into(),
-                byte_len: 1,
-            },
-            articles,
-            skipped_articles: 0,
-        }
+    fn changed(comparison: &Comparison, number: &str) -> Change {
+        comparison
+            .changes
+            .iter()
+            .find(|c| c.number == number)
+            .unwrap()
+            .change
     }
 
     /// The register keeps a repealed article in every rendition after the one
@@ -196,98 +265,125 @@ mod tests {
     /// repeals, among them article 31 through stb-1989-541.
     #[test]
     fn a_repeal_that_already_stood_is_not_a_change_in_this_window() {
-        let before = law("2026-01-01", vec![article("31", "31", "", "vervallen")]);
-        let after = law("2026-07-01", vec![article("31", "31", "", "vervallen")]);
+        let before = [article("31", "31", "", "vervallen")];
+        let after = [article("31", "31", "", "vervallen")];
 
-        let changes = compare(&before, &after);
-
-        assert_eq!(changes[0].change, Change::Unchanged);
+        assert_eq!(changed(&compare(&before, &after), "31"), Change::Unchanged);
     }
 
     #[test]
     fn a_repeal_within_the_window_is_still_reported() {
-        let before = law(
-            "2026-01-01",
-            vec![article("31", "31", "Geldt nog.", "wijziging")],
-        );
-        let after = law("2026-07-01", vec![article("31", "31", "", "vervallen")]);
+        let before = [article("31", "31", "Geldt nog.", "wijziging")];
+        let after = [article("31", "31", "", "vervallen")];
 
-        let changes = compare(&before, &after);
-
-        assert_eq!(changes[0].change, Change::Repealed);
+        assert_eq!(changed(&compare(&before, &after), "31"), Change::Repealed);
     }
 
     #[test]
     fn reports_every_kind_of_change() {
-        let before = law(
-            "2015",
-            vec![
-                article("1", "1", "Ongewijzigde tekst.", "nieuwe-regeling"),
-                article("2", "2", "De oude tekst.", "nieuwe-regeling"),
-                article("3", "3", "Verdwijnt zonder meer.", "nieuwe-regeling"),
-                article("4", "4", "Wordt ingetrokken.", "nieuwe-regeling"),
-            ],
-        );
-        let after = law(
-            "2023",
-            vec![
-                article("1", "1", "Ongewijzigde tekst.", "nieuwe-regeling"),
-                article("2", "2", "De nieuwe tekst.", "wijziging"),
-                article("4", "4", "", "vervallen"),
-                article("5", "5", "Geheel nieuw.", "nieuw"),
-            ],
-        );
+        let before = [
+            article("1", "1", "Ongewijzigde tekst.", "nieuwe-regeling"),
+            article("2", "2", "De oude tekst.", "nieuwe-regeling"),
+            article("3", "3", "Verdwijnt zonder meer.", "nieuwe-regeling"),
+            article("4", "4", "Wordt ingetrokken.", "nieuwe-regeling"),
+        ];
+        let after = [
+            article("1", "1", "Ongewijzigde tekst.", "nieuwe-regeling"),
+            article("2", "2", "De nieuwe tekst.", "wijziging"),
+            article("4", "4", "", "vervallen"),
+            article("5", "5", "Geheel nieuw.", "nieuw"),
+        ];
 
-        let changes = compare(&before, &after);
-        let by_number = |n: &str| changes.iter().find(|c| c.number == n).unwrap().change;
+        let comparison = compare(&before, &after);
 
-        assert_eq!(by_number("1"), Change::Unchanged);
-        assert_eq!(by_number("2"), Change::Amended);
-        assert_eq!(by_number("4"), Change::Repealed);
-        assert_eq!(by_number("5"), Change::Added);
-        assert_eq!(by_number("3"), Change::Withdrawn);
+        assert_eq!(changed(&comparison, "1"), Change::Unchanged);
+        assert_eq!(changed(&comparison, "2"), Change::Amended);
+        assert_eq!(changed(&comparison, "4"), Change::Repealed);
+        assert_eq!(changed(&comparison, "5"), Change::Added);
+        assert_eq!(changed(&comparison, "3"), Change::Withdrawn);
+        assert!(comparison.is_whole());
     }
 
     #[test]
-    fn an_amendment_carries_both_texts() {
-        let before = law(
-            "2015",
-            vec![article("2", "2", "De oude tekst.", "nieuwe-regeling")],
-        );
-        let after = law(
-            "2023",
-            vec![article("2", "2", "De nieuwe tekst.", "wijziging")],
-        );
+    fn each_side_points_back_at_the_article_it_came_from() {
+        let before = [article("2", "2", "De oude tekst.", "nieuwe-regeling")];
+        let after = [article("2", "2", "De nieuwe tekst.", "wijziging")];
 
-        let changes = compare(&before, &after);
-        let amended = &changes[0];
+        let comparison = compare(&before, &after);
+        let amended = &comparison.changes[0];
 
-        assert_eq!(amended.before.as_ref().unwrap().content, "De oude tekst.");
-        assert_eq!(amended.after.as_ref().unwrap().content, "De nieuwe tekst.");
+        assert_eq!(before[amended.before.unwrap()].content, "De oude tekst.");
+        assert_eq!(after[amended.after.unwrap()].content, "De nieuwe tekst.");
     }
 
     #[test]
     fn matching_is_on_identity_not_on_number() {
         // The same article renumbered is one amendment, not a removal plus an
         // addition. Matching on the printed number would report it as both.
-        let before = law(
-            "2015",
-            vec![article("7", "196b", "Tekst.", "nieuwe-regeling")],
-        );
-        let after = law("2023", vec![article("7", "196c", "Tekst.", "wijziging")]);
+        let before = [article("7", "196b", "Tekst.", "nieuwe-regeling")];
+        let after = [article("7", "196c", "Tekst.", "wijziging")];
 
-        let changes = compare(&before, &after);
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].change, Change::Unchanged);
-        assert_eq!(changes[0].number, "196c");
+        let comparison = compare(&before, &after);
+
+        assert_eq!(comparison.changes.len(), 1);
+        assert_eq!(comparison.changes[0].change, Change::Unchanged);
+        assert_eq!(comparison.changes[0].number, "196c");
     }
 
+    /// Nothing says whether an article with no identity on one side is the same
+    /// article on the other. It is left out, and left out is not the same as
+    /// unchanged, so it is counted and the caller says so.
     #[test]
-    fn an_article_without_an_identity_is_left_out_rather_than_guessed_at() {
+    fn an_article_without_an_identity_is_counted_rather_than_dropped() {
         let mut orphan = article("x", "9", "Tekst.", "nieuw");
         orphan.stam_id = None;
 
-        let changes = compare(&law("2015", vec![]), &law("2023", vec![orphan]));
-        assert!(changes.is_empty());
+        let comparison = compare(&[], &[orphan]);
+
+        assert!(comparison.changes.is_empty());
+        assert_eq!(comparison.unidentified.after, 1);
+        assert!(!comparison.is_whole());
+    }
+
+    /// One article standing in both renditions counts once in each, because
+    /// that is the only thing that can be counted: a missing stam-id is exactly
+    /// the register declining to say whether these two are one article. A
+    /// single total would read as two articles, and a number here stands in for
+    /// an adjective.
+    #[test]
+    fn an_article_with_no_identity_is_counted_in_each_rendition_it_stands_in() {
+        let nameless = |text: &str| {
+            let mut article = article("x", "9", text, "wijziging");
+            article.stam_id = None;
+            article
+        };
+
+        let comparison = compare(&[nameless("Oud.")], &[nameless("Nieuw.")]);
+
+        assert_eq!(
+            comparison.unidentified,
+            Unidentified {
+                before: 1,
+                after: 1
+            }
+        );
+    }
+
+    /// A map keeps the last of a repeated key and says nothing. That would
+    /// report one of two articles as unchanged and lose the other with no trace
+    /// of either the loss or the ambiguity.
+    #[test]
+    fn an_identity_the_register_used_twice_is_named_rather_than_resolved() {
+        let before = [article("7", "1", "Eerste.", "nieuwe-regeling")];
+        let after = [
+            article("7", "1", "Eerste.", "nieuwe-regeling"),
+            article("7", "2", "Tweede.", "nieuw"),
+        ];
+
+        let comparison = compare(&before, &after);
+
+        assert!(comparison.changes.is_empty());
+        assert_eq!(comparison.repeated, vec!["7".to_string()]);
+        assert!(!comparison.is_whole());
     }
 }

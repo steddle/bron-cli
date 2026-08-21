@@ -5,7 +5,7 @@
 
 Dutch primary legal sources on your own disk.
 
-bron fetches legislation, case law and official publications, freezes the bytes that arrived, and records byte offsets from everything it stored back into those bytes. It answers what a law said on a given date, not only what it says today. The point isn't search. It's that a claim made from this corpus can name the document and the characters it rests on, and that the same question asked twice gives the same answer.
+bron reads legislation, case law and official publications, and every answer names the document it rests on and the byte range inside it. It says what a law said on a given date, not only what it says today. The point isn't search. It's that a claim made here can name the document and the characters behind it, and that the same question asked twice gives the same answer.
 
 ## Installation
 
@@ -19,20 +19,68 @@ cargo install --path .
 
 - Rust 1.85 or newer, for edition 2024.
 - No system libraries. SQLite is bundled and TLS goes through rustls, so there's no OpenSSL header to find on Linux.
-- `BRON_HOME` to put the corpus and blob store somewhere other than `~/.bron`, which is what a per-project corpus in CI wants.
+- `BRON_HOME` to put the corpus and blob store somewhere other than the platform data directory (`~/Library/Application Support/bron` on macOS, `~/.local/share/bron` on Linux), which is what a per-project corpus in CI wants.
 - `BRON_IA_ACCESS_KEY` and `BRON_IA_SECRET_KEY` from [archive.org](https://archive.org/account/s3.php), only for `bron archive capture`. Reading the archive needs neither.
 
 ## Quick start
 
+Find the act, then read an article as it stood on a date:
+
 ```
-bron law search burgerlijk wetboek boek 6
-bron law show BWBR0005289 --article 162
-bron law show BWBR0005289 --article 162 --as-of 2019-06-01
-bron law changes BWBR0005289 --from 2019-01-01 --article 162
-bron case appeal ECLI:NL:HR:2019:1278
+$ bron law search burgerlijk wetboek boek 6
+BWBR0005289  Burgerlijk Wetboek Boek 6
+BWBR0017013  Vaststellingsbesluit tijdelijke AMvB ex artikel 110, Burgerlijk Wetboek Boek 6 [...]
+BWBR0039501  Wijzigingswet Burgerlijk Wetboek Boek 6 (tegengaan onredelijk lange betaaltermijnen)
+BWBR0046553  Wijzigingswet Burgerlijk Wetboek Boek 6 en Overgangswet nieuw Burgerlijk Wetboek [...]
+
+$ bron law show BWBR0005289 --article 119a --as-of 2019-06-01
+as in force on 2019-06-01
+
+Artikel 119a
+/Boek6/Titeldeel1/Afdeling11/Artikel119a
+
+1. De schadevergoeding, verschuldigd wegens vertraging in de voldoening van een geldsom, [...]
+6. In afwijking van lid 5 kunnen partijen geen uiterste dag van betaling overeenkomen van meer dan zestig dagen indien de schuldenaar een rechtspersoon is die [...]
+
+source: c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3 (349072..361267)
+https://bron.steddle.com/api/v1/blobs/c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3
+jci1.3:c:BWBR0005289&boek=6&titeldeel=1&afdeling=11&artikel=119a&z=2019-04-01&g=2019-04-01
+in force through stb-2017-170 (wijziging)
 ```
 
-The third command answers with the text that applied in June 2019, not today's. The fourth says what changed since then and names the act that changed it.
+Every answer ends with the digest of the document it was read from, where those bytes can be fetched, the byte range inside them, and the act that put that text in force. Fetch the blob, slice it at `349072..361267`, and you have the publisher's own characters; `--raw` sends that slice along instead. Ask what changed since, and bron names the amending act per article:
+
+```
+$ bron law changes BWBR0005289 --from 2019-01-01 --article 119a
+BWBR0005289
+2019-01-01_0 (2019-01-01 to 2019-03-31) -> 2026-07-16_0 (2026-07-16 onwards)
+
+29 amended, 5 added, 1 repealed, 0 withdrawn, 305 unchanged
+
+AMENDED    Artikel 119a
+           through stb-2022-146
+  [...] uiterste dag van betaling overeenkomen van meer dan [-zestig-] {+30+} dagen indien de schuldenaar een rechtspersoon is die [...]
+```
+
+Case law works the same way. Fetch a decision once, and the appeal question is answered from what the register holds:
+
+```
+$ bron case show ECLI:NL:HR:2019:1278
+ECLI:NL:HR:2019:1278
+Hoge Raad
+decided 2019-07-19
+
+Prejudiciële vraag (art. 392 Rv). Aardbevingsschade in Groningen. [...]
+
+relations
+  earlier conclusie ECLI:NL:PHR:2019:496
+
+appeal: no published successor known, as of 2026-08-20
+source: 0dba13d017e9cb0a4dc7c77a5af767559ef454c5ab9425e5185a4418a01647cf
+
+$ bron case appeal ECLI:NL:HR:2019:1278
+no published successor known, as of 2026-08-20
+```
 
 `--as-of` asks what was in force. `--as-known-on` asks what the register showed, which becomes a different question the moment something is published with retroactive effect. One flag can't choose between them, so there are two.
 
@@ -42,7 +90,7 @@ Every command takes `--json` and answers in a versioned envelope:
 
 ```
 $ bron --json db stats
-{"bron":1,"grade":"authority","data":{"path":"/Users/you/.bron/bron.db","laws":0,"versions":0,"articles":0,"cases":0,"publications":0,"documents":0}}
+{"bron":1,"grade":"authority","data":{"path":"/Users/you/Library/Application Support/bron/bron.db","laws":4,"versions":7,"articles":3825,"cases":2,"publications":0,"documents":9}}
 ```
 
 Human and JSON output share one code path, so they can't drift apart. On failure the JSON still goes to stdout and the human sentence to stderr, so a caller never has to read stderr to tell one failure from another:
@@ -60,28 +108,29 @@ A 404 from upstream is a 2, not a 3. It's the service answering, and reporting i
 
 `grade` separates what a source can carry. `authority` is a statute or a ruling speaking with its own force. `archive` is the Internet Archive's record that a page said something on a day, which is a weaker claim, dated to its capture and never to today.
 
-## Reading through a mirror
+## Reading through the service
 
-By default bron fetches bytes through `https://bron.steddle.com/api/v1`, which already holds most of them and spares both you and the publisher a request. The mirror only ever serves bytes, and only bytes that hash to the digest the publisher stated in its own manifest, which bron reads from the publisher either way. A mirror that altered a text would fail that hash.
+`bron law` reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Every answer names which of the two served it in `resolved_via`, because a dossier must not be able to hide that its text came through an intermediary.
+Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. Fetch those bytes, hash them, slice them, and either they say what bron said or they do not. Every answer also names the route it took in `resolved_via`, because a dossier must not be able to hide that its text came through an intermediary.
 
 ```
-bron law show BWBR0005289 --article 162 --direct   # this run, publisher only
-BRON_MIRROR=                                       # opt out for good
-BRON_MIRROR=https://mirror.example.org/api/v1          # somewhere else entirely
+bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
+BRON_MIRROR=https://bron.example.org/api/v1     # somewhere else entirely
 ```
 
-Dates are never resolved through a mirror. Which version applied on a day is read from validity windows that hang on nothing verifiable, so that answer always comes from the publisher's own manifest.
+`bron update` still reads the publisher itself, and holds anything the service hands it to the SHA-512 the publisher's own manifest states before storing a byte of it. `--direct`, or `BRON_MIRROR=`, pins a run to the publisher; for `bron law` that leaves nothing to ask, and it says so.
+
+Answers from the service are read and not kept. Nothing points into one, and what it does point at is a blob addressed by the hash of itself, so freezing a copy of every answer ever read would fill a store that is deliberately never evicted. A question put to `bron find` travels in a POST body for the same reason: neither the question nor its ranking is written down.
 
 ## Features
 
-- Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date.
+- Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date, and renditions the publisher has withdrawn named rather than quietly served.
 - Content-addressed storage. Each document is held under the SHA-256 of its own bytes, and every article and lid carries a byte range back into it.
 - Amendment diffs. `bron law changes` matches articles on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
 - A three-valued appeal answer. `appealed`, `no_published_successor` and `unknown` stay distinct, because 'nothing published' is a claim about the register and not about whether an appeal was brought.
 - Web archive access for pages no publisher keeps, graded apart from primary sources. Digest checking is three-valued too: only a match is positive evidence, because the index hashes the stored payload and the replay strips its chunk framing.
-- Per-host pacing through a file lock, so several processes on one machine share one budget instead of each pacing itself perfectly and together going three times too fast.
+- Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers instead of each pacing itself perfectly and together going three times too fast.
 - `bron verify` re-hashes every frozen document against its own name.
 
 ## Documentation

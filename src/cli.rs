@@ -238,13 +238,14 @@ pub enum Law {
         #[arg(long, requires = "paragraph")]
         item: Option<String>,
 
-        /// Asks upstream even when the corpus already covers this date.
+        /// Also carry the publisher's own bytes at every span.
         ///
-        /// Without it the corpus answers alone, which keeps a frozen dossier
-        /// readable offline and keeps an answer from changing because someone
-        /// republished. Use this to find out whether it did.
+        /// Without it an answer carries the offsets and bron's reading, and no
+        /// markup travels. With it each excerpt also carries the slice itself,
+        /// on the service's word: checking it means fetching the blob it was
+        /// cut from, and not having to is the reason it is offered at all.
         #[arg(long)]
-        refresh: bool,
+        raw: bool,
 
         #[command(flatten)]
         moment: Moment,
@@ -279,6 +280,10 @@ pub enum Law {
         /// Only this article number.
         #[arg(long)]
         article: Option<String>,
+
+        /// Also carry the publisher's own bytes at every span. See `law show`.
+        #[arg(long)]
+        raw: bool,
     },
 }
 

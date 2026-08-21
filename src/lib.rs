@@ -1,17 +1,20 @@
 //! Dutch primary legal sources on your disk.
 //!
-//! bron fetches wetgeving, court decisions and official publications, freezes
-//! the exact bytes it received, and stores what it parsed alongside byte spans
-//! back into those bytes. The point is not search. The point is that a claim
-//! made from this corpus can name the document and the characters it rests on,
-//! and that the same question asked twice gives the same answer.
+//! bron reads wetgeving, court decisions and official publications, and answers
+//! with the document each claim rests on and the byte span inside it. Court
+//! decisions and publications are frozen here under the digest of their own
+//! bytes; wetgeving is read through [`service`], which resolves a date against
+//! every manifest the register publishes and names the blob its answer came
+//! out of. The point is not search. The point is that a claim made from bron
+//! can name the document and the characters it rests on, and that the same
+//! question asked twice gives the same answer.
 //!
 //! Three rules run through the whole crate:
 //!
 //! - **Identity is the official identifier.** [`ids::BwbId`], [`ids::Ecli`],
 //!   [`ids::PublicationId`]. Never a URL.
-//! - **Provenance is not optional.** Every parsed value carries the
-//!   [`blob::BlobId`] of the document it came from.
+//! - **Provenance is not optional.** Every value carries the [`blob::BlobId`]
+//!   of the document it came from, whether bron froze it or the service did.
 //! - **Nothing in the resolution path is nondeterministic.** No clock reads
 //!   inside writes, no generated identifiers in requests, no model anywhere.
 
@@ -22,9 +25,9 @@ pub mod db;
 pub mod diff;
 pub mod error;
 pub mod ids;
-pub mod mirror;
 pub mod model;
 pub mod paths;
 pub mod ratelimit;
+pub mod service;
 pub mod sources;
 pub mod wire;

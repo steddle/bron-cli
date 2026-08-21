@@ -63,7 +63,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     window(&version.in_force)
                 )?;
             }
-            writeln!(out, "\n* = text held locally")?;
+            writeln!(out, "\n* = the service holds this text")?;
             caveats(e.caveats.as_slice(), out)
         }
 
@@ -499,19 +499,50 @@ fn caveats(caveats: &[Caveat], out: &mut impl Write) -> io::Result<()> {
                 articles.join(", "),
                 cell_separator.trim(),
             ),
-            Caveat::UpstreamDigestDiffers { published, ours } => format!(
-                "note: these bytes do not match the digest the publisher's manifest states. \
-                 Published {}…, ours {}…. The register is inconsistent about what it hashes, \
+            Caveat::UpstreamDigestDiffers => {
+                "note: the bytes behind this answer do not match the digest the publisher's \
+                 manifest states for them. The register is inconsistent about what it hashes, \
                  so this is upstream disagreeing with itself rather than the text being wrong, \
-                 and it cannot be settled from here.",
-                &published[..published.len().min(16)],
-                &ours[..ours.len().min(16)],
-            ),
+                 and it cannot be settled from here."
+                    .to_string()
+            }
             Caveat::UpstreamDigestAbsent => {
                 "note: the manifest published no hash for this rendition, so these bytes rest \
                  on bron's own capture alone"
                     .to_string()
             }
+            Caveat::SeveralReadings { readings } => format!(
+                "note: this citation reads more than one way and every reading is answered: {}. \
+                 Which was meant is yours to say.",
+                readings.join(", "),
+            ),
+            Caveat::ReadingUnresolved {
+                reading,
+                because,
+                regulation_id,
+                renditions,
+            } => {
+                let mut line = format!("note: the reading {reading} came to nothing ({because})");
+                if let Some(id) = regulation_id {
+                    line.push_str(&format!(", for {id}"));
+                }
+                if !renditions.is_empty() {
+                    line.push_str(&format!(": {}", renditions.join(", ")));
+                }
+                line.push_str(
+                    ". The other reading is answered above; this one was looked for and is not.",
+                );
+                line
+            }
+            Caveat::HeldTextOnly {
+                held_regulations,
+                known_regulations,
+            } => format!(
+                "note: this is drawn from the {held_regulations} regulation(s) whose text the \
+                 corpus holds, out of {known_regulations} it knows of. What the other \
+                 {} would have said is not in this answer.",
+                known_regulations.saturating_sub(*held_regulations),
+            ),
             Caveat::LanesUnsearched { lanes } => format!(
                 "note: {} hold no vectors and were not searched, so this answer covers less \
                  than the question did",
@@ -535,13 +566,67 @@ fn caveats(caveats: &[Caveat], out: &mut impl Write) -> io::Result<()> {
                 "note: this text applies from {in_force_from} but was only visible from \
                  {first_visible}"
             ),
+            // The reason this lane goes through the service. A withdrawn
+            // rendition keeps its dates, so it wins an ordering by date and is
+            // still not what the register says applies.
+            Caveat::WithdrawnRenditions { excluded } => format!(
+                "note: the publisher has withdrawn {}, which cover(s) this date and were \
+                 passed over. This answer is the newest rendition the register still \
+                 publishes for it.",
+                excluded.join(", "),
+            ),
             // Deliberately does not say which one to use. That is transitional
             // law, and naming a winner here would be a legal judgement wearing
             // a lookup's clothes.
-            Caveat::WindowsDisagree { in_force, as_known } => format!(
-                "note: the two windows disagree for this date. In force: {in_force}. \
-                 As the register showed it: {as_known}. Which governs is a question of \
-                 transitional law that bron does not answer."
+            Caveat::AmbiguousRendition { chosen, discarded } => format!(
+                "note: more than one published rendition covers this date. This is {chosen}, \
+                 which commenced last; {} also cover(s) it. Which governs is a question of \
+                 transitional law that bron does not answer.",
+                discarded.join(", "),
+            ),
+            Caveat::SupersededKnowledge { visible_until } => format!(
+                "note: the register has since revised what it shows for this date; this text \
+                 was what it showed until {visible_until}"
+            ),
+            Caveat::UnverifiedSlice => {
+                "note: the text beside each span is the service's word for what stands there. \
+                 bron did not cut it out of bytes it hashed, so it is a report and not a \
+                 proof; fetch the blob and slice it at those offsets to check it."
+                    .to_string()
+            }
+            // Said because the counts above cannot say it. An article left out
+            // of a comparison is left out of its totals too, so silence here
+            // reads as 'nothing changed'.
+            Caveat::ArticlesNotCompared {
+                unidentified_from,
+                unidentified_to,
+                repeated,
+            } => {
+                let mut line = String::from("note: not every article could be compared.");
+                if unidentified_from + unidentified_to > 0 {
+                    // Counted per rendition, and said that way. A missing
+                    // stam-id is the register declining to say whether the one
+                    // here is the one there, so one total would read as two
+                    // articles where there may be one.
+                    line.push_str(&format!(
+                        " {unidentified_from} article(s) in the earlier rendition and \
+                         {unidentified_to} in the later carry no stam-id, so nothing says \
+                         whether one on either side is the same article."
+                    ));
+                }
+                if !repeated.is_empty() {
+                    line.push_str(&format!(
+                        " The register used stam-id {} more than once inside one rendition, and \
+                         picking one of those would be a guess.",
+                        repeated.join(", "),
+                    ));
+                }
+                line.push_str(" They are outside the counts above.");
+                line
+            }
+            Caveat::Unrecognised { stated } => format!(
+                "note: the service stated a limit this bron has no name for: {stated}. \
+                 Upgrade to read what it says."
             ),
             Caveat::NoZichtWindow => {
                 "note: the manifest carries no zicht dates, so this question cannot be \

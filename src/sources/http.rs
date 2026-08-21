@@ -76,6 +76,41 @@ impl Fetched {
 /// than look hung.
 pub type WaitReporter = Box<dyn Fn(&str, Duration) + Send + Sync>;
 
+/// What a fetch does with what comes back.
+#[derive(Debug, Clone, Copy)]
+enum Reading {
+    /// Freeze it, and refuse it where the server answered an error status.
+    ///
+    /// What every publisher fetch wants. The bytes are the evidence an offset
+    /// will point into, and the [`reqwest::Error`] carrying the code is what
+    /// lets [`crate::error::from_source`] tell a 404 from a dead network.
+    Frozen,
+    /// None of the three, and they go together.
+    ///
+    /// An answer from the bron service is not evidence: no offset points into
+    /// it, no ledger row names it, and what it does point at is a blob already
+    /// addressed by the hash of itself. Freezing one would put a copy of every
+    /// answer ever read in a store that is deliberately never evicted, and a
+    /// question put to `bron find` travels in a POST body precisely so it does
+    /// not end up written down.
+    ///
+    /// A failure arrives inside that answer rather than beside it, carrying the
+    /// kind to branch on and the detail that says why, so refusing it on a
+    /// status code would leave bron reporting that something is missing without
+    /// the labels the service named.
+    ///
+    /// And it takes no share of the budget. That budget is a promise to the
+    /// public services bron reads: they rate-limit by address, and several
+    /// processes on one machine must not together go three times too fast. The
+    /// bron service is not one of them. It states its own limit in a header,
+    /// refuses with a 429 this fetch still reports, and paces nobody, so
+    /// queueing behind a one-second bucket spends two seconds on a
+    /// three-kilobyte article. The hold-off is the worse half: a deadline
+    /// written for one unreachable host is shared by every process on the
+    /// machine, and this lane has no publisher left to fall back to.
+    Envelope,
+}
+
 pub struct Client {
     inner: reqwest::blocking::Client,
     /// The same client, except that it reports a redirect rather than taking
@@ -131,7 +166,7 @@ impl Client {
     /// The URL is taken from the built request rather than from the caller, so
     /// provenance records the address actually dialled, query string and all.
     pub fn fetch_bytes(&self, request: RequestBuilder) -> Result<FetchedBytes> {
-        self.fetch_on(&self.inner, request)
+        self.fetch_on(&self.inner, request, Reading::Frozen)
     }
 
     /// Freezes what comes back without taking any redirect it offers.
@@ -151,31 +186,42 @@ impl Client {
     /// than the one that built it, which is why this is a separate fetch and
     /// not a separate builder.
     pub fn fetch_bytes_unredirected(&self, request: RequestBuilder) -> Result<FetchedBytes> {
-        self.fetch_on(&self.no_redirect, request)
+        self.fetch_on(&self.no_redirect, request, Reading::Frozen)
     }
 
     fn fetch_on(
         &self,
         client: &reqwest::blocking::Client,
         request: RequestBuilder,
+        reading: Reading,
     ) -> Result<FetchedBytes> {
         let request = request.build().context("cannot build request")?;
         let url = request.url().to_string();
         let host = request.url().host_str().unwrap_or_default().to_string();
 
-        let policy = Policy::for_request(&host, request.url().path());
-        let bucket = Bucket::new(&self.buckets, &host, policy);
-        let waited = bucket.acquire()?;
-        if !waited.is_zero()
-            && let Some(report) = &self.on_wait
-        {
-            report(&host, waited);
-        }
+        // The shared budget is for the services bron does not run. See
+        // [`Reading::Envelope`].
+        let bucket = match reading {
+            Reading::Frozen => {
+                let policy = Policy::for_request(&host, request.url().path());
+                let bucket = Bucket::new(&self.buckets, &host, policy);
+                let waited = bucket.acquire()?;
+                if !waited.is_zero()
+                    && let Some(report) = &self.on_wait
+                {
+                    report(&host, waited);
+                }
+                Some(bucket)
+            }
+            Reading::Envelope => None,
+        };
 
         let response = client.execute(request);
         // Stamped on return rather than on dispatch: a call that spent a minute
         // inside its own retries must not hand the next one a free pass.
-        bucket.released()?;
+        if let Some(bucket) = &bucket {
+            bucket.released()?;
+        }
 
         let response = match response {
             Ok(response) => response,
@@ -187,27 +233,45 @@ impl Client {
                 // when it has decided about you, and it must slow every
                 // caller exactly as a 429 would; otherwise a run answers
                 // "cannot reach" a few hundred times without ever pausing.
-                let held = bucket.unreachable()?;
-                return Err(anyhow::Error::new(error)
-                    .context(format!(
+                let error = anyhow::Error::new(error);
+                let error = match &bucket {
+                    Some(bucket) => error.context(format!(
                         "cannot reach {host}; holding off for {}s",
-                        held.as_secs()
-                    ))
-                    .context(format!("request to {url} failed")));
+                        bucket.unreachable()?.as_secs()
+                    )),
+                    None => error.context(format!("cannot reach {host}")),
+                };
+                return Err(error.context(format!("request to {url} failed")));
             }
         };
 
         if let Some(backoff) = refusal(&response) {
-            let held = bucket.refused(backoff)?;
-            anyhow::bail!(
-                "{host} refused the request; holding off for {}s",
-                held.as_secs()
-            );
+            // Reported either way, and the delay the host named is reported
+            // either way. Only a host that shares the budget has a deadline
+            // written for it; the service refusing is this caller's problem and
+            // not every other process's, and this lane has no publisher to fall
+            // back to, so the one thing it can be told is how long to wait.
+            match &bucket {
+                Some(bucket) => anyhow::bail!(
+                    "{host} refused the request; holding off for {}s",
+                    bucket.refused(backoff)?.as_secs()
+                ),
+                None => match backoff {
+                    Some(wait) => anyhow::bail!(
+                        "{host} refused the request and asked for {}s",
+                        wait.as_secs()
+                    ),
+                    None => anyhow::bail!("{host} refused the request and named no delay"),
+                },
+            }
         }
 
-        let response = response
-            .error_for_status()
-            .with_context(|| format!("{url} returned an error status"))?;
+        let response = match reading {
+            Reading::Frozen => response
+                .error_for_status()
+                .with_context(|| format!("{url} returned an error status"))?,
+            Reading::Envelope => response,
+        };
 
         let content_type = response
             .headers()
@@ -226,8 +290,13 @@ impl Client {
             .with_context(|| format!("{url} returned an unreadable body"))?;
 
         // Frozen before anything is decided about what it says, so a body that
-        // no reading can decode still has a digest to be cited by.
-        let blob = self.blobs.put(&body)?;
+        // no reading can decode still has a digest to be cited by. An envelope
+        // is hashed and not kept: it is nothing's evidence, and the digest is
+        // still what it would be filed under if it ever were.
+        let blob = match reading {
+            Reading::Frozen => self.blobs.put(&body)?,
+            Reading::Envelope => BlobId::of(&body),
+        };
 
         Ok(FetchedBytes {
             content_encoding,
@@ -257,6 +326,20 @@ impl Client {
 
     pub fn fetch_url(&self, url: &str) -> Result<Fetched> {
         self.fetch(self.get(url))
+    }
+
+    /// Reads an answer from a service that speaks the bron envelope. See
+    /// [`Reading::Envelope`].
+    pub fn fetch_answered(&self, request: RequestBuilder) -> Result<Fetched> {
+        let raw = self.fetch_on(&self.inner, request, Reading::Envelope)?;
+        let text = String::from_utf8(raw.bytes)
+            .with_context(|| format!("{} returned a body that is not UTF-8", raw.url))?;
+
+        Ok(Fetched {
+            blob: raw.blob,
+            text,
+            url: raw.url,
+        })
     }
 }
 

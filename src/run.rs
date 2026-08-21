@@ -8,21 +8,19 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use chrono::{NaiveDate, Utc};
-use data_encoding::HEXLOWER;
 use serde::Serialize;
-use sha2::{Digest, Sha512};
 
 use bron::blob::BlobStore;
 use bron::db::{self, Db};
 use bron::diff;
 use bron::error::{Fault, Outcome, from_corpus, from_source};
 use bron::ids::{BwbId, Ecli, PublicationId};
-use bron::mirror::{self, Mirror, ResolvedVia};
+use bron::service::{self, Service};
 use bron::paths;
 use bron::sources::{
     Client, FetchedLaw, Source, VersionMeta, bwb, publications, rechtspraak, wayback,
 };
-use bron::wire::{self, Caveat, Envelope, View};
+use bron::wire::{self, Caveat, Envelope, ResolvedVia, View};
 
 use crate::cli::{Archive, Case, Cli, Command, DbCommand, Law, Publication, UpdateArgs};
 use crate::render;
@@ -98,10 +96,10 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
     let today = Utc::now().date_naive();
 
     // Resolved once, so every fetch in a run takes the same route.
-    let mirror = Mirror::resolve(cli.direct);
+    let service = Service::resolve(cli.direct);
 
     match &cli.command {
-        Command::Law(law) => run_law(law, today, quiet, mirror.as_ref()),
+        Command::Law(law) => run_law(law, today, quiet, service.as_ref()),
         Command::Case(case) => run_case(case, quiet),
         Command::Publication(pub_) => run_publication(pub_, quiet),
         Command::Archive(archive) => run_archive(archive, today, quiet),
@@ -115,9 +113,9 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
             moment,
             today,
             quiet,
-            mirror.as_ref(),
+            service.as_ref(),
         ),
-        Command::Update(args) => run_update(args, quiet, mirror.as_ref()),
+        Command::Update(args) => run_update(args, quiet, service.as_ref()),
         Command::Verify => run_verify(),
         Command::Db(command) => run_db(command),
     }
@@ -205,51 +203,45 @@ fn narrow(
 /// Ranks the corpus against a question and answers with identifiers.
 ///
 /// The one command with no publisher behind it. Every other route through the
-/// mirror is an accelerant in front of a source of last resort; a ranking over
-/// the shared corpus has none, because the corpus is the source. So no mirror
+/// service is an accelerant in front of a source of last resort; a ranking over
+/// the shared corpus has none, because the corpus is the source. So no service
 /// is a refusal rather than an empty answer: reporting nothing found would
 /// record an absence bron never established, which is the distinction the whole
-/// contract rests on.
+/// contract rests on. A 404 read as 'nothing matched' would record that same
+/// absence, which is why this reads the service's own envelope like every other
+/// call here.
 fn run_find(
     query: &str,
     limit: u32,
     moment: &crate::cli::Moment,
     today: NaiveDate,
     quiet: bool,
-    mirror: Option<&Mirror>,
+    service: Option<&Service>,
 ) -> Outcome<Answer> {
     if query.trim().is_empty() {
         return Err(Fault::usage("say what to search for"));
     }
 
-    let Some(mirror) = mirror else {
-        return Err(Fault::usage(
-            "find reads the shared corpus, which only the service holds, so it needs a mirror. \
-             Set BRON_MIRROR and drop --direct. Everything else here answers without one.",
-        ));
-    };
-
+    let service = self::service(service)?;
     let (date, view) = moment.resolve(today);
     let (as_of, as_known_on) = match view {
-        wire::View::InForce => (Some(date.to_string()), None),
-        wire::View::AsKnown => (None, Some(date.to_string())),
+        View::InForce => (Some(date.to_string()), None),
+        View::AsKnown => (None, Some(date.to_string())),
     };
 
     let client = client(quiet)?;
-    let answer = mirror
-        .search(
-            &client,
-            &mirror::SearchRequest {
-                q: query.to_string(),
-                limit,
-                as_of,
-                as_known_on,
-            },
-        )
-        .map_err(|e| from_source("bron", e))?;
+    let answered = service.search(
+        &client,
+        &service::SearchRequest {
+            q: query.to_string(),
+            limit,
+            as_of,
+            as_known_on,
+        },
+    )?;
 
-    let hits = answer
-        .data
+    let found = answered.data;
+    let hits = found
         .hits
         .into_iter()
         .map(|hit| wire::Hit {
@@ -266,57 +258,50 @@ fn run_find(
         })
         .collect();
 
-    // The service already says which corpora it searched, and that fact travels
-    // rather than being restated: a CLI that decided for itself would be a
-    // second place for the same claim to be made differently.
-    let unsearched: Vec<String> = ["wetgeving", "rechtspraak", "publicaties"]
-        .into_iter()
-        .filter(|lane| !answer.data.searched.iter().any(|s| s == lane))
-        .map(str::to_string)
-        .collect();
-
-    let mut caveats = Vec::new();
-
-    if !unsearched.is_empty() {
-        caveats.push(Caveat::LanesUnsearched { lanes: unsearched });
-    }
-
+    // Which lanes hold no vectors is the service's claim and travels as one.
+    // Working it out again from `searched` would be a second place for the same
+    // fact to be stated, and the two said it twice in one answer.
     Ok(Answer::Ranking(
         Envelope::ok(wire::Ranking {
-            searched: answer.data.searched,
+            searched: found.searched,
             hits,
         })
         .bound_to(date, view)
-        .with_caveats(caveats),
+        .via(ResolvedVia::Mirror)
+        .with_caveats(answered.caveats),
     ))
 }
 
-/// Fetches one version, through the mirror when there is one.
+/// Fetches one version, through the service when there is one.
 ///
-/// `meta` always came from the publisher's own manifest, because the manifest
-/// is never mirrored, so the digest a mirrored body is held to is the
-/// publisher's. That is what makes the two routes interchangeable: whichever
-/// answers, the bytes are the ones the publisher published or they are refused.
+/// `meta` always came from the publisher's own manifest, which `update` reads
+/// directly, so the digest a served body is held to is the publisher's. That is
+/// what makes the two routes interchangeable: whichever answers, the bytes are
+/// the ones the publisher published or they are refused.
 ///
-/// A mirror that cannot answer is not a failure. It costs one wasted request
-/// and the publisher is asked instead. A mirror that answers with bytes failing
-/// the digest is a different matter and says so on stderr, because bytes served
-/// under a digest they do not match is the one thing a mirror must never do.
+/// A service that cannot answer is not a failure. It costs one wasted request
+/// and the publisher is asked instead. One that answers with bytes failing the
+/// digest is a different matter and says so on stderr, because bytes served
+/// under a digest they do not match is the one thing it must never do.
+///
+/// Which of the two answered is not reported. `update` writes bytes into the
+/// corpus and the corpus records the document, not the route; an answer that
+/// names a route is one read back out of the service, and it names its own.
 fn fetch_version(
     client: &Client,
-    mirror: Option<&Mirror>,
+    service: Option<&Service>,
     law: &BwbId,
     meta: &VersionMeta,
     quiet: bool,
-) -> anyhow::Result<(FetchedLaw, ResolvedVia)> {
-    if let Some(mirror) = mirror {
-        let offered = match mirror.version_bytes(client, law, meta) {
+) -> anyhow::Result<FetchedLaw> {
+    if let Some(service) = service {
+        let offered = match service.version_bytes(client, law, meta) {
             Ok(offered) => offered,
             Err(e) => {
                 if !quiet {
                     eprintln!(
                         "bron: {} could not answer, asking the publisher: {e:#}",
-                        mirror.base()
+                        service.base()
                     );
                 }
                 None
@@ -324,26 +309,158 @@ fn fetch_version(
         };
 
         if let Some(fetched) = offered {
-            // A mirror is worth exactly the digest it can be held to. Anything
-            // short of a match, including a version the manifest states no digest
-            // for, goes back to the publisher.
+            // The service is worth exactly the digest it can be held to.
+            // Anything short of a match, including a version the manifest
+            // states no digest for, goes back to the publisher.
             if bwb::digest_matches(fetched.text.as_bytes(), meta) == Some(true) {
-                let parsed = bwb::parse(Source::from(&fetched), law, meta)?;
-                return Ok((parsed, ResolvedVia::Mirror));
+                return bwb::parse(Source::from(&fetched), law, meta);
             }
 
             if !quiet {
                 eprintln!(
                     "bron: {} served {law} {} without matching the digest the publisher \
                      stated; asking the publisher instead",
-                    mirror.base(),
+                    service.base(),
                     meta.version
                 );
             }
         }
     }
 
-    Ok((bwb::fetch(client, law, meta)?, ResolvedVia::Publisher))
+    bwb::fetch(client, law, meta)
+}
+
+/// The service this lane reads through.
+///
+/// A usage failure rather than an empty answer where there is none. Every
+/// rendition a date resolves to, every window and every span in this lane is
+/// the service's answer; with the address taken out of the path there is
+/// nothing left to ask, and reporting nothing found would record an absence
+/// bron never established.
+fn service(service: Option<&Service>) -> Outcome<&Service> {
+    service.ok_or_else(|| {
+        Fault::usage(
+            "the wetgeving lane reads the bron service, so it needs one. Set BRON_MIRROR and \
+             drop --direct. `update` is what still reads the publisher itself.",
+        )
+    })
+}
+
+/// Where the document a rendition's spans point into came from.
+///
+/// One lookup per rendition, never one per article: a rendition names one blob
+/// and every span in the answer points into those bytes.
+fn provenance(
+    client: &Client,
+    service: &Service,
+    law: &BwbId,
+    expression: &service::Expression,
+) -> Outcome<wire::Provenance> {
+    // The rendition exists and its dates resolved; what is missing is its text.
+    // Reporting that as no such rendition would have a caller stop looking, and
+    // the publisher still serves it.
+    let digest = expression.blob.as_deref().ok_or_else(|| {
+        Fault::not_found(
+            "text held for",
+            format!("{law} rendition {}", expression.label),
+        )
+    })?;
+
+    let blob = digest.parse().map_err(|e| Fault::Upstream {
+        service: "bron",
+        source: anyhow::anyhow!("{e}"),
+    })?;
+    let answered = service.blob_at(client, digest)?;
+
+    Ok(wire::Provenance::served(
+        blob,
+        service.blob_url(digest),
+        answered.data.size,
+    ))
+}
+
+/// bron's reading of one article: its leden in order, each opened by the number
+/// the register gives it.
+///
+/// Assembled here rather than taken from the article's own rendering, because
+/// that string carries no lid numbers and the lid is the unit Dutch practice
+/// cites: `art. 6:162 lid 2 BW`. It is rendering, so it lives where the answer
+/// is built rather than on the shape the service sends.
+fn content(article: &service::Article) -> String {
+    leden(article).map(lid).collect::<Vec<_>>().join("\n")
+}
+
+/// The leden worth citing, which are the ones the register printed text in.
+///
+/// A repealed article is a single empty one. Keeping it would give every repeal
+/// a lid that says nothing, and the article's own emptiness beside its
+/// `vervallen` is the whole of what the register states.
+fn leden(article: &service::Article) -> impl Iterator<Item = &service::Paragraph> {
+    article
+        .paragraphs
+        .iter()
+        .filter(|lid| !lid.text().is_empty())
+}
+
+/// One lid as bron prints it, opened by its number where it has one.
+fn lid(lid: &service::Paragraph) -> String {
+    match &lid.number {
+        Some(number) => format!("{number}. {}", lid.text()),
+        None => lid.text().to_string(),
+    }
+}
+
+/// One article in the terms a comparison is made in.
+fn compared_article(article: &service::Article) -> diff::Article {
+    diff::Article {
+        stam_id: article.stam_id.clone(),
+        number: article.number.clone(),
+        label: article.label.clone(),
+        path: article.path.clone(),
+        content: content(article),
+        effect: article.effect.clone(),
+    }
+}
+
+/// One article, in the shape a consumer parses.
+fn article(
+    article: &service::Article,
+    law: &BwbId,
+    version: &str,
+    provenance: &wire::Provenance,
+) -> wire::Article {
+    wire::Article {
+        law_id: law.to_string(),
+        version: version.to_string(),
+        number: article.number.clone(),
+        label: article.label.clone(),
+        title: article.title.clone(),
+        path: article.path.clone(),
+        content: content(article),
+        excerpt: excerpt(article.span, article.raw.as_deref()),
+        leden: leden(article)
+            .map(|paragraph| wire::Lid {
+                number: paragraph.number.clone(),
+                content: lid(paragraph),
+                excerpt: excerpt(paragraph.span, paragraph.raw.as_deref()),
+                jci: paragraph.jci.clone(),
+            })
+            .collect(),
+        amended_by: article.amended_by.clone(),
+        effect: article.effect.clone(),
+        status: article.status.clone(),
+        in_force_from: article.in_force_from,
+        jci: article.jci.clone(),
+        provenance: provenance.clone(),
+    }
+}
+
+fn excerpt(span: service::Span, raw: Option<&str>) -> wire::Excerpt {
+    wire::Excerpt {
+        start: span.start,
+        end: span.end,
+        text: raw.map(str::to_string),
+    }
 }
 
 // -- wetgeving -----------------------------------------------------------
@@ -352,47 +469,54 @@ fn run_law(
     law_cmd: &Law,
     today: NaiveDate,
     quiet: bool,
-    mirror: Option<&Mirror>,
+    service: Option<&Service>,
 ) -> Outcome<Answer> {
+    let service = self::service(service)?;
+    let client = client(quiet)?;
+
     match law_cmd {
         Law::Search { query, limit } => {
-            let client = client(quiet)?;
-            let hits = bwb::search(&client, &query.join(" "), *limit)
-                .map_err(|e| from_source("bwb", e))?;
+            let answered = service.regulations(&client, &query.join(" "), *limit)?;
 
-            Ok(Answer::LawHits(Envelope::ok(
-                hits.into_iter().map(Into::into).collect(),
-            )))
+            Ok(Answer::LawHits(
+                Envelope::ok(
+                    answered
+                        .data
+                        .into_iter()
+                        .map(|hit| wire::LawHit {
+                            id: hit.id,
+                            title: hit.title,
+                            law_type: hit.regulation_type,
+                        })
+                        .collect(),
+                )
+                .via(ResolvedVia::Mirror)
+                .with_caveats(answered.caveats),
+            ))
         }
 
         Law::Versions { id } => {
             let law: BwbId = parse_id(id)?;
-            let client = client(quiet)?;
-            let db = open_db()?;
+            let answered = service.expressions(&client, &law)?;
 
-            // The manifest is authoritative for which versions exist; the
-            // corpus only knows which of them have been fetched.
-            let metas = bwb::versions(&client, &law).map_err(|e| from_source("bwb", e))?;
-            let held: Vec<String> = db
-                .versions(&law)
-                .map_err(from_corpus)?
-                .into_iter()
-                .map(|v| v.version)
-                .collect();
-
-            Ok(Answer::Versions(Envelope::ok(
-                metas
-                    .into_iter()
-                    .map(|m| wire::VersionSummary {
-                        held: held.contains(&m.version),
-                        version: m.version,
-                        in_force: m.in_force.into(),
-                        as_known: m.visible.map(Into::into),
-                        upstream_hash: m.upstream_hash,
-                        byte_len: m.byte_len,
-                    })
-                    .collect(),
-            )))
+            Ok(Answer::Versions(
+                Envelope::ok(
+                    answered
+                        .data
+                        .into_iter()
+                        .map(|rendition| wire::VersionSummary {
+                            version: rendition.label,
+                            in_force: rendition.in_force.into(),
+                            as_known: rendition.as_known.map(Into::into),
+                            upstream_hash: rendition.upstream_hash,
+                            byte_len: rendition.size,
+                            held: rendition.held,
+                        })
+                        .collect(),
+                )
+                .via(ResolvedVia::Mirror)
+                .with_caveats(answered.caveats),
+            ))
         }
 
         Law::Changes {
@@ -400,7 +524,8 @@ fn run_law(
             from,
             to,
             all,
-            article,
+            article: wanted,
+            raw,
         } => {
             let law: BwbId = parse_id(id)?;
             let to = to.unwrap_or(today);
@@ -408,52 +533,42 @@ fn run_law(
                 return Err(Fault::usage(format!("--from {from} is after --to {to}")));
             }
 
-            let client = client(quiet)?;
-            let metas = bwb::versions(&client, &law).map_err(|e| from_source("bwb", e))?;
-
-            let earlier = bwb::version_on(&metas, *from)
-                .ok_or_else(|| Fault::not_found("version of", format!("{law} on {from}")))?;
-            let later = bwb::version_on(&metas, to)
-                .ok_or_else(|| Fault::not_found("version of", format!("{law} on {to}")))?;
-
-            let (before, before_via) = fetch_version(&client, mirror, &law, earlier, quiet)
-                .map_err(|e| from_source("bwb", e))?;
-            let (after, after_via) = fetch_version(&client, mirror, &law, later, quiet)
-                .map_err(|e| from_source("bwb", e))?;
-            // Two documents, so the answer may only claim one route when both
-            // took it.
-            let via = if before_via == after_via {
-                before_via
-            } else {
-                ResolvedVia::Publisher
+            let ask = |on: NaiveDate| service::Ask {
+                as_of: on,
+                as_known_on: None,
+                number: None,
+                raw: *raw,
             };
 
-            // Both sides are stored, so what was compared is on the record and
-            // every span in the answer stays resolvable afterwards.
-            let stamped_at = Utc::now();
-            let mut db = open_db()?;
-            let tx = db.transaction().map_err(from_corpus)?;
-            db::put_law_version(&tx, &before, stamped_at).map_err(from_corpus)?;
-            db::put_law_version(&tx, &after, stamped_at).map_err(from_corpus)?;
-            tx.commit().map_err(|e| from_corpus(e.into()))?;
+            let earlier = service.articles(&client, &law, &ask(*from))?;
+            let later = service.articles(&client, &law, &ask(to))?;
 
-            // Read back from the store rather than holding two full documents
-            // in memory: a BWB book runs to megabytes and the blob is the thing
-            // the spans are recorded against anyway.
-            let before_text = read_document(before.provenance.blob)?;
-            let after_text = read_document(after.provenance.blob)?;
-            let before_prov = provenance_of(&db, before.provenance.blob)?;
-            let after_prov = provenance_of(&db, after.provenance.blob)?;
+            let mut caveats = earlier.caveats;
+            caveats.extend(later.caveats);
 
-            // Both sides, because a diff rests on two documents and either can
-            // be the one the publisher does not vouch for.
-            let mut caveats = digest_caveats(before.upstream_hash.as_deref(), &before_text);
-            caveats.extend(digest_caveats(after.upstream_hash.as_deref(), &after_text));
+            let before = earlier.data;
+            let after = later.data;
+            let before_provenance = provenance(&client, service, &law, &before.expression)?;
+            let after_provenance = provenance(&client, service, &law, &after.expression)?;
+
+            let earlier_compared: Vec<diff::Article> =
+                before.articles.iter().map(compared_article).collect();
+            let later_compared: Vec<diff::Article> =
+                after.articles.iter().map(compared_article).collect();
+            let comparison = diff::compare(&earlier_compared, &later_compared);
+
+            if !comparison.is_whole() {
+                caveats.push(Caveat::ArticlesNotCompared {
+                    unidentified_from: comparison.unidentified.before,
+                    unidentified_to: comparison.unidentified.after,
+                    repeated: comparison.repeated,
+                });
+            }
 
             let mut summary = wire::ChangeSummary::default();
             let mut articles = Vec::new();
 
-            for change in diff::compare(&before, &after) {
+            for change in comparison.changes {
                 match change.change {
                     diff::Change::Unchanged => summary.unchanged += 1,
                     diff::Change::Amended => summary.amended += 1,
@@ -465,9 +580,9 @@ fn run_law(
                 if !*all && !change.change.is_change() {
                     continue;
                 }
-                if article
+                if wanted
                     .as_deref()
-                    .is_some_and(|wanted| change.number != wanted)
+                    .is_some_and(|number| change.number != number)
                 {
                     continue;
                 }
@@ -477,145 +592,92 @@ fn run_law(
                     number: change.number,
                     label: change.label,
                     path: change.path,
-                    before: change
-                        .before
-                        .and_then(|a| side(&a, &before.version, &before_text, &before_prov)),
-                    after: change
-                        .after
-                        .and_then(|a| side(&a, &after.version, &after_text, &after_prov)),
+                    before: change.before.map(|at| {
+                        side(
+                            &before.articles[at],
+                            &before.expression.label,
+                            &before_provenance,
+                        )
+                    }),
+                    after: change.after.map(|at| {
+                        side(&after.articles[at], &after.expression.label, &after_provenance)
+                    }),
                 });
+            }
+
+            // Read off what the answer carries rather than off the flag that
+            // asked for it. `--all` decides which articles are in the list at
+            // all, and a caveat about the request cannot see that.
+            if articles.iter().any(|change| {
+                change.before.as_ref().is_some_and(wire::Side::reports_a_slice)
+                    || change.after.as_ref().is_some_and(wire::Side::reports_a_slice)
+            }) {
+                caveats.push(Caveat::UnverifiedSlice);
             }
 
             Ok(Answer::Changes(
                 Envelope::ok(Box::new(wire::Changes {
                     law_id: law.into_string(),
-                    from: compared(earlier, before.provenance.blob),
-                    to: compared(later, after.provenance.blob),
+                    from: compared(&before.expression, before_provenance.blob),
+                    to: compared(&after.expression, after_provenance.blob),
                     articles,
                     summary,
                 }))
-                .via(via)
+                .via(ResolvedVia::Mirror)
                 .with_caveats(caveats),
             ))
         }
 
         Law::Show {
             id,
-            article,
+            article: wanted,
             paragraph,
             item,
             moment,
-            refresh,
+            raw,
         } => {
             let law: BwbId = parse_id(id)?;
             let (date, view) = moment.resolve(today);
 
-            let mut db = open_db()?;
+            let answered = service.articles(
+                &client,
+                &law,
+                &service::Ask {
+                    as_of: date,
+                    // One date names both coordinates of a zicht question: the
+                    // text for a day, as the register had it that day. Sending
+                    // only the second resolves against a rendition in force
+                    // now, which for anything amended since is none at all.
+                    as_known_on: (view == View::AsKnown).then_some(date),
+                    number: wanted.as_deref(),
+                    raw: *raw,
+                },
+            )?;
 
-            // The corpus first. It already holds the validity windows, so it can
-            // answer which version covers a date without asking anyone. That is
-            // not only faster: a frozen corpus must stay readable when the
-            // publisher is unreachable, and an answer that silently changes
-            // because someone republished is the opposite of reproducible.
-            //
-            // --refresh is how you ask whether that is still the whole story.
-            let held = if *refresh {
-                None
-            } else {
-                match view {
-                    View::InForce => db.version_in_force(&law, date).map_err(from_corpus)?,
-                    // Zicht is not indexed locally, so it always asks upstream.
-                    View::AsKnown => None,
-                }
-            };
+            let mut caveats = answered.caveats;
+            let found = answered.data;
+            let provenance = provenance(&client, service, &law, &found.expression)?;
 
-            let (version, mut caveats) = match held {
-                Some(stored) => (stored.version, Vec::new()),
-                None => {
-                    let client = client(quiet)?;
-                    let metas = bwb::versions(&client, &law).map_err(|e| from_source("bwb", e))?;
-
-                    let meta = select_version(&metas, date, view).ok_or_else(|| {
-                        Fault::not_found("version of", format!("{law} on {date}"))
-                    })?;
-
-                    if db
-                        .version_id(&law, &meta.version)
-                        .map_err(from_corpus)?
-                        .is_none()
-                    {
-                        // The route is not carried onto this answer: what is
-                        // rendered below is read back out of the corpus, and
-                        // naming a route for a corpus read would describe how
-                        // the bytes arrived once rather than where this answer
-                        // came from.
-                        let (fetched, _) = fetch_version(&client, mirror, &law, meta, quiet)
-                            .map_err(|e| from_source("bwb", e))?;
-                        let tx = db.transaction().map_err(from_corpus)?;
-                        db::put_law_version(&tx, &fetched, Utc::now()).map_err(from_corpus)?;
-                        tx.commit().map_err(|e| from_corpus(e.into()))?;
-                    }
-
-                    (meta.version.clone(), window_caveats(&metas, meta, date))
-                }
-            };
-
-            let stored = db
-                .version(&law, &version)
-                .map_err(from_corpus)?
-                .ok_or_else(|| Fault::not_found("version of", &law))?;
-            let version_id = db
-                .version_id(&law, &version)
-                .map_err(from_corpus)?
-                .ok_or_else(|| Fault::not_found("version of", &law))?;
-
-            let provenance = provenance_of(&db, stored.blob)?;
-            let document = read_document(stored.blob)?;
-            caveats.extend(digest_caveats(stored.upstream_hash.as_deref(), &document));
-
-            let stored_articles = db
-                .articles(version_id, article.as_deref())
-                .map_err(from_corpus)?;
-
-            // Read off the stored articles rather than the wire ones, because
-            // the count is how the text was rendered and not something a
-            // consumer needs per article: the caveat names them once.
-            let flattened: Vec<String> = stored_articles
+            let articles: Vec<wire::Article> = found
+                .articles
                 .iter()
-                .filter(|a| a.tables > 0)
-                .map(|a| a.number.clone())
+                .map(|a| article(a, &law, &found.expression.label, &provenance))
                 .collect();
 
-            let illustrated: Vec<String> = stored_articles
-                .iter()
-                .filter(|a| a.illustrations > 0)
-                .map(|a| a.number.clone())
-                .collect();
-
-            let uncommenced: Vec<String> = stored_articles
-                .iter()
-                .filter(|a| a.status.as_deref() == Some("nogniet"))
-                .map(|a| a.number.clone())
-                .collect();
-
-            let articles = stored_articles
-                .into_iter()
-                .map(|a| {
-                    let number = a.number.clone();
-                    wire::Article::new(a, &document, provenance.clone()).ok_or_else(|| {
-                        Fault::Corpus(anyhow::anyhow!(
-                            "article {number} has spans that do not fit its document"
-                        ))
-                    })
-                })
-                .collect::<Outcome<Vec<_>>>()?;
+            if articles.is_empty() {
+                let what = match wanted {
+                    Some(number) => format!("article {number} of {law}"),
+                    None => format!("articles of {law}"),
+                };
+                return Err(Fault::not_found("stored", what));
+            }
 
             // Asking for one number and getting several means the number named
             // several. Both are answered, because picking would be bron
             // deciding which was meant, but the reader has to be told: two
             // headings reading "1" are otherwise indistinguishable from a
             // duplicated row.
-            if let Some(number) = article.as_deref()
+            if let Some(number) = wanted.as_deref()
                 && articles.len() > 1
             {
                 caveats.push(Caveat::AmbiguousArticle {
@@ -627,93 +689,22 @@ fn run_law(
                 });
             }
 
-            if articles.is_empty() {
-                let what = match article {
-                    Some(n) => format!("article {n} of {law}"),
-                    None => format!("articles of {law}"),
-                };
-                return Err(Fault::not_found("stored", what));
-            }
-
-            if !flattened.is_empty() {
-                caveats.push(Caveat::TableFlattened {
-                    articles: flattened,
-                    cell_separator: bwb::CELL,
-                });
-            }
-
-            if !uncommenced.is_empty() {
-                caveats.push(Caveat::NotCommenced {
-                    articles: uncommenced,
-                });
-            }
-
-            if !illustrated.is_empty() {
-                caveats.push(Caveat::IllustrationOmitted {
-                    articles: illustrated,
-                });
-            }
-
-            if view == View::AsKnown && stored.visible.is_none() {
-                caveats.push(Caveat::NoZichtWindow);
-            }
-
             let articles = narrow(articles, paragraph.as_deref(), item.as_deref())?;
+
+            // Read off what the answer carries rather than off the flag that
+            // asked for it. Narrowing to a lid changes which excerpts travel,
+            // and a caveat about the request cannot see that.
+            if articles.iter().any(wire::Article::reports_a_slice) {
+                caveats.push(Caveat::UnverifiedSlice);
+            }
 
             Ok(Answer::Articles(
                 Envelope::ok(articles)
                     .bound_to(date, view)
+                    .via(ResolvedVia::Mirror)
                     .with_caveats(caveats),
             ))
         }
-    }
-}
-
-/// States what the caller cannot see: that this text applied before it was
-/// visible, and that the other window resolves the same date to another text.
-///
-/// Which of the two governs is a question of transitional law. bron does not
-/// answer it, because that is a legal judgement and nothing here may make one.
-/// Saying nothing, however, hands over one text as though it were the only
-/// candidate, and for most tax legislation it is not.
-fn window_caveats(metas: &[VersionMeta], chosen: &VersionMeta, date: NaiveDate) -> Vec<Caveat> {
-    let mut caveats = Vec::new();
-
-    if let Some(zicht) = chosen.visible.filter(|z| z.from > chosen.in_force.from) {
-        caveats.push(Caveat::Retroactive {
-            in_force_from: chosen.in_force.from,
-            first_visible: zicht.from,
-        });
-    }
-
-    let in_force = bwb::version_on(metas, date);
-    let as_known = metas
-        .iter()
-        .rev()
-        .find(|m| m.visible.is_some_and(|z| z.contains(date)));
-
-    if let (Some(a), Some(b)) = (in_force, as_known)
-        && a.version != b.version
-    {
-        caveats.push(Caveat::WindowsDisagree {
-            in_force: a.version.clone(),
-            as_known: b.version.clone(),
-        });
-    }
-
-    caveats
-}
-
-/// Picks the version a date resolves to, in the window the caller asked for.
-fn select_version(metas: &[VersionMeta], date: NaiveDate, view: View) -> Option<&VersionMeta> {
-    match view {
-        View::InForce => bwb::version_on(metas, date),
-        // Zicht is only answerable where upstream stated it. Silently falling
-        // back to geldigheid is the substitution the two windows exist to stop.
-        View::AsKnown => metas
-            .iter()
-            .rev()
-            .find(|m| m.visible.is_some_and(|w| w.contains(date))),
     }
 }
 
@@ -855,7 +846,7 @@ fn run_publication(cmd: &Publication, quiet: bool) -> Outcome<Answer> {
 
 // -- update --------------------------------------------------------------
 
-fn run_update(args: &UpdateArgs, quiet: bool, mirror: Option<&Mirror>) -> Outcome<Answer> {
+fn run_update(args: &UpdateArgs, quiet: bool, service: Option<&Service>) -> Outcome<Answer> {
     let mut db = open_db()?;
     let client = client(quiet)?;
 
@@ -880,7 +871,7 @@ fn run_update(args: &UpdateArgs, quiet: bool, mirror: Option<&Mirror>) -> Outcom
         // A per-item failure is logged and the batch continues. This is the one
         // place an error is only ever printed, so anyhow is the right shape.
         match update_one(
-            &client, &mut db, &law, args.force, stamped_at, mirror, quiet,
+            &client, &mut db, &law, args.force, stamped_at, service, quiet,
         ) {
             Ok(updated) => report.push(updated),
             Err(e) => report.push(Updated {
@@ -903,7 +894,7 @@ fn update_one(
     law: &BwbId,
     force: bool,
     stamped_at: chrono::DateTime<Utc>,
-    mirror: Option<&Mirror>,
+    service: Option<&Service>,
     quiet: bool,
 ) -> anyhow::Result<Updated> {
     let metas = bwb::versions(client, law)?;
@@ -924,7 +915,7 @@ fn update_one(
         });
     }
 
-    let (fetched, _) = fetch_version(client, mirror, law, current, quiet)?;
+    let fetched = fetch_version(client, service, law, current, quiet)?;
     let articles = fetched.articles.len() as u32;
 
     let tx = db.transaction()?;
@@ -995,27 +986,26 @@ fn run_db(command: &DbCommand) -> Outcome<Answer> {
 
 // -- shared --------------------------------------------------------------
 
-/// One side of a comparison, with the excerpt that proves it.
+/// One side of a comparison, with the span that places it.
 fn side(
-    article: &bron::sources::FetchedArticle,
+    article: &service::Article,
     version: &str,
-    document: &str,
     provenance: &wire::Provenance,
-) -> Option<wire::Side> {
-    Some(wire::Side {
+) -> wire::Side {
+    wire::Side {
         version: version.to_string(),
-        excerpt: wire::Excerpt::new(article.span, &article.content, document)?,
-        content: article.content.clone(),
-        amended_by: article.amended_by.as_ref().map(|p| p.as_str().to_string()),
+        excerpt: excerpt(article.span, article.raw.as_deref()),
+        content: content(article),
+        amended_by: article.amended_by.clone(),
         effect: article.effect.clone(),
         provenance: provenance.clone(),
-    })
+    }
 }
 
-fn compared(meta: &VersionMeta, blob: bron::blob::BlobId) -> wire::ComparedVersion {
+fn compared(expression: &service::Expression, blob: bron::blob::BlobId) -> wire::ComparedVersion {
     wire::ComparedVersion {
-        version: meta.version.clone(),
-        in_force: meta.in_force.into(),
+        version: expression.label.clone(),
+        in_force: expression.in_force.into(),
         blob,
     }
 }
@@ -1309,34 +1299,6 @@ fn client(quiet: bool) -> Outcome<Client> {
     }))
 }
 
-/// What the publisher's own manifest says about these bytes.
-///
-/// `bron verify` checks that a blob still hashes to its own name, which is a
-/// claim about this disk and not about the register. This is the other half:
-/// the manifest publishes a SHA-512 per rendition, and until now bron stored it
-/// and never looked at it again on the read path. A citation resting on bytes
-/// the publisher does not vouch for is exactly the thing this corpus exists to
-/// make visible.
-///
-/// Recomputed rather than stored. Measured at 1,2 ms over the 1,3 MB BW6
-/// document, against a blob read that has already happened by the time this is
-/// called, so a column would buy nothing and add a second place for the truth
-/// to go stale.
-fn digest_caveats(published: Option<&str>, document: &str) -> Vec<Caveat> {
-    let Some(published) = published else {
-        return vec![Caveat::UpstreamDigestAbsent];
-    };
-
-    let published = published.trim().to_ascii_lowercase();
-    let ours = HEXLOWER.encode(&Sha512::digest(document.as_bytes()));
-
-    if ours == published {
-        return Vec::new();
-    }
-
-    vec![Caveat::UpstreamDigestDiffers { published, ours }]
-}
-
 fn provenance_of(db: &Db, blob: bron::blob::BlobId) -> Outcome<wire::Provenance> {
     db.document(&blob)
         .map_err(from_corpus)?
@@ -1344,62 +1306,80 @@ fn provenance_of(db: &Db, blob: bron::blob::BlobId) -> Outcome<wire::Provenance>
         .ok_or_else(|| Fault::Corpus(anyhow::anyhow!("no ledger entry for document {blob}")))
 }
 
-/// Reads a frozen document back, verifying it still hashes to its own name.
-fn read_document(blob: bron::blob::BlobId) -> Outcome<String> {
-    let blobs = BlobStore::new(paths::blob_dir().map_err(from_corpus)?);
-    let bytes = blobs.get_verified(&blob).map_err(from_corpus)?;
-    String::from_utf8(bytes)
-        .map_err(|e| Fault::Corpus(anyhow::anyhow!("document {blob} is not UTF-8: {e}")))
-}
-
 #[cfg(test)]
-mod digest_tests {
-    use super::digest_caveats;
-    use bron::wire::Caveat;
-    use data_encoding::HEXLOWER;
-    use sha2::{Digest, Sha512};
+mod reading_tests {
+    use super::{compared_article, content, leden};
+    use bron::service::{Article, Paragraph, Span};
 
-    fn sha512(text: &str) -> String {
-        HEXLOWER.encode(&Sha512::digest(text.as_bytes()))
-    }
-
-    #[test]
-    fn bytes_the_publisher_vouched_for_say_nothing() {
-        let text = "<toestand/>";
-        assert!(digest_caveats(Some(&sha512(text)), text).is_empty());
-    }
-
-    /// The register publishes hashes in upper case in places, and a caveat
-    /// raised over letter case would be bron inventing a disagreement.
-    #[test]
-    fn the_comparison_ignores_case_and_surrounding_space() {
-        let text = "<toestand/>";
-        let published = format!("  {}  ", sha512(text).to_uppercase());
-
-        assert!(digest_caveats(Some(&published), text).is_empty());
-    }
-
-    #[test]
-    fn bytes_that_disagree_name_both_digests() {
-        let caveats = digest_caveats(Some(&sha512("something else")), "<toestand/>");
-
-        match caveats.as_slice() {
-            [Caveat::UpstreamDigestDiffers { published, ours }] => {
-                assert_eq!(*ours, sha512("<toestand/>"));
-                assert_ne!(published, ours);
-            }
-            other => panic!("expected one differs caveat, got {other:?}"),
+    fn paragraph(number: Option<&str>, text: &str) -> Paragraph {
+        Paragraph {
+            number: number.map(str::to_string),
+            rendered: Some(text.to_string()),
+            raw: None,
+            jci: None,
+            span: Span { start: 0, end: 1 },
         }
     }
 
-    /// 'Nobody vouched for this' and 'the voucher and the bytes disagree' are
-    /// different facts, and a consumer may care about the difference.
+    fn article(leden: Vec<Paragraph>) -> Article {
+        Article {
+            number: "162".into(),
+            label: None,
+            title: None,
+            path: None,
+            stam_id: Some("1".into()),
+            amended_by: None,
+            effect: None,
+            status: None,
+            in_force_from: None,
+            jci: None,
+            span: Span { start: 0, end: 1 },
+            raw: None,
+            paragraphs: leden,
+        }
+    }
+
+    /// The lid is the unit Dutch practice cites, and the service's own
+    /// rendering of an article carries no lid numbers at all.
     #[test]
-    fn a_rendition_with_no_published_hash_says_so_separately() {
-        assert!(matches!(
-            digest_caveats(None, "<toestand/>").as_slice(),
-            [Caveat::UpstreamDigestAbsent]
-        ));
+    fn an_article_reads_as_its_leden_each_opened_by_its_number() {
+        let article = article(vec![
+            paragraph(Some("1"), "Eerste lid."),
+            paragraph(Some("2"), "Tweede lid."),
+        ]);
+
+        assert_eq!(content(&article), "1. Eerste lid.\n2. Tweede lid.");
+    }
+
+    /// An article printed without leden is one unnumbered unit, and opening it
+    /// with a number the register never printed would be bron writing text.
+    #[test]
+    fn an_article_without_leden_reads_as_itself() {
+        assert_eq!(content(&article(vec![paragraph(None, "Eén geheel.")])), "Eén geheel.");
+    }
+
+    /// A repealed article is a single empty lid. Keeping it would give every
+    /// repeal a citable unit that says nothing.
+    #[test]
+    fn an_empty_lid_is_not_a_citable_unit() {
+        let repealed = article(vec![paragraph(None, "")]);
+
+        assert_eq!(leden(&repealed).count(), 0);
+        assert_eq!(content(&repealed), "");
+    }
+
+    /// A comparison is made over what bron prints, and what bron prints opens
+    /// each lid with its number. Two renditions that renumber a lid say
+    /// different things about which rule is which, and comparing the service's
+    /// unnumbered text alone would call that unchanged.
+    #[test]
+    fn a_comparison_reads_the_text_bron_prints() {
+        let numbered = |number: &str| article(vec![paragraph(Some(number), "Dezelfde woorden.")]);
+
+        assert_ne!(
+            compared_article(&numbered("1")).content,
+            compared_article(&numbered("2")).content
+        );
     }
 }
 
@@ -1420,8 +1400,7 @@ mod narrow_tests {
             excerpt: Excerpt {
                 start: 1000,
                 end: 2000,
-                text: "<artikel/>".into(),
-                rendered: String::new(),
+                text: None,
             },
             // Distinct spans per lid, because the whole point of narrowing is
             // that the answer stops pointing at the article's range.
@@ -1434,8 +1413,7 @@ mod narrow_tests {
                     excerpt: Excerpt {
                         start: 1100 + i as u32 * 100,
                         end: 1150 + i as u32 * 100,
-                        text: "<lid/>".into(),
-                        rendered: String::new(),
+                        text: None,
                     },
                     jci: Some(format!("jci1.3:c:BWBR0005289&artikel=3&lid={number}")),
                 })
@@ -1445,12 +1423,11 @@ mod narrow_tests {
             in_force_from: None,
             jci: None,
             status: None,
-            provenance: Provenance {
-                blob: bron::blob::BlobId::of(b"<toestand/>"),
-                url: "https://example.invalid".into(),
-                byte_len: 1,
-                fetched_at: chrono::Utc::now(),
-            },
+            provenance: Provenance::served(
+                bron::blob::BlobId::of(b"<toestand/>"),
+                "https://example.invalid".into(),
+                1,
+            ),
         }
     }
 

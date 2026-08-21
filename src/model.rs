@@ -328,14 +328,6 @@ impl Capture {
 // -- search-index hits, not yet fetched ----------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LawHit {
-    pub id: BwbId,
-    pub title: Option<String>,
-    pub law_type: Option<String>,
-    pub modified: Option<NaiveDate>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseHit {
     pub id: Ecli,
     pub title: Option<String>,

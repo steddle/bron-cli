@@ -1,11 +1,16 @@
 //! Wetgeving, from the Basis Wetten Bestand.
 //!
-//! Three documents are involved. The SRU index answers title searches. The
-//! per-law manifest lists every published version with the dates it was in
-//! force, which is what makes `--as-of` a lookup rather than an estimate. The
-//! versioned XML behind each entry is the text itself, and is immutable.
+//! Two documents are involved. The per-law manifest lists every published
+//! version with the dates it was in force and the digest of each. The versioned
+//! XML behind each entry is the text itself, and is immutable.
+//!
+//! What is read here is what `update` needs to hold a law's current text and
+//! hold the service's copy of it to the publisher's own digest. Answering a
+//! question about a law goes through [`crate::service`], which resolves a date
+//! against every manifest the register publishes rather than against the
+//! handful this machine has fetched.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use data_encoding::HEXLOWER;
 use roxmltree::Document;
@@ -14,78 +19,9 @@ use sha2::{Digest, Sha512};
 use super::xml::{self, Elem};
 use super::{Client, FetchedArticle, FetchedLaw, FetchedLid, Source, VersionMeta};
 use crate::ids::{BwbId, PublicationId};
-use crate::model::{LawHit, OPEN_ENDED, Span, Validity};
+use crate::model::{OPEN_ENDED, Span, Validity};
 
-const SEARCH_ENDPOINT: &str = "https://zoekservice.overheid.nl/sru/Search";
 const REPOSITORY: &str = "https://repository.officiele-overheidspublicaties.nl/bwb";
-
-const NS_SRU: &str = "http://www.loc.gov/zing/srw/";
-const NS_GZD: &str = "http://standaarden.overheid.nl/sru";
-const NS_DCTERMS: &str = "http://purl.org/dc/terms/";
-
-/// Searches the BWB index by citeertitel.
-///
-/// Free text in, so this is resolution rather than retrieval: the result is
-/// candidates, and a [`BwbId`] is what identifies one of them.
-pub fn search(client: &Client, query: &str, limit: u32) -> Result<Vec<LawHit>> {
-    // CQL string literals have no escape syntax, so a quote in the query would
-    // terminate the term early and draw a parse diagnostic instead of results.
-    // Replaced with a space, never removed: deleting it welds two terms into a
-    // third that the caller never asked for.
-    let query = strip_quotes(query);
-
-    let fetched = client.fetch(client.get(SEARCH_ENDPOINT).query(&[
-        ("operation", "searchRetrieve"),
-        ("version", "1.2"),
-        ("x-connection", "BWB"),
-        ("maximumRecords", &limit.to_string()),
-        ("query", &format!("overheidbwb.titel any \"{query}\"")),
-    ]))?;
-
-    parse_search(&fetched.text)
-}
-
-fn parse_search(body: &str) -> Result<Vec<LawHit>> {
-    let doc = Document::parse(body).context("BWB search returned malformed XML")?;
-    let root = doc.root_element();
-
-    // A rejected query comes back as a diagnostics document with HTTP 200.
-    if xml::find_local(root, "record").is_none()
-        && let Some(message) = xml::find_local(root, "message").and_then(xml::inner_text)
-    {
-        return Err(anyhow!("BWB search rejected the query: {message}"));
-    }
-
-    let mut hits = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for record in xml::find_all(root, NS_SRU, "record") {
-        let Some(gzd) = xml::find(record, NS_GZD, "gzd") else {
-            continue;
-        };
-        let Some(id) = xml::text_of(gzd, NS_DCTERMS, "identifier") else {
-            continue;
-        };
-        // The index carries entries bron has no identity for; skip rather than
-        // inventing one.
-        let Ok(id) = id.parse::<BwbId>() else {
-            continue;
-        };
-
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-
-        hits.push(LawHit {
-            id,
-            title: xml::text_of(gzd, NS_DCTERMS, "title"),
-            law_type: xml::text_of(gzd, NS_DCTERMS, "type"),
-            modified: xml::text_of(gzd, NS_DCTERMS, "modified").and_then(|d| iso_date(&d)),
-        });
-    }
-
-    Ok(hits)
-}
 
 /// Every published version of a law, oldest first.
 ///
@@ -946,14 +882,6 @@ mod tests {
         assert_eq!(repealed.effect.as_deref(), Some("vervallen"));
         assert!(repealed.content.is_empty());
         assert_eq!(repealed.stam_id.as_deref(), Some("99"));
-    }
-
-    #[test]
-    fn reports_a_search_diagnostic_as_an_error() {
-        let body = r#"<diagnostics><diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">
-            <message>Unsupported index</message></diagnostic></diagnostics>"#;
-        let error = parse_search(body).unwrap_err().to_string();
-        assert!(error.contains("Unsupported index"), "{error}");
     }
 
     const MANIFEST: &str = r#"<work label="BWBR0005289" _latestItem="2026-07-16_0/xml/x.xml">

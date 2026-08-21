@@ -35,6 +35,23 @@ pub enum Grade {
     Archive,
 }
 
+/// Which route the bytes behind an answer took.
+///
+/// A dossier may not be able to hide that it read through an intermediary, even
+/// one whose bytes are addressed by the hash of themselves.
+///
+/// `mirror` is published contract and keeps its name. The module behind it is
+/// [`crate::service`]: there is no publisher behind the address any more for a
+/// caller of this lane to be mirrored from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolvedVia {
+    /// Straight from the body that published it.
+    Publisher,
+    /// Through the bron service.
+    Mirror,
+}
+
 /// Which of the two validity windows a date was resolved against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,7 +82,7 @@ pub struct Envelope<T> {
     /// intermediary, even one whose bytes were checked against the publisher's
     /// own digest.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_via: Option<crate::mirror::ResolvedVia>,
+    pub resolved_via: Option<ResolvedVia>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,7 +146,7 @@ impl<T: Serialize> Envelope<T> {
     }
 
     /// Records which route the bytes behind this answer took.
-    pub fn via(mut self, route: crate::mirror::ResolvedVia) -> Self {
+    pub fn via(mut self, route: ResolvedVia) -> Self {
         self.resolved_via = Some(route);
         self
     }
@@ -170,6 +187,11 @@ pub struct ErrorBody {
 }
 
 /// A stated limit on what an answer supports.
+///
+/// Most of these now arrive from the service, which is where the corpus and the
+/// arithmetic over it live. [`Caveat::stated`] is the one place that translates
+/// them, so a limit the service knows about and this crate does not is carried
+/// under its own name rather than dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Caveat {
@@ -198,12 +220,11 @@ pub enum Caveat {
     /// about: linearised, every figure is present and no rate is tied to the
     /// band it applies to unless the reader knows to split the line.
     ///
-    /// `cell_separator` is stated rather than assumed, so a consumer splits on
-    /// a published value. The service emits the same one from the same
-    /// reasoning; it is a contract between the two halves.
+    /// `cell_separator` is carried from the service rather than restated here,
+    /// so a consumer splits on the value that actually produced the line.
     TableFlattened {
         articles: Vec<String>,
-        cell_separator: &'static str,
+        cell_separator: String,
     },
     /// A corpus bron is meant to cover holds no vectors, so was not searched.
     ///
@@ -211,6 +232,38 @@ pub enum Caveat {
     /// has to be told the difference between 'the corpus holds no answer' and
     /// 'that half of it was never indexed'.
     LanesUnsearched { lanes: Vec<String> },
+
+    /// The citation reads more than one way and every reading is answered.
+    ///
+    /// Not [`Caveat::AmbiguousRendition`]: nothing is discarded here. `3:305a`
+    /// is Boek 3 artikel 305a and is also, in a law that prints the colon
+    /// itself, artikel 3:305a, and which the reader meant is theirs to say.
+    SeveralReadings { readings: Vec<String> },
+
+    /// A reading of a citation that came to nothing, and why.
+    ///
+    /// `because` is the service's own word: `not_in_corpus`,
+    /// `no_regulation_prints_it`, `no_rendition_in_force`, `withdrawn`,
+    /// `not_carried`. Four of those would otherwise render as one absence, and
+    /// a reader handed the other reading alone has to be told this one was
+    /// looked for.
+    ReadingUnresolved {
+        reading: String,
+        because: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        regulation_id: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        renditions: Vec<String>,
+    },
+
+    /// The answer is drawn from the regulations whose text the corpus holds,
+    /// and says how many that is of the ones it knows. Four held out of 25.462
+    /// known is four of an unknown number, and nothing else in an answer can
+    /// tell a caller that.
+    HeldTextOnly {
+        held_regulations: u32,
+        known_regulations: u32,
+    },
     /// An article in this answer has not commenced.
     ///
     /// The register publishes such a provision twice: once as the stub 'Dit
@@ -239,10 +292,14 @@ pub enum Caveat {
     /// over. So the text is answered and the disagreement is stated, which
     /// leaves the reader to decide what it is worth.
     ///
+    /// Neither digest travels. The comparison is the service's, made against
+    /// bytes it holds, and printing two hashes here would read as bron having
+    /// hashed something.
+    ///
     /// Distinct from [`Caveat::DigestUnverifiable`], which is the web archive's
     /// index digest. Two unrelated mechanisms, and collapsing them would make
     /// one verification story indistinguishable from the other.
-    UpstreamDigestDiffers { published: String, ours: String },
+    UpstreamDigestDiffers,
     /// The manifest published no hash for this rendition, so these bytes rest
     /// on our own capture alone.
     ///
@@ -258,12 +315,64 @@ pub enum Caveat {
         in_force_from: NaiveDate,
         first_visible: NaiveDate,
     },
-    /// The two windows resolve this date to different texts.
+    /// Renditions the publisher has withdrawn cover this date and were passed
+    /// over, whatever their windows say.
     ///
-    /// Which one governs is a question of transitional law and not one bron
-    /// answers. Both versions are named so the caller can fetch either and
-    /// decide, rather than being handed one without being told the other exists.
-    WindowsDisagree { in_force: String, as_known: String },
+    /// The reason this lane goes through the service at all. A withdrawn
+    /// rendition keeps its dates in the manifest, so it wins an ordering by
+    /// date and is still not what the register says applies; asking the
+    /// publisher for its text ends in a redirect loop, because the text is no
+    /// longer there. They are named so a reader can see which they were.
+    WithdrawnRenditions { excluded: Vec<String> },
+
+    /// More than one published rendition covers this date, which the register
+    /// does. The answer is the one that commenced last; the rest are named so a
+    /// caller can fetch either and decide.
+    AmbiguousRendition {
+        chosen: String,
+        discarded: Vec<String>,
+    },
+
+    /// The register has since revised what it shows for this date, so this is
+    /// what was believed then rather than what is believed now.
+    SupersededKnowledge { visible_until: NaiveDate },
+
+    /// The bytes beside each span are the service's word for what stands there.
+    ///
+    /// bron used to cut them out of a document whose digest it had checked, and
+    /// refused outright a span that did not fit that document. It no longer
+    /// holds the document: checking this text means fetching the blob it came
+    /// out of, and not having to is the whole reason it travels. Being handed a
+    /// slice and having cut one are different facts, and only one of them is a
+    /// proof.
+    UnverifiedSlice,
+
+    /// Articles a comparison could not place, and why.
+    ///
+    /// `unidentified_from` and `unidentified_to` count articles carrying no
+    /// `stam-id`, one count per rendition. Nothing identifies them, so whether
+    /// the one in the earlier rendition is the one in the later is exactly what
+    /// the register declined to say, and one total would read as two articles.
+    ///
+    /// `repeated` are stam-ids the register used more than once inside one
+    /// rendition, where a match would have to pick one and calling that an
+    /// identity would be a guess.
+    ///
+    /// Both are left out of the comparison and out of its counts, which is why
+    /// this has to be said: without it `law changes` answers "nothing changed"
+    /// where the answer is "this could not be compared".
+    ArticlesNotCompared {
+        unidentified_from: u32,
+        unidentified_to: u32,
+        repeated: Vec<String>,
+    },
+
+    /// The service stated a limit this bron has no name for.
+    ///
+    /// Carried rather than dropped. A limit on what an answer supports that
+    /// goes unsaid because the reader is one release behind is the failure
+    /// every caveat here exists to prevent.
+    Unrecognised { stated: String },
     /// The index recorded no digest for this capture, so the replayed bytes
     /// could not be checked against what the crawl stored. Not a failure and
     /// not a clean bill of health.
@@ -289,16 +398,177 @@ pub enum Caveat {
     MoreCaptures,
 }
 
+impl Caveat {
+    /// One limit the service stated, read into this crate's vocabulary.
+    pub fn stated(value: serde_json::Value) -> Self {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum Stated {
+            Withdrawn {
+                excluded: Vec<String>,
+            },
+            Ambiguous {
+                chosen: String,
+                discarded: Vec<String>,
+            },
+            NoZichtWindow,
+            Retroactive {
+                in_force_from: NaiveDate,
+                first_visible: NaiveDate,
+            },
+            SupersededKnowledge {
+                visible_until: NaiveDate,
+            },
+            Unverified,
+            HashDisagrees,
+            Truncated {
+                window: u32,
+            },
+            TableFlattened {
+                articles: Vec<String>,
+                cell_separator: String,
+            },
+            NotCommenced {
+                articles: Vec<String>,
+            },
+            IllustrationOmitted {
+                articles: Vec<String>,
+            },
+            LanesUnsearched {
+                lanes: Vec<String>,
+            },
+            SeveralReadings {
+                readings: Vec<String>,
+            },
+            ReadingUnresolved {
+                reading: String,
+                because: String,
+                #[serde(default)]
+                regulation_id: Option<String>,
+                #[serde(default)]
+                renditions: Vec<String>,
+            },
+            HeldTextOnly {
+                held_regulations: u32,
+                known_regulations: u32,
+            },
+        }
+
+        // Read before the value is consumed, so an unrecognised limit can still
+        // be reported by the name the service gave it.
+        let kind = value
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("a limit with no kind")
+            .to_string();
+
+        match serde_json::from_value::<Stated>(value) {
+            Ok(Stated::Withdrawn { excluded }) => Self::WithdrawnRenditions { excluded },
+            Ok(Stated::Ambiguous { chosen, discarded }) => {
+                Self::AmbiguousRendition { chosen, discarded }
+            }
+            Ok(Stated::NoZichtWindow) => Self::NoZichtWindow,
+            Ok(Stated::Retroactive {
+                in_force_from,
+                first_visible,
+            }) => Self::Retroactive {
+                in_force_from,
+                first_visible,
+            },
+            Ok(Stated::SupersededKnowledge { visible_until }) => {
+                Self::SupersededKnowledge { visible_until }
+            }
+            Ok(Stated::Unverified) => Self::UpstreamDigestAbsent,
+            Ok(Stated::HashDisagrees) => Self::UpstreamDigestDiffers,
+            Ok(Stated::Truncated { window }) => Self::Truncated { window },
+            Ok(Stated::TableFlattened {
+                articles,
+                cell_separator,
+            }) => Self::TableFlattened {
+                articles,
+                cell_separator,
+            },
+            Ok(Stated::NotCommenced { articles }) => Self::NotCommenced { articles },
+            Ok(Stated::IllustrationOmitted { articles }) => Self::IllustrationOmitted { articles },
+            Ok(Stated::LanesUnsearched { lanes }) => Self::LanesUnsearched { lanes },
+            Ok(Stated::SeveralReadings { readings }) => Self::SeveralReadings { readings },
+            Ok(Stated::ReadingUnresolved {
+                reading,
+                because,
+                regulation_id,
+                renditions,
+            }) => Self::ReadingUnresolved {
+                reading,
+                because,
+                regulation_id,
+                renditions,
+            },
+            Ok(Stated::HeldTextOnly {
+                held_regulations,
+                known_regulations,
+            }) => Self::HeldTextOnly {
+                held_regulations,
+                known_regulations,
+            },
+            Err(_) => Self::Unrecognised { stated: kind },
+        }
+    }
+}
+
 // -- documents -----------------------------------------------------------
+
+/// Who froze the bytes an answer rests on.
+///
+/// Two facts, said outright rather than left to be inferred from whether an
+/// unrelated timestamp happens to be there. What a consumer may conclude from a
+/// span differs between them: one is bron's own reading of bytes it hashed, the
+/// other is the service's word for what stands at an offset.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case", tag = "frozen_by")]
+pub enum Frozen {
+    /// bron. It fetched these bytes, filed them under the digest of themselves,
+    /// and knows when it did because it did it.
+    Bron { fetched_at: DateTime<Utc> },
+    /// The service. bron has the digest and the address and has not read a
+    /// byte: checking one means fetching the blob, and not having to is what
+    /// this shape buys.
+    ///
+    /// No moment travels with it, and none should. The service does not say
+    /// when it froze a document, deliberately: a reader who can see when
+    /// something was fetched can see what is being worked on.
+    Service,
+}
+
+impl Frozen {
+    /// Whether a slice cut from this document is a report rather than a cut
+    /// bron made. See [`Caveat::UnverifiedSlice`].
+    pub fn reports(&self) -> bool {
+        matches!(self, Self::Service)
+    }
+}
 
 /// Where a value came from, in the form a consumer can verify.
 #[derive(Debug, Clone, Serialize)]
 pub struct Provenance {
-    /// SHA-256 of the frozen document, hex.
+    /// SHA-256 of the document, hex.
     pub blob: BlobId,
     pub url: String,
     pub byte_len: usize,
-    pub fetched_at: DateTime<Utc>,
+    #[serde(flatten)]
+    pub frozen: Frozen,
+}
+
+impl Provenance {
+    /// Provenance for a document the service froze and serves, named by its
+    /// digest.
+    pub fn served(blob: BlobId, url: String, byte_len: usize) -> Self {
+        Self {
+            blob,
+            url,
+            byte_len,
+            frozen: Frozen::Service,
+        }
+    }
 }
 
 impl From<Document> for Provenance {
@@ -307,41 +577,41 @@ impl From<Document> for Provenance {
             blob: doc.blob,
             url: doc.url,
             byte_len: doc.byte_len,
-            fetched_at: doc.fetched_at,
+            frozen: Frozen::Bron {
+                fetched_at: doc.fetched_at,
+            },
         }
     }
 }
 
-/// A byte range plus the bytes themselves.
+/// Where a value sits in the frozen document, and optionally what stands there.
 ///
-/// `text` is the exact slice of the frozen document, and `rendered` is bron's
-/// reading of it. They are different strings and both are needed: a consumer
-/// verifying a quotation compares against `rendered`, and a consumer proving
-/// what the publisher actually wrote slices the blob at `start..end` and gets
-/// `text` back. Shipping only the offsets would mean a bron span could not
-/// verify a bron quote.
+/// The offsets are the answer. `blob` in the same provenance names a document
+/// whose address is the hash of its own content, so a consumer that wants to
+/// prove a quotation fetches those bytes and slices them at `start..end`.
+///
+/// `text` is that slice, sent only when `--raw` asks for it, and it is the
+/// service's word for what stands there rather than a cut bron made. bron used
+/// to take the slice itself out of a document whose digest it had checked, and
+/// refused a span that did not fit. It no longer holds that document: checking
+/// this string means fetching the blob it came out of, and not having to is
+/// exactly why it travels. [`Caveat::UnverifiedSlice`] says so on any answer
+/// that carries one.
 #[derive(Debug, Clone, Serialize)]
 pub struct Excerpt {
     pub start: u32,
     pub end: u32,
-    /// The raw slice of the source document, markup included.
-    pub text: String,
-    /// bron's rendering of that slice, which is what `content` is built from.
-    pub rendered: String,
+    /// The publisher's own bytes at this range, markup included. Absent unless
+    /// `--raw`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 impl Excerpt {
-    /// Builds an excerpt, given the document the span points into.
-    ///
-    /// Returns `None` when the span does not lie inside the document, which
-    /// means the blob is not the one the span was recorded against.
-    pub fn new(span: model::Span, rendered: &str, document: &str) -> Option<Self> {
-        Some(Self {
-            start: span.start,
-            end: span.end,
-            text: span.slice(document)?.to_string(),
-            rendered: rendered.to_string(),
-        })
+    /// Whether this excerpt carries the bytes at its range, rather than only
+    /// pointing at them.
+    pub fn quotes(&self) -> bool {
+        self.text.is_some()
     }
 }
 
@@ -377,6 +647,15 @@ impl From<model::Validity> for Window {
         Self {
             from: validity.from,
             until: validity.until,
+        }
+    }
+}
+
+impl From<crate::service::Window> for Window {
+    fn from(window: crate::service::Window) -> Self {
+        Self {
+            from: window.from,
+            until: window.until,
         }
     }
 }
@@ -520,40 +799,6 @@ pub struct Ranking {
     pub hits: Vec<Hit>,
 }
 
-impl Article {
-    /// Renders an article against the document it was parsed from.
-    pub fn new(article: model::Article, document: &str, provenance: Provenance) -> Option<Self> {
-        Some(Self {
-            law_id: article.law_id.into_string(),
-            version: article.version,
-            number: article.number,
-            label: article.label,
-            title: article.title,
-            path: article.path,
-            excerpt: Excerpt::new(article.span, &article.content, document)?,
-            content: article.content,
-            amended_by: article.amended_by.map(|p| p.into_string()),
-            effect: article.effect,
-            in_force_from: article.in_force_from,
-            jci: article.jci,
-            status: article.status,
-            leden: article
-                .leden
-                .into_iter()
-                .map(|lid| {
-                    Some(Lid {
-                        excerpt: Excerpt::new(lid.span, &lid.content, document)?,
-                        number: lid.number,
-                        content: lid.content,
-                        jci: lid.jci,
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?,
-            provenance,
-        })
-    }
-}
-
 /// What happened to one article between two versions of a law.
 ///
 /// Both sides carry their own text, digest and offsets, from two different
@@ -587,6 +832,26 @@ pub struct Side {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effect: Option<String>,
     pub provenance: Provenance,
+}
+
+impl Article {
+    /// Whether this answer carries bytes bron did not cut out of a document it
+    /// hashed. See [`Caveat::UnverifiedSlice`].
+    ///
+    /// Read off the answer rather than off the flag that asked for it: a caveat
+    /// raised from `--raw` says something about the request, and only this says
+    /// something about what is in the envelope.
+    pub fn reports_a_slice(&self) -> bool {
+        self.provenance.frozen.reports()
+            && (self.excerpt.quotes() || self.leden.iter().any(|lid| lid.excerpt.quotes()))
+    }
+}
+
+impl Side {
+    /// See [`Article::reports_a_slice`].
+    pub fn reports_a_slice(&self) -> bool {
+        self.provenance.frozen.reports() && self.excerpt.quotes()
+    }
 }
 
 /// A comparison of two versions of one law.
@@ -692,16 +957,6 @@ pub struct LawHit {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub law_type: Option<String>,
-}
-
-impl From<model::LawHit> for LawHit {
-    fn from(hit: model::LawHit) -> Self {
-        Self {
-            id: hit.id.into_string(),
-            title: hit.title,
-            law_type: hit.law_type,
-        }
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -989,29 +1244,105 @@ mod tests {
         );
     }
 
+    /// Offsets alone by default. The slice is markup, it is megabytes over a
+    /// whole law, and a consumer that wants it asks.
     #[test]
-    fn an_excerpt_carries_both_the_raw_slice_and_the_rendering() {
-        let document = "<lid><lidnr>1</lidnr><al>Eerste lid.</al></lid>";
-        let span = model::Span {
-            start: 0,
-            end: document.len() as u32,
+    fn an_excerpt_carries_its_offsets_and_nothing_else_unasked() {
+        let excerpt = Excerpt {
+            start: 7108,
+            end: 15301,
+            text: None,
         };
-        let excerpt = Excerpt::new(span, "1. Eerste lid.", document).unwrap();
+        let json = serde_json::to_string(&excerpt).unwrap();
 
-        // The consumer can verify the quote against the rendering, and prove the
-        // publisher's own bytes by slicing the blob at the same offsets.
-        assert_eq!(excerpt.rendered, "1. Eerste lid.");
-        assert_eq!(excerpt.text, document);
+        assert_eq!(json, r#"{"start":7108,"end":15301}"#);
+    }
+
+    #[test]
+    fn a_slice_that_was_asked_for_travels_beside_its_offsets() {
+        let excerpt = Excerpt {
+            start: 0,
+            end: 46,
+            text: Some("<lid><lidnr>1</lidnr><al>Eerste lid.</al></lid>".into()),
+        };
+        let json = serde_json::to_string(&excerpt).unwrap();
+
+        assert!(json.contains(r#""text":"<lid>"#), "{json}");
+    }
+
+    /// A limit the service knows about and this crate does not is carried under
+    /// the name the service gave it. Dropping it would leave a reader one
+    /// release behind unable to see that anything was said.
+    #[test]
+    fn a_limit_with_no_name_here_is_still_reported() {
+        let stated = serde_json::json!({"kind": "something_later", "detail": 3});
+
         assert_eq!(
-            &document[excerpt.start as usize..excerpt.end as usize],
-            excerpt.text
+            Caveat::stated(stated),
+            Caveat::Unrecognised {
+                stated: "something_later".into()
+            }
+        );
+    }
+
+    /// The service's two hash caveats answer different questions, and a
+    /// consumer may care about one and not the other.
+    #[test]
+    fn the_two_hash_limits_stay_apart() {
+        assert_eq!(
+            Caveat::stated(serde_json::json!({"kind": "unverified"})),
+            Caveat::UpstreamDigestAbsent
+        );
+        assert_eq!(
+            Caveat::stated(serde_json::json!({"kind": "hash_disagrees"})),
+            Caveat::UpstreamDigestDiffers
         );
     }
 
     #[test]
-    fn an_excerpt_against_the_wrong_document_is_refused() {
-        let span = model::Span { start: 0, end: 500 };
-        assert!(Excerpt::new(span, "x", "short document").is_none());
+    fn a_withdrawn_rendition_is_named_rather_than_only_counted() {
+        assert_eq!(
+            Caveat::stated(serde_json::json!({
+                "kind": "withdrawn",
+                "excluded": ["2017-07-01_0"],
+            })),
+            Caveat::WithdrawnRenditions {
+                excluded: vec!["2017-07-01_0".into()]
+            }
+        );
+    }
+
+    /// Provenance names who froze the bytes. A slice cut from a document bron
+    /// holds is bron's own reading of bytes it hashed; one beside a span the
+    /// service serves is the service's word for what stands there. Those are
+    /// different claims, and the envelope says which one an answer is making.
+    #[test]
+    fn provenance_says_who_froze_the_bytes() {
+        let served = Provenance::served(
+            BlobId::of(b"<toestand/>"),
+            "https://example.invalid/x.xml".into(),
+            11,
+        );
+        let json = serde_json::to_string(&served).unwrap();
+
+        assert!(json.contains(r#""frozen_by":"service""#), "{json}");
+        assert!(!json.contains("fetched_at"), "{json}");
+        assert!(served.frozen.reports());
+
+        let ours = Provenance::from(Document {
+            blob: BlobId::of(b"<toestand/>"),
+            url: "https://data.rechtspraak.nl/x".into(),
+            byte_len: 11,
+            fetched_at: "2026-08-20T09:00:00Z".parse().unwrap(),
+        });
+        let json = serde_json::to_string(&ours).unwrap();
+
+        assert!(json.contains(r#""frozen_by":"bron""#), "{json}");
+        assert!(
+            json.contains(r#""fetched_at":"2026-08-20T09:00:00Z""#),
+            "{json}"
+        );
+        assert!(!ours.frozen.reports());
     }
 
     #[test]
