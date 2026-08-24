@@ -26,6 +26,12 @@ jobs:
 
       - run: cargo clippy --all-targets -- -D warnings
 
+      # A doc link to a module that no longer exists is a build error nowhere
+      # else, so rustdoc runs with broken intra-doc links promoted to errors.
+      - run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
+
       # The default feature set only. `live-tests` hits the real Internet
       # Archive, so it belongs on a manual or nightly trigger and never on a
       # run that a pull request can fire at will.
