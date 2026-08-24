@@ -122,6 +122,9 @@ impl Bucket {
     ///
     /// An empty key means the host is its own budget, which is the ordinary
     /// case and keeps the filename for every unmeasured host exactly as it was.
+    ///
+    /// `dir` must already exist: whoever owns the directory creates it once,
+    /// so that a bucket does not re-check it on every wakeup of its wait loop.
     pub fn new(dir: &Path, host: &str, policy: Policy) -> Self {
         let BucketKey(key) = policy.key;
         let key = if key.is_empty() { host } else { key };
@@ -217,10 +220,6 @@ impl Bucket {
     }
 
     fn open(&self) -> Result<File> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("cannot create {}", parent.display()))?;
-        }
         let file = OpenOptions::new()
             .read(true)
             .write(true)

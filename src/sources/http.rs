@@ -127,22 +127,25 @@ pub struct Client {
 
 impl Client {
     pub fn new() -> Result<Self> {
-        Ok(Self {
-            inner: build(reqwest::redirect::Policy::default())?,
-            no_redirect: build(reqwest::redirect::Policy::none())?,
-            buckets: paths::bucket_dir().context(OwnDoing(
-                "bron has nowhere to keep its share of the rate-limit budget",
-            ))?,
-            on_wait: None,
-        })
+        Self::with_buckets(paths::bucket_dir().context(OwnDoing(
+            "bron has nowhere to keep its share of the rate-limit budget",
+        ))?)
     }
 
-    /// A client whose rate-limit buckets land somewhere specific. For tests.
+    /// A client whose rate-limit buckets land somewhere specific. `new` points
+    /// it at the machine's shared budget; tests point it at a tempdir.
+    ///
+    /// The directory is created here, once, so that acquiring a bucket does not
+    /// re-check it on every wakeup of its wait loop.
     pub fn with_buckets(buckets: impl Into<PathBuf>) -> Result<Self> {
+        let buckets = buckets.into();
+        std::fs::create_dir_all(&buckets)
+            .with_context(|| format!("cannot create {}", buckets.display()))
+            .context(BUDGET)?;
         Ok(Self {
             inner: build(reqwest::redirect::Policy::default())?,
             no_redirect: build(reqwest::redirect::Policy::none())?,
-            buckets: buckets.into(),
+            buckets,
             on_wait: None,
         })
     }
