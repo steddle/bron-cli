@@ -327,20 +327,34 @@ pub fn newest_capture(
     url: &str,
     on: Option<NaiveDate>,
 ) -> Result<Option<IndexRow>> {
-    let mut request = client.get(INDEX_ENDPOINT).query(&[
-        ("url", url),
-        ("output", "json"),
-        ("fl", &INDEX_FIELDS.join(",")),
-        ("matchType", MatchType::Exact.as_str()),
-        // Negative counts back from the newest, which is the whole trick.
-        ("limit", "-1"),
-    ]);
+    let request = client.get(INDEX_ENDPOINT).query(&newest_query(url, on));
+
+    Ok(parse_index(&client.read(request)?.text)?.rows.pop())
+}
+
+/// Exactly what a newest-capture request asks the index for.
+///
+/// `--as-of` is arithmetic the archive does, not bron: `limit=-1` counts back
+/// from the newest row and `to` bounds the search at the last second of the
+/// day, so one request returns the newest capture at or before that date. Its
+/// own function so those two can be read on their own, because nothing else in
+/// this crate would notice if either stopped going out: a missing `to` answers
+/// with today's page for a 2016 question, and a missing `limit` answers with
+/// the oldest capture instead of the newest. Both look like an answer.
+fn newest_query(url: &str, on: Option<NaiveDate>) -> Vec<(&'static str, String)> {
+    let mut query = vec![
+        ("url", url.to_string()),
+        ("output", "json".to_string()),
+        ("fl", INDEX_FIELDS.join(",")),
+        ("matchType", MatchType::Exact.as_str().to_string()),
+        ("limit", "-1".to_string()),
+    ];
 
     if let Some(on) = on {
-        request = request.query(&[("to", on.format("%Y%m%d235959").to_string())]);
+        query.push(("to", on.format("%Y%m%d235959").to_string()));
     }
 
-    Ok(parse_index(&client.fetch(request)?.text)?.rows.pop())
+    query
 }
 
 /// Whether a capture the archive has just reported is one bron caused.
@@ -391,7 +405,7 @@ pub fn captures(client: &Client, url: &str, query: &IndexQuery) -> Result<Captur
             request = request.query(&[("resumeKey", key)]);
         }
 
-        let fetched = client.fetch(request)?;
+        let fetched = client.read(request)?;
         let index = parse_index(&fetched.text)?;
 
         rows.extend(index.rows);
@@ -660,7 +674,7 @@ fn fetch_replay(client: &Client, row: &IndexRow) -> Result<ReplayBytes> {
     // taking it lands on a different capture whose bytes cannot match the
     // digest recorded for this one.
     Ok(ReplayBytes {
-        fetched: client.fetch_bytes_unredirected(client.get(&url))?,
+        fetched: client.read_bytes_unredirected(client.get(&url))?,
     })
 }
 
@@ -1047,7 +1061,7 @@ pub fn submit(client: &Client, credentials: &Credentials, request: &SaveRequest)
         form.push(("capture_screenshot".to_string(), "1".to_string()));
     }
 
-    let fetched = client.fetch(
+    let fetched = client.read(
         client
             .post(SAVE_ENDPOINT)
             .header("Authorization", credentials.header())
@@ -1060,7 +1074,7 @@ pub fn submit(client: &Client, credentials: &Credentials, request: &SaveRequest)
 
 /// Asks how a job is getting on.
 pub fn job_status(client: &Client, credentials: &Credentials, job: &str) -> Result<SaveStatus> {
-    let fetched = client.fetch(
+    let fetched = client.read(
         client
             .get(&format!("{STATUS_ENDPOINT}/{job}"))
             .header("Authorization", credentials.header())
@@ -1786,4 +1800,40 @@ mod tests {
             Poll::Done(_)
         ));
     }
+    /// `--as-of` on a capture is arithmetic the archive does, and these two
+    /// parameters are the whole of the instruction. Nothing else in this crate
+    /// would notice if either stopped going out: without `to` the index answers
+    /// a 2016 question with today's page, and without `limit` it answers with
+    /// the oldest capture rather than the newest. Both look like an answer.
+    #[test]
+    fn the_newest_capture_on_a_date_is_asked_for_by_bounding_and_counting_back() {
+        let asked = newest_query("https://steddle.com/pricing", Some("2024-06-01".parse().unwrap()));
+
+        assert!(asked.contains(&("limit", "-1".to_string())), "{asked:?}");
+        assert!(
+            asked.contains(&("to", "20240601235959".to_string())),
+            "the bound is the last second of the day, so a capture taken that \
+             day still counts: {asked:?}"
+        );
+
+        // Encoded the way it actually leaves, so a change in how the pairs are
+        // joined shows up here rather than against the archive.
+        let url = reqwest::Url::parse_with_params(INDEX_ENDPOINT, &asked).unwrap();
+        let query = url.query().expect("a query");
+        assert!(query.contains("limit=-1"), "{query}");
+        assert!(query.contains("to=20240601235959"), "{query}");
+        assert!(query.contains("matchType=exact"), "{query}");
+    }
+
+    /// Without a date there is no bound, and the newest capture there is is the
+    /// answer. Sending `to` for today would quietly exclude one taken later
+    /// today.
+    #[test]
+    fn the_newest_capture_of_all_is_asked_for_without_a_bound() {
+        let asked = newest_query("https://steddle.com/pricing", None);
+
+        assert!(asked.contains(&("limit", "-1".to_string())), "{asked:?}");
+        assert!(!asked.iter().any(|(key, _)| *key == "to"), "{asked:?}");
+    }
+
 }

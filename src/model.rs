@@ -213,24 +213,23 @@ impl Direction {
 
 /// What the register can honestly say about whether a decision was appealed.
 ///
-/// Deliberately three-valued. Rechtspraak records appeal relations in both
-/// directions, so a forward link missing from an indexed decision is evidence.
-/// It is not proof of no appeal: an appeal that settled, was withdrawn, or ended
-/// in an unpublished decision leaves no trace here. Collapsing this to a boolean
-/// is how a corpus comes to assert that none of its judgments were appealed.
-/// A negative also carries the date it was true on. It is a claim about what
-/// bron holds, and what bron holds went stale the moment it was written: a
-/// decision fetched a year ago yields a negative indistinguishable from one
-/// fetched this morning unless the answer says when it was looked at.
+/// Never a boolean. Rechtspraak records appeal relations in both directions, so
+/// a forward link missing from a decision it publishes is evidence. It is not
+/// proof of no appeal: an appeal that settled, was withdrawn, or ended in an
+/// unpublished decision leaves no trace here. Collapsing this to `true` and
+/// `false` is how a tool comes to assert that none of these judgments were
+/// appealed.
+///
+/// A negative also carries the moment it was true at. It is a claim about what
+/// the register held when bron read the decision, and it began going stale as
+/// it was made: a decision read a year ago yields a negative indistinguishable
+/// from one read this morning unless the answer says when it was looked at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppealStatus {
     /// A later decision exists and is published.
     Appealed { successors: Vec<Ecli> },
-    /// The decision is held and carries no forward link, as of the moment its
-    /// record was last fetched.
+    /// The decision carries no forward link, as of the moment bron read it.
     NoPublishedSuccessor { as_of: DateTime<Utc> },
-    /// The decision is not held, so nothing can be said.
-    Unknown,
 }
 
 /// A parliamentary or official publication.

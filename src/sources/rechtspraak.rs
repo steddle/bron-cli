@@ -114,7 +114,7 @@ pub fn search(client: &Client, query: &Query) -> Result<SearchResults> {
         "CorrelationId": CORRELATION_ID,
     });
 
-    let fetched = client.fetch(
+    let fetched = client.read(
         client
             .post(SEARCH_ENDPOINT)
             .header("Origin", "https://uitspraken.rechtspraak.nl")
@@ -176,7 +176,7 @@ pub fn search(client: &Client, query: &Query) -> Result<SearchResults> {
 /// Fetches one decision by ECLI.
 pub fn fetch(client: &Client, ecli: &Ecli) -> Result<FetchedCase> {
     let fetched = client
-        .fetch(client.get(CONTENT_ENDPOINT).query(&[("id", ecli.as_str())]))
+        .read(client.get(CONTENT_ENDPOINT).query(&[("id", ecli.as_str())]))
         .with_context(|| format!("cannot fetch {ecli}"))?;
 
     parse(Source::from(&fetched), ecli)

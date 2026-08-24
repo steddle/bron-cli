@@ -347,7 +347,7 @@ async fn a_replay_fetch_stops_at_a_redirect_instead_of_taking_it() {
 
     let stopped = off_thread(&home, move |client| {
         client
-            .fetch_bytes_unredirected(client.get(&url))
+            .read_bytes_unredirected(client.get(&url))
             .map(|r| r.bytes)
             .ok()
     })
@@ -394,4 +394,58 @@ async fn a_host_that_refuses_the_connection_still_slows_every_caller() {
         ahead > 25_000,
         "a refused connection must pause the run, got {ahead}ms"
     );
+}
+
+/// A lane that fetches, parses, renders and is done keeps no copy. The digest
+/// is the same either way and is what travels with the answer; a second copy
+/// on disk would be a file per invocation in a store that is deliberately never
+/// evicted, that no ledger row names and that nothing here can read back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hashed_read_names_its_bytes_without_keeping_them() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/decision"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<uitspraak/>"))
+        .mount(&server)
+        .await;
+
+    let home = Home::new();
+    let url = format!("{}/decision", server.uri());
+    let blobs = home.blobs.clone();
+
+    let (digest, held) = off_thread(&home, move |client| {
+        let fetched = client.read_url(&url).expect("the publisher answered");
+        let held = BlobStore::new(&blobs).contains(&fetched.blob);
+        (fetched.blob, held)
+    })
+    .await;
+
+    // The digest is the one the bytes would have been filed under.
+    assert_eq!(digest, BlobId::of(b"<uitspraak/>"));
+    assert!(!held, "a hashed read wrote a blob nothing will come back for");
+}
+
+/// The one lane that keeps them. `update` writes a ledger row naming this
+/// digest and stores articles whose spans point into these bytes, so the file
+/// has both an index and a reader.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_frozen_fetch_keeps_what_something_will_come_back_for() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/toestand"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<toestand/>"))
+        .mount(&server)
+        .await;
+
+    let home = Home::new();
+    let url = format!("{}/toestand", server.uri());
+    let blobs = home.blobs.clone();
+
+    let held = off_thread(&home, move |client| {
+        let fetched = client.fetch_url(&url).expect("the publisher answered");
+        BlobStore::new(&blobs).contains(&fetched.blob)
+    })
+    .await;
+
+    assert!(held, "the corpus lane must keep the bytes its spans point into");
 }

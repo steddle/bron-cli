@@ -7,7 +7,7 @@
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
 use bron::blob::BlobStore;
@@ -36,6 +36,7 @@ pub enum Answer {
     Case(Envelope<Box<wire::Case>>),
     Appeal(Envelope<wire::AppealStatus>),
     PublicationHits(Envelope<Vec<wire::PublicationHit>>),
+    Publication(Envelope<Box<wire::Publication>>),
     CaptureHits(Envelope<Vec<wire::CaptureHit>>),
     Capture(Box<Envelope<Box<wire::Capture>>>),
     Updated(Envelope<Vec<Updated>>),
@@ -77,6 +78,7 @@ impl Answer {
             Self::Case(e) => write(out, e),
             Self::Appeal(e) => write(out, e),
             Self::PublicationHits(e) => write(out, e),
+            Self::Publication(e) => write(out, e),
             Self::CaptureHits(e) => write(out, e),
             Self::Capture(e) => write(out, e),
             Self::Updated(e) => write(out, e),
@@ -748,6 +750,45 @@ fn run_law(
 
 // -- rechtspraak ---------------------------------------------------------
 
+/// One decision, and the moment bron read it.
+///
+/// Fetched every time. There is no corpus in front of this any more, and there
+/// was never much point to one: a decision is immutable once published, so the
+/// only thing a stored copy saved was a request, and the only thing it cost was
+/// a store that had to be kept, verified and migrated.
+///
+/// The moment is bron's own and is stamped once, because it is what an answer
+/// about the absence of a successor is dated to and two reads of the clock
+/// would date two halves of one answer differently.
+fn decision(ecli: &Ecli, quiet: bool) -> Outcome<(bron::sources::FetchedCase, DateTime<Utc>)> {
+    let client = client(quiet)?;
+    let fetched = rechtspraak::fetch(&client, ecli).map_err(|e| from_source("rechtspraak", e))?;
+
+    Ok((fetched, Utc::now()))
+}
+
+/// What the decision's own relations can say about appeal or cassation.
+///
+/// Read off the document rather than out of a corpus, because that is where
+/// upstream states them. Dated to when bron looked, because
+/// `no_published_successor` is a claim about what the register held at that
+/// moment and it began going stale as it was made.
+fn appeal(relations: &[bron::model::Relation], read_at: DateTime<Utc>) -> bron::model::AppealStatus {
+    use bron::model::{AppealStatus, Direction};
+
+    let successors: Vec<Ecli> = relations
+        .iter()
+        .filter(|relation| relation.direction == Direction::Later)
+        .map(|relation| relation.target.clone())
+        .collect();
+
+    if successors.is_empty() {
+        AppealStatus::NoPublishedSuccessor { as_of: read_at }
+    } else {
+        AppealStatus::Appealed { successors }
+    }
+}
+
 fn run_case(case_cmd: &Case, quiet: bool) -> Outcome<Answer> {
     match case_cmd {
         Case::Search {
@@ -781,46 +822,29 @@ fn run_case(case_cmd: &Case, quiet: bool) -> Outcome<Answer> {
 
         Case::Show { ecli } => {
             let ecli: Ecli = parse_id(ecli)?;
-            let mut db = open_db()?;
-
-            if db.case(&ecli).map_err(from_corpus)?.is_none() {
-                let client = client(quiet)?;
-                let fetched = rechtspraak::fetch(&client, &ecli)
-                    .map_err(|e| from_source("rechtspraak", e))?;
-                let tx = db.transaction().map_err(from_corpus)?;
-                db::put_case(&tx, &fetched, Utc::now()).map_err(from_corpus)?;
-                tx.commit().map_err(|e| from_corpus(e.into()))?;
-            }
-
-            let case = db
-                .case(&ecli)
-                .map_err(from_corpus)?
-                .ok_or_else(|| Fault::not_found("decision", &ecli))?;
-            let appeal = db.appeal_status(&ecli).map_err(from_corpus)?;
-            let provenance = provenance_of(&db, case.blob)?;
+            let (decision, read_at) = decision(&ecli, quiet)?;
 
             Ok(Answer::Case(Envelope::ok(Box::new(wire::Case {
-                ecli: case.id.into_string(),
-                court: case.court,
-                decided_on: case.decided_on,
-                published_on: case.published_on,
-                procedure_type: case.procedure_type,
-                summary: case.summary,
-                full_text: case.full_text,
-                relations: case.relations.into_iter().map(Into::into).collect(),
-                appeal: appeal.into(),
-                provenance,
+                ecli: decision.id.into_string(),
+                court: decision.court,
+                decided_on: decision.decided_on,
+                published_on: decision.published_on,
+                procedure_type: decision.procedure_type,
+                summary: decision.summary,
+                full_text: decision.full_text,
+                appeal: appeal(&decision.relations, read_at).into(),
+                relations: decision.relations.into_iter().map(Into::into).collect(),
+                provenance: wire::Provenance::frozen(&decision.provenance, read_at),
             }))))
         }
 
         Case::Appeal { ecli } => {
             let ecli: Ecli = parse_id(ecli)?;
-            let db = open_db()?;
-            let status = db.appeal_status(&ecli).map_err(from_corpus)?;
+            let (decision, read_at) = decision(&ecli, quiet)?;
 
-            // Unknown means the corpus has never seen it, which is a real
-            // answer rather than a miss: fetch it first to get a better one.
-            Ok(Answer::Appeal(Envelope::ok(status.into())))
+            Ok(Answer::Appeal(Envelope::ok(
+                appeal(&decision.relations, read_at).into(),
+            )))
         }
     }
 }
@@ -854,30 +878,30 @@ fn run_publication(cmd: &Publication, quiet: bool) -> Outcome<Answer> {
 
         Publication::Show { id } => {
             let id: PublicationId = parse_id(id)?;
-            let mut db = open_db()?;
+            let client = client(quiet)?;
+            let doc = publications::fetch(&client, &id)
+                .map_err(|e| from_source("officiële bekendmakingen", e))?;
+            let read_at = Utc::now();
 
-            if db.publication(&id).map_err(from_corpus)?.is_none() {
-                let client = client(quiet)?;
-                let fetched = publications::fetch(&client, &id)
-                    .map_err(|e| from_source("officiële bekendmakingen", e))?;
-                let tx = db.transaction().map_err(from_corpus)?;
-                db::put_publication(&tx, &fetched, Utc::now()).map_err(from_corpus)?;
-                tx.commit().map_err(|e| from_corpus(e.into()))?;
-            }
+            // Not every record links a body, and the answer says which it is.
+            // A digest is the whole of how this lane can be checked, so its
+            // absence is a fact to state rather than a key to leave out.
+            let body = match &doc.provenance {
+                Some(source) => wire::Body::Linked {
+                    provenance: wire::Provenance::frozen(source, read_at),
+                },
+                None => wire::Body::Absent,
+            };
 
-            let doc = db
-                .publication(&id)
-                .map_err(from_corpus)?
-                .ok_or_else(|| Fault::not_found("publication", &id))?;
-
-            Ok(Answer::PublicationHits(Envelope::ok(vec![
-                wire::PublicationHit {
+            Ok(Answer::Publication(Envelope::ok(Box::new(
+                wire::Publication {
                     id: doc.id.into_string(),
                     title: doc.title,
                     dossier: doc.dossier,
                     published_on: doc.published_on,
+                    body,
                 },
-            ])))
+            ))))
         }
     }
 }
@@ -989,6 +1013,8 @@ fn run_verify() -> Outcome<Answer> {
     }
 
     let verification = wire::Verification {
+        // The one thing that keeps bytes. See `Verification::scope`.
+        scope: "corpus",
         documents: documents.len() as u32,
         intact: (documents.len() - missing.len() - corrupt.len()) as u32,
         missing,
@@ -1092,40 +1118,23 @@ fn run_archive(command: &Archive, today: NaiveDate, quiet: bool) -> Outcome<Answ
 
         Archive::Show { url, as_of } => {
             let on = as_of.unwrap_or(today);
-            let mut db = open_db()?;
             let client = client(quiet)?;
 
-            // The index decides which capture answers the question; the corpus
-            // only ever saves the fetch of its bytes. Asking the corpus first
-            // would answer "the page in 2025" with whatever happens to be held,
-            // which for a corpus holding one 2016 capture is a nine-year-old
-            // page returned in ten milliseconds with nothing to say so.
+            // The index decides which capture answers the question, and only
+            // then are its bytes read. Asking a store first would answer "the
+            // page in 2025" with whatever happens to be held, which for one
+            // 2016 capture is a nine-year-old page returned in ten
+            // milliseconds with nothing to say so.
             let row = wayback::capture_on(&client, url, on)
                 .map_err(|e| from_source(ARCHIVE, e))?
                 .ok_or_else(|| Fault::not_found("capture", format!("{url} on or before {on}")))?;
 
-            let urlkey = wayback::urlkey_of(url).map_err(|e| Fault::usage(e.to_string()))?;
-            let held = db
-                .capture_at(&urlkey, on)
-                .map_err(from_corpus)?
-                .filter(|capture| capture.id == row.id && capture.content.is_some());
+            let fetched =
+                wayback::fetch_capture(&client, &row).map_err(|e| from_source(ARCHIVE, e))?;
 
-            let capture = match held {
-                Some(capture) => capture,
-                None => {
-                    let fetched = wayback::fetch_capture(&client, &row)
-                        .map_err(|e| from_source(ARCHIVE, e))?;
-
-                    let tx = db.transaction().map_err(from_corpus)?;
-                    db::put_capture(&tx, &fetched, false, Utc::now()).map_err(from_corpus)?;
-                    tx.commit().map_err(|e| from_corpus(e.into()))?;
-
-                    db.capture_at(&urlkey, on)
-                        .map_err(from_corpus)?
-                        .ok_or_else(|| Fault::not_found("capture", url))?
-                }
-            };
-
+            // Not one bron caused. This command reads the index and fetches
+            // what it names; it never asks the archive to make anything.
+            let capture = read_capture(fetched, false, Utc::now());
             let caveats = capture_caveats(&capture);
             let bound = capture.captured_at.date_naive();
 
@@ -1207,25 +1216,14 @@ fn run_archive(command: &Archive, today: NaiveDate, quiet: bool) -> Outcome<Answ
                     )
                 })?;
 
+            // Whether bron caused this one, decided against what the archive
+            // held before it was asked. A job id proves nothing: the archive
+            // answers a resubmit with the job of the capture it already had.
             let fresh = wayback::caused_by_bron(newest_before.as_ref(), &stamp);
             let fetched =
                 wayback::fetch_capture(&client, row).map_err(|e| from_source(ARCHIVE, e))?;
 
-            let mut db = open_db()?;
-            let tx = db.transaction().map_err(from_corpus)?;
-            db::put_capture(&tx, &fetched, fresh, Utc::now()).map_err(from_corpus)?;
-            tx.commit().map_err(|e| from_corpus(e.into()))?;
-
-            let urlkey = wayback::urlkey_of(url).map_err(|e| Fault::usage(e.to_string()))?;
-            let capture = db
-                .capture_at(&urlkey, stamp.date())
-                .map_err(from_corpus)?
-                .ok_or_else(|| Fault::not_found("capture", url))?;
-
-            // `fresh` decides whether this capture is recorded as one bron
-            // caused. When the archive answered with a job for a capture it
-            // already held, it is not, and `capture_caveats` reads that back
-            // off the stored row rather than off what was asked for.
+            let capture = read_capture(fetched, fresh, Utc::now());
             let caveats = capture_caveats(&capture);
             let bound = capture.captured_at.date_naive();
 
@@ -1273,6 +1271,58 @@ fn poll(
     }
 
     unreachable!("next() bounds both attempts and elapsed time")
+}
+
+/// One capture, as bron read it.
+///
+/// `requested` is the caller's own knowledge and cannot be read off the
+/// capture: only the command that asked the archive to make one knows that it
+/// did, and it knows by comparing what the index held before against what came
+/// back. See [`wayback::caused_by_bron`].
+fn read_capture(
+    fetched: bron::sources::FetchedCapture,
+    requested: bool,
+    read_at: DateTime<Utc>,
+) -> bron::model::Capture {
+    use bron::model::DigestCheck;
+    use wayback::{Reading, Verified};
+
+    let (content, encoding, encoding_from) = match fetched.reading {
+        Reading::Text {
+            text,
+            encoding,
+            declared,
+            ..
+        } => (
+            Some(text),
+            Some(encoding.to_string()),
+            Some(format!("{declared:?}").to_lowercase()),
+        ),
+        // A capture of a PDF is evidence as bytes and a digest; running a text
+        // extractor over it would invent a document.
+        Reading::Binary => (None, None, None),
+    };
+
+    bron::model::Capture {
+        captured_at: fetched.id.captured_at(),
+        id: fetched.id,
+        original_url: fetched.original,
+        archive_status: fetched.status.code(),
+        index_digest: fetched.digest,
+        verified: Some(match fetched.verified {
+            Verified::Matches => DigestCheck::Matches,
+            Verified::Differs => DigestCheck::Differs,
+            Verified::Absent => DigestCheck::Absent,
+        }),
+        is_revisit: fetched.is_revisit,
+        mime_type: fetched.mime_type,
+        encoding,
+        encoding_from,
+        requested,
+        content,
+        blob: Some(fetched.provenance.blob),
+        fetched_at: read_at,
+    }
 }
 
 /// What limits what may be concluded from one capture.
@@ -1331,13 +1381,6 @@ fn client(quiet: bool) -> Outcome<Client> {
         // A sweep that pauses must say so rather than look hung.
         eprintln!("bron: waiting {:.1}s for {host}", waited.as_secs_f32());
     }))
-}
-
-fn provenance_of(db: &Db, blob: bron::blob::BlobId) -> Outcome<wire::Provenance> {
-    db.document(&blob)
-        .map_err(from_corpus)?
-        .map(wire::Provenance::from)
-        .ok_or_else(|| Fault::Corpus(anyhow::anyhow!("no ledger entry for document {blob}")))
 }
 
 #[cfg(test)]
@@ -1564,5 +1607,188 @@ mod narrow_tests {
         let narrowed = narrow(vec![items()], Some("2"), Some("b")).unwrap();
 
         assert_eq!(narrowed[0].leden[0].excerpt.end, before);
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::{appeal, capture_caveats, read_capture};
+    use bron::blob::BlobId;
+    use bron::ids::CaptureId;
+    use bron::model::{AppealStatus, Captured, DigestCheck, Direction, Relation};
+    use bron::sources::{FetchedCapture, Provenance, wayback};
+    use bron::wire::Caveat;
+    use chrono::{DateTime, Utc};
+
+    fn read_at() -> DateTime<Utc> {
+        "2026-08-24T09:00:00Z".parse().unwrap()
+    }
+
+    fn fetched(timestamp: &str, status: wayback::ArchiveStatus, body: &[u8]) -> FetchedCapture {
+        // The key is the archive's, taken from the index row, so a fixture
+        // writes one out rather than deriving one and calling it the same thing.
+        let id = CaptureId::new(timestamp.parse().unwrap(), "com,steddle)/pricing".to_string());
+
+        FetchedCapture {
+            id,
+            original: "https://steddle.com/pricing".to_string(),
+            status,
+            digest: Some(wayback::digest_of(body)),
+            verified: wayback::Verified::Matches,
+            is_revisit: false,
+            mime_type: Some("text/html".to_string()),
+            content_type: Some("text/html; charset=utf-8".to_string()),
+            reading: wayback::Reading::Text {
+                decompressed: false,
+                text: String::from_utf8_lossy(body).into_owned(),
+                encoding: "UTF-8",
+                declared: wayback::Declared::Header,
+                lossy: false,
+            },
+            provenance: Provenance {
+                blob: BlobId::of(body),
+                url: "https://web.archive.org/web/x/y".to_string(),
+                byte_len: body.len(),
+            },
+        }
+    }
+
+    /// The capture is from January and it was read in August. An answer bound
+    /// to the read date would date a 2024 page to today.
+    #[test]
+    fn a_capture_keeps_the_date_it_was_taken_apart_from_the_date_it_was_read() {
+        let capture = read_capture(
+            fetched("20240101120000", wayback::ArchiveStatus::Answered(200), b"old"),
+            false,
+            read_at(),
+        );
+
+        assert_eq!(
+            capture.captured_at.date_naive(),
+            "2024-01-01".parse::<chrono::NaiveDate>().unwrap()
+        );
+        assert_eq!(capture.fetched_at, read_at());
+    }
+
+    /// Not `No`: there is a capture and the archive will not say what it got.
+    #[test]
+    fn a_withheld_status_reads_as_unknown_rather_than_as_no() {
+        let capture = read_capture(
+            fetched("20240101120000", wayback::ArchiveStatus::Unknown, b"body"),
+            false,
+            read_at(),
+        );
+
+        assert_eq!(capture.archive_status, None);
+        assert_eq!(capture.captured_the_page(), Captured::Unknown);
+        assert!(capture_caveats(&capture).contains(&Caveat::ArchiveStatusUnknown));
+    }
+
+    /// A capture of a 404 is a faithful capture of an error page, and citing it
+    /// as the page is the mistake this distinction exists to prevent.
+    #[test]
+    fn a_captured_error_page_reads_as_not_the_page() {
+        let capture = read_capture(
+            fetched("20240101120000", wayback::ArchiveStatus::Answered(404), b"404"),
+            false,
+            read_at(),
+        );
+
+        assert_eq!(capture.archive_status, Some(404));
+        assert_eq!(capture.captured_the_page(), Captured::No);
+    }
+
+    /// Two different answers, kept apart. Only a match is positive evidence,
+    /// and an index that recorded no digest is not a clean bill of health.
+    #[test]
+    fn a_capture_with_no_index_digest_is_not_read_as_a_verified_one() {
+        let mut old = fetched("20040101120000", wayback::ArchiveStatus::Answered(200), b"ancient");
+        old.digest = None;
+        old.verified = wayback::Verified::Absent;
+
+        let capture = read_capture(old, false, read_at());
+
+        assert_eq!(capture.verified, Some(DigestCheck::Absent));
+        assert_ne!(capture.verified, Some(DigestCheck::Matches));
+        assert!(capture_caveats(&capture).contains(&Caveat::DigestUnverifiable));
+    }
+
+    /// A tool that can cause the evidence it then cites says which happened.
+    /// Only the command that asked the archive to make a capture knows that it
+    /// did, so this is the caller's own knowledge and not the capture's.
+    #[test]
+    fn a_capture_bron_asked_for_says_so() {
+        let row = || fetched("20240101120000", wayback::ArchiveStatus::Answered(200), b"x");
+
+        let found = read_capture(row(), false, read_at());
+        assert!(!found.requested);
+        assert!(!capture_caveats(&found).contains(&Caveat::RequestedByBron));
+
+        let caused = read_capture(row(), true, read_at());
+        assert!(caused.requested);
+        assert!(capture_caveats(&caused).contains(&Caveat::RequestedByBron));
+    }
+
+    /// Not text at all. A capture of a PDF is evidence as bytes and a digest;
+    /// running a text extractor over it would invent a document.
+    #[test]
+    fn a_capture_that_is_not_text_carries_bytes_and_a_digest_and_no_content() {
+        let mut binary = fetched("20240101120000", wayback::ArchiveStatus::Answered(200), b"%PDF");
+        binary.reading = wayback::Reading::Binary;
+        binary.mime_type = Some("application/pdf".into());
+
+        let capture = read_capture(binary, false, read_at());
+
+        assert!(capture.content.is_none());
+        assert!(capture.encoding.is_none());
+        assert!(capture.blob.is_some());
+    }
+
+    fn relation(target: &str, direction: Direction) -> Relation {
+        Relation {
+            target: target.parse().unwrap(),
+            kind: Some("cassatie".into()),
+            direction,
+        }
+    }
+
+    /// A forward link is the appeal. Read off the decision's own relations,
+    /// which is where upstream states them.
+    #[test]
+    fn a_forward_relation_is_an_appeal() {
+        let status = appeal(
+            &[relation("ECLI:NL:HR:2016:2326", Direction::Later)],
+            read_at(),
+        );
+
+        assert_eq!(
+            status,
+            AppealStatus::Appealed {
+                successors: vec!["ECLI:NL:HR:2016:2326".parse().unwrap()],
+            }
+        );
+    }
+
+    /// A cassation decision points back at the hof. That says something was
+    /// appealed *to* it, not that it was itself appealed.
+    #[test]
+    fn a_backward_relation_alone_is_not_an_appeal() {
+        let status = appeal(
+            &[relation("ECLI:NL:GHARL:2015:10068", Direction::Earlier)],
+            read_at(),
+        );
+
+        assert!(matches!(status, AppealStatus::NoPublishedSuccessor { .. }));
+    }
+
+    /// The strongest true claim available, and deliberately not "was not
+    /// appealed". It is dated to when bron looked, because it began going stale
+    /// as it was made.
+    #[test]
+    fn no_forward_relation_is_dated_to_the_moment_bron_looked() {
+        assert_eq!(
+            appeal(&[], read_at()),
+            AppealStatus::NoPublishedSuccessor { as_of: read_at() }
+        );
     }
 }

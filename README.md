@@ -128,10 +128,10 @@ Answers from the service are read and not kept. Nothing points into one, and wha
 - Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date, and renditions the publisher has withdrawn named rather than quietly served.
 - Content-addressed storage. Each document is held under the SHA-256 of its own bytes, and every article and lid carries a byte range back into it.
 - Amendment diffs. `bron law changes` matches articles on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
-- A three-valued appeal answer. `appealed`, `no_published_successor` and `unknown` stay distinct, because 'nothing published' is a claim about the register and not about whether an appeal was brought.
+- An appeal answer that is never a boolean. `no_published_successor` is dated to the moment bron read the decision, because 'nothing published' is a claim about what the register held then and not about whether an appeal was brought.
 - Web archive access for pages no publisher keeps, graded apart from primary sources. Digest checking is three-valued too: only a match is positive evidence, because the index hashes the stored payload and the replay strips its chunk framing.
 - Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers instead of each pacing itself perfectly and together going three times too fast.
-- `bron verify` re-hashes every frozen document against its own name.
+- `bron verify` re-hashes every document the corpus holds against its own name, and says that is what it covers.
 
 ## Documentation
 

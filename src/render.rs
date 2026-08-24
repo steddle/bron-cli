@@ -6,7 +6,7 @@
 
 use std::io::{self, Write};
 
-use bron::wire::{AppealStatus, Caveat, DigestCheck, Envelope, Found, View, Window};
+use bron::wire::{AppealStatus, Body, Caveat, DigestCheck, Envelope, Found, View, Window};
 
 use crate::run::Answer;
 
@@ -254,6 +254,30 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
             caveats(e.caveats.as_slice(), out)
         }
 
+        Answer::Publication(e) => {
+            let Some(doc) = &e.data else { return Ok(()) };
+
+            writeln!(out, "{}  {}", doc.id, doc.title.as_deref().unwrap_or(""))?;
+            if let Some(dossier) = &doc.dossier {
+                writeln!(out, "  dossier {dossier}")?;
+            }
+
+            match &doc.body {
+                Body::Linked { provenance } => {
+                    writeln!(out, "source: {}", provenance.blob)?;
+                    writeln!(out, "{}", provenance.url)?;
+                }
+                // Said in words. Silence here reads as a digest that went
+                // missing rather than one the register never had.
+                Body::Absent => writeln!(
+                    out,
+                    "the register links no document for this record, so there is nothing to hash"
+                )?,
+            }
+
+            caveats(e.caveats.as_slice(), out)
+        }
+
         Answer::PublicationHits(e) => {
             for hit in data(e) {
                 writeln!(out, "{}  {}", hit.id, hit.title.as_deref().unwrap_or(""))?;
@@ -369,7 +393,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
             let Some(v) = &e.data else { return Ok(()) };
             writeln!(
                 out,
-                "{} of {} documents still hash to their own name",
+                "{} of {} documents in the corpus still hash to their own name",
                 v.intact, v.documents
             )
         }
@@ -509,12 +533,11 @@ fn appeal(status: &AppealStatus) -> String {
         AppealStatus::Appealed { successors } => {
             format!("a later decision exists: {}", successors.join(", "))
         }
-        // Deliberately not 'not appealed'. This says what the corpus holds on
-        // the day it looked, and nothing about whether an appeal was brought.
+        // Deliberately not 'not appealed'. This says what the register held on
+        // the day it was read, and nothing about whether an appeal was brought.
         AppealStatus::NoPublishedSuccessor { as_of } => {
             format!("no published successor known, as of {}", as_of.date_naive())
         }
-        AppealStatus::Unknown => "unknown, this decision is not in the corpus".to_string(),
     }
 }
 

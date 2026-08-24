@@ -17,7 +17,6 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
 use crate::blob::BlobId;
-use crate::db::Document;
 use crate::error::Fault;
 use crate::model;
 use crate::sources;
@@ -569,17 +568,15 @@ impl Provenance {
             frozen: Frozen::Service,
         }
     }
-}
 
-impl From<Document> for Provenance {
-    fn from(doc: Document) -> Self {
+    /// Provenance for a document bron fetched and froze itself, stamped with
+    /// the moment it did.
+    pub fn frozen(source: &sources::Provenance, fetched_at: DateTime<Utc>) -> Self {
         Self {
-            blob: doc.blob,
-            url: doc.url,
-            byte_len: doc.byte_len,
-            frozen: Frozen::Bron {
-                fetched_at: doc.fetched_at,
-            },
+            blob: source.blob,
+            url: source.url.clone(),
+            byte_len: source.byte_len,
+            frozen: Frozen::Bron { fetched_at },
         }
     }
 }
@@ -991,17 +988,17 @@ impl From<model::Relation> for Relation {
     }
 }
 
-/// Three-valued, never a boolean.
+/// What the decision's own relations say, and never a boolean.
 ///
-/// `no_published_successor` is a claim about what bron holds on the date it
-/// last looked, not a claim that no appeal was brought. An appeal that settled,
-/// was withdrawn, or ended in an unpublished decision leaves no trace.
+/// `no_published_successor` is a claim about what the register held at the
+/// moment bron read it, dated to that moment, and not a claim that no appeal
+/// was brought. An appeal that settled, was withdrawn, or ended in an
+/// unpublished decision leaves no trace.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum AppealStatus {
     Appealed { successors: Vec<String> },
     NoPublishedSuccessor { as_of: DateTime<Utc> },
-    Unknown,
 }
 
 impl From<model::AppealStatus> for AppealStatus {
@@ -1013,7 +1010,6 @@ impl From<model::AppealStatus> for AppealStatus {
             model::AppealStatus::NoPublishedSuccessor { as_of } => {
                 Self::NoPublishedSuccessor { as_of }
             }
-            model::AppealStatus::Unknown => Self::Unknown,
         }
     }
 }
@@ -1049,6 +1045,38 @@ impl From<model::CaseHit> for CaseHit {
             decided_on: hit.decided_on,
         }
     }
+}
+
+/// Whether the register links a document for a publication.
+///
+/// Said outright rather than left to a missing key. The digest is how an answer
+/// from this lane is checked at all: a reader fetches the address beside it and
+/// hashes what arrives. A record the register publishes without a body has
+/// nothing to hash, and simply leaving the provenance out would read as an
+/// answer whose digest went missing.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case", tag = "body")]
+pub enum Body {
+    /// The register links an XML document. This is where those bytes came from
+    /// and what they hash to.
+    Linked { provenance: Provenance },
+    /// The register links none. The record is the whole of what it publishes
+    /// under this identifier, so there is nothing to fetch and nothing to hash.
+    Absent,
+}
+
+/// One publication, and the bytes behind it where there are any.
+#[derive(Debug, Serialize)]
+pub struct Publication {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dossier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published_on: Option<NaiveDate>,
+    #[serde(flatten)]
+    pub body: Body,
 }
 
 #[derive(Debug, Serialize)]
@@ -1253,13 +1281,23 @@ impl From<crate::db::Stats> for Stats {
 /// What `bron verify` can and cannot say.
 ///
 /// Every count here is about the corpus alone: whether the bytes on this disk
-/// still hash to the name they are filed under. It says nothing about whether
-/// those bytes are the ones the publisher vouched for. A document whose
-/// upstream digest disagrees is `intact` all the same, because the two are
-/// different claims and collapsing them is the inference this crate exists to
-/// refuse.
+/// still hash to the name they are filed under. That is the wetgeving corpus
+/// and nothing else, because it is the only thing that keeps bytes: the other
+/// lanes fetch, parse, render and let go, and name the digest of what they read
+/// rather than a file. It says nothing about whether those bytes are the ones
+/// the publisher vouched for either. A document whose upstream digest disagrees
+/// is `intact` all the same, because the two are different claims and
+/// collapsing them is the inference this crate exists to refuse.
 #[derive(Debug, Serialize)]
 pub struct Verification {
+    /// What these counts are about, said rather than assumed.
+    ///
+    /// Zero is the ordinary answer on a machine that has never run
+    /// `bron update`, and `{"documents":0,"intact":0}` alone reads as 'nothing
+    /// bron holds is broken' where the truth is 'bron holds nothing'. A caller
+    /// that ran only `case`, `publication` or `archive` has verified exactly
+    /// nothing, and is entitled to see that from the answer.
+    pub scope: &'static str,
     pub documents: u32,
     pub intact: u32,
     pub missing: Vec<String>,
@@ -1382,6 +1420,62 @@ mod tests {
         );
     }
 
+    /// A record the register publishes without a body says so, rather than
+    /// arriving as one whose provenance went missing. The digest is the whole
+    /// of how an answer from this lane is checked.
+    #[test]
+    fn a_publication_says_whether_the_register_links_a_document() {
+        let linked = Publication {
+            id: "kst-33669-6".into(),
+            title: None,
+            dossier: None,
+            published_on: None,
+            body: Body::Linked {
+                provenance: Provenance::frozen(
+                    &sources::Provenance {
+                        blob: BlobId::of(b"<kamerstuk/>"),
+                        url: "https://zoek.officielebekendmakingen.nl/kst-33669-6.xml".into(),
+                        byte_len: 12,
+                    },
+                    "2026-08-24T09:00:00Z".parse().unwrap(),
+                ),
+            },
+        };
+        let json = serde_json::to_string(&linked).unwrap();
+
+        assert!(json.contains(r#""body":"linked""#), "{json}");
+        assert!(json.contains(r#""frozen_by":"bron""#), "{json}");
+
+        let bare = Publication {
+            id: "kst-33669-6".into(),
+            title: None,
+            dossier: None,
+            published_on: None,
+            body: Body::Absent,
+        };
+        let json = serde_json::to_string(&bare).unwrap();
+
+        assert!(json.contains(r#""body":"absent""#), "{json}");
+        assert!(!json.contains("provenance"), "{json}");
+    }
+
+    /// Zero is the ordinary answer on a machine that never ran `bron update`,
+    /// and four zeroes on their own read as 'nothing is broken' where the truth
+    /// is 'nothing is held'.
+    #[test]
+    fn a_verification_names_what_it_checked() {
+        let json = serde_json::to_string(&Verification {
+            scope: "corpus",
+            documents: 0,
+            intact: 0,
+            missing: Vec::new(),
+            corrupt: Vec::new(),
+        })
+        .unwrap();
+
+        assert!(json.contains(r#""scope":"corpus""#), "{json}");
+    }
+
     /// A consumer tells the two shapes apart by reading one key, never by
     /// testing whether another is present. A ranking that happened to resolve
     /// to one hit and a citation that resolved to one article are different
@@ -1439,12 +1533,14 @@ mod tests {
         assert!(!json.contains("fetched_at"), "{json}");
         assert!(served.frozen.reports());
 
-        let ours = Provenance::from(Document {
-            blob: BlobId::of(b"<toestand/>"),
-            url: "https://data.rechtspraak.nl/x".into(),
-            byte_len: 11,
-            fetched_at: "2026-08-20T09:00:00Z".parse().unwrap(),
-        });
+        let ours = Provenance::frozen(
+            &sources::Provenance {
+                blob: BlobId::of(b"<toestand/>"),
+                url: "https://data.rechtspraak.nl/x".into(),
+                byte_len: 11,
+            },
+            "2026-08-20T09:00:00Z".parse().unwrap(),
+        );
         let json = serde_json::to_string(&ours).unwrap();
 
         assert!(json.contains(r#""frozen_by":"bron""#), "{json}");

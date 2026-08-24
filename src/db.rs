@@ -16,15 +16,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
 use crate::blob::BlobId;
-use crate::ids::{BwbId, Ecli, PublicationId};
-use crate::model::{
-    AppealStatus, Article, Capture, Case, DigestCheck, Direction, Law, LawVersion, Lid,
-    Publication, Relation, Span, Validity,
-};
+use crate::ids::BwbId;
+use crate::model::{Article, Law, LawVersion, Lid, Span, Validity};
 use crate::paths;
-use crate::sources::{
-    FetchedCapture, FetchedCase, FetchedLaw, FetchedPublication, Provenance, wayback,
-};
+use crate::sources::{FetchedLaw, Provenance};
 
 /// Bumped whenever `schema.sql` changes in a way an older database cannot
 /// absorb by re-running it.
@@ -273,105 +268,7 @@ impl Db {
 
     // -- cases -----------------------------------------------------------
 
-    pub fn case(&self, id: &Ecli) -> Result<Option<Case>> {
-        let case = self
-            .conn
-            .query_row(
-                &format!("{CASE_SELECT} WHERE id = ?1"),
-                params![id],
-                case_from_row,
-            )
-            .optional()
-            .context("cannot read case")?;
-
-        match case {
-            Some(mut case) => {
-                case.relations = self.relations(id)?;
-                Ok(Some(case))
-            }
-            None => Ok(None),
-        }
-    }
-
-    pub fn relations(&self, id: &Ecli) -> Result<Vec<Relation>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT target, kind, direction FROM case_relations
-             WHERE case_id = ?1 ORDER BY direction, target",
-        )?;
-        let rows = stmt
-            .query_map(params![id], |row| {
-                Ok(Relation {
-                    target: row.get("target")?,
-                    kind: row.get("kind")?,
-                    direction: match row.get::<_, String>("direction")?.as_str() {
-                        "later" => Direction::Later,
-                        _ => Direction::Earlier,
-                    },
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-
-    /// What the corpus can honestly say about a decision having been appealed.
-    ///
-    /// Absence of a forward link is only meaningful for a decision we actually
-    /// hold; for anything else the answer is [`AppealStatus::Unknown`]. See the
-    /// type's own documentation for why this is never a boolean.
-    pub fn appeal_status(&self, id: &Ecli) -> Result<AppealStatus> {
-        let fetched_at: Option<DateTime<Utc>> = self
-            .conn
-            .query_row(
-                "SELECT fetched_at FROM cases WHERE id = ?1",
-                params![id],
-                |r| r.get(0),
-            )
-            .optional()?;
-
-        let Some(fetched_at) = fetched_at else {
-            return Ok(AppealStatus::Unknown);
-        };
-
-        let successors: Vec<Ecli> = self
-            .relations(id)?
-            .into_iter()
-            .filter(|r| r.direction == Direction::Later)
-            .map(|r| r.target)
-            .collect();
-
-        Ok(if successors.is_empty() {
-            // Dated, because this is a claim about what bron holds and what
-            // bron holds began going stale the moment it was fetched.
-            AppealStatus::NoPublishedSuccessor { as_of: fetched_at }
-        } else {
-            AppealStatus::Appealed { successors }
-        })
-    }
-
     // -- publications ----------------------------------------------------
-
-    pub fn publication(&self, id: &PublicationId) -> Result<Option<Publication>> {
-        self.conn
-            .query_row(
-                &format!("{PUBLICATION_SELECT} WHERE id = ?1"),
-                params![id],
-                publication_from_row,
-            )
-            .optional()
-            .context("cannot read publication")
-    }
-
-    pub fn publications(&self, dossier: Option<&str>, limit: u32) -> Result<Vec<Publication>> {
-        let mut stmt = self.conn.prepare(&format!(
-            "{PUBLICATION_SELECT}
-             WHERE (?1 IS NULL OR dossier = ?1)
-             ORDER BY published_on DESC LIMIT ?2"
-        ))?;
-        let rows = stmt
-            .query_map(params![dossier, i64::from(limit)], publication_from_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
 
     /// A row from the provenance ledger.
     pub fn document(&self, blob: &BlobId) -> Result<Option<Document>> {
@@ -418,96 +315,7 @@ impl Db {
     }
 }
 
-const CAPTURE_SELECT: &str = "SELECT id, original_url, captured_at, archive_status, index_digest, \
-                              verified, is_revisit, mime_type, encoding, encoding_from, \
-                              requested, content, blob, fetched_at FROM captures";
-
 impl Db {
-    /// The capture in force for a date: the newest one taken at or before it.
-    ///
-    /// Takes an [`wayback::ApproxUrlKey`], because a local guess at the key is
-    /// the only kind a caller holding a plain address can have. The column
-    /// holds the keys the index itself assigned, so a guess that is finer than
-    /// the archive's simply misses.
-    ///
-    /// At-or-before rather than nearest, because a capture taken after the date
-    /// cannot evidence what the page said on it. Answering with the nearest one
-    /// would sometimes hand back a page that had already changed.
-    pub fn capture_at(
-        &self,
-        urlkey: &wayback::ApproxUrlKey,
-        on: NaiveDate,
-    ) -> Result<Option<Capture>> {
-        self.conn
-            .query_row(
-                &format!(
-                    "{CAPTURE_SELECT} WHERE urlkey = ?1 AND captured_at <= ?2
-                     ORDER BY captured_at DESC LIMIT 1"
-                ),
-                params![urlkey.as_str(), end_of_day(on)],
-                capture_from_row,
-            )
-            .optional()
-            .context("cannot read capture")
-    }
-
-    /// The newest capture held for an address.
-    pub fn newest_capture(&self, urlkey: &wayback::ApproxUrlKey) -> Result<Option<Capture>> {
-        self.conn
-            .query_row(
-                &format!("{CAPTURE_SELECT} WHERE urlkey = ?1 ORDER BY captured_at DESC LIMIT 1"),
-                params![urlkey.as_str()],
-                capture_from_row,
-            )
-            .optional()
-            .context("cannot read capture")
-    }
-
-    /// Every capture held for an address, newest first.
-    pub fn captures(&self, urlkey: &wayback::ApproxUrlKey, limit: u32) -> Result<Vec<Capture>> {
-        let mut stmt = self.conn.prepare(&format!(
-            "{CAPTURE_SELECT} WHERE urlkey = ?1 ORDER BY captured_at DESC LIMIT ?2"
-        ))?;
-        let rows = stmt
-            .query_map(params![urlkey.as_str(), i64::from(limit)], capture_from_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-}
-
-/// The last instant of a day, so a date bound includes captures made that
-/// afternoon rather than only those made at midnight.
-fn end_of_day(on: NaiveDate) -> DateTime<Utc> {
-    on.and_hms_opt(23, 59, 59)
-        .expect("a valid time of day")
-        .and_utc()
-}
-
-fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
-    Ok(Capture {
-        id: row.get("id")?,
-        original_url: row.get("original_url")?,
-        captured_at: row.get("captured_at")?,
-        archive_status: row
-            .get::<_, Option<i64>>("archive_status")?
-            .map(|s| s as u16),
-        index_digest: row.get("index_digest")?,
-        verified: row
-            .get::<_, Option<String>>("verified")?
-            .map(|v| match v.as_str() {
-                "matches" => DigestCheck::Matches,
-                "differs" => DigestCheck::Differs,
-                _ => DigestCheck::Absent,
-            }),
-        is_revisit: row.get("is_revisit")?,
-        mime_type: row.get("mime_type")?,
-        encoding: row.get("encoding")?,
-        encoding_from: row.get("encoding_from")?,
-        requested: row.get("requested")?,
-        content: row.get("content")?,
-        blob: row.get("blob")?,
-        fetched_at: row.get("fetched_at")?,
-    })
 }
 
 // -- writes --------------------------------------------------------------
@@ -523,78 +331,6 @@ fn put_document(tx: &Transaction, doc: &Provenance, fetched_at: DateTime<Utc>) -
          ON CONFLICT (blob) DO NOTHING",
         params![doc.blob, doc.url, i64::try_from(doc.byte_len)?, fetched_at],
     )?;
-    Ok(())
-}
-
-/// Stores one capture.
-///
-/// `requested` records whether bron asked the archive for this capture or found
-/// one it already held. A tool that can cause the evidence it later cites
-/// should say which it did, so the two are stored apart rather than blurred.
-pub fn put_capture(
-    tx: &Transaction,
-    capture: &FetchedCapture,
-    requested: bool,
-    fetched_at: DateTime<Utc>,
-) -> Result<()> {
-    put_document(tx, &capture.provenance, fetched_at)?;
-
-    let (content, encoding, encoding_from) = match &capture.reading {
-        wayback::Reading::Text {
-            text,
-            encoding,
-            declared,
-            ..
-        } => (
-            Some(text.as_str()),
-            Some(*encoding),
-            Some(format!("{declared:?}").to_lowercase()),
-        ),
-        wayback::Reading::Binary => (None, None, None),
-    };
-
-    tx.execute(
-        "INSERT INTO captures
-             (id, urlkey, original_url, captured_at, archive_status, index_digest, verified,
-              is_revisit, mime_type, encoding, encoding_from, requested, content, blob, fetched_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-         ON CONFLICT (id) DO UPDATE SET
-             archive_status = excluded.archive_status,
-             index_digest = excluded.index_digest,
-             verified = excluded.verified,
-             is_revisit = excluded.is_revisit,
-             mime_type = excluded.mime_type,
-             encoding = excluded.encoding,
-             encoding_from = excluded.encoding_from,
-             -- Once true, always true: a later read that merely found the
-             -- capture does not undo the fact that bron caused it.
-             requested = captures.requested OR excluded.requested,
-             content = excluded.content,
-             blob = excluded.blob,
-             fetched_at = excluded.fetched_at",
-        params![
-            capture.id,
-            capture.id.urlkey(),
-            capture.original,
-            capture.id.captured_at(),
-            capture.status.code(),
-            capture.digest,
-            match capture.verified {
-                wayback::Verified::Matches => "matches",
-                wayback::Verified::Differs => "differs",
-                wayback::Verified::Absent => "absent",
-            },
-            capture.is_revisit,
-            capture.mime_type,
-            encoding,
-            encoding_from,
-            requested,
-            content,
-            capture.provenance.blob,
-            fetched_at,
-        ],
-    )?;
-
     Ok(())
 }
 
@@ -712,97 +448,6 @@ pub fn put_law_version(
     Ok(version)
 }
 
-pub fn put_case(tx: &Transaction, case: &FetchedCase, fetched_at: DateTime<Utc>) -> Result<()> {
-    put_document(tx, &case.provenance, fetched_at)?;
-
-    tx.execute(
-        "INSERT INTO cases
-             (id, court, decided_on, published_on, procedure_type, summary, full_text,
-              blob, fetched_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT (id) DO UPDATE SET
-             court = excluded.court,
-             decided_on = excluded.decided_on,
-             published_on = excluded.published_on,
-             procedure_type = excluded.procedure_type,
-             summary = excluded.summary,
-             full_text = excluded.full_text,
-             blob = excluded.blob,
-             fetched_at = excluded.fetched_at",
-        params![
-            case.id,
-            case.court,
-            case.decided_on,
-            case.published_on,
-            case.procedure_type,
-            case.summary,
-            case.full_text,
-            case.provenance.blob,
-            fetched_at,
-        ],
-    )?;
-
-    tx.execute(
-        "DELETE FROM case_relations WHERE case_id = ?1",
-        params![case.id],
-    )?;
-
-    let mut insert = tx.prepare(
-        "INSERT INTO case_relations (case_id, target, kind, direction) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT DO NOTHING",
-    )?;
-    for relation in &case.relations {
-        insert.execute(params![
-            case.id,
-            relation.target,
-            relation.kind,
-            relation.direction.as_str()
-        ])?;
-    }
-
-    Ok(())
-}
-
-pub fn put_publication(
-    tx: &Transaction,
-    doc: &FetchedPublication,
-    fetched_at: DateTime<Utc>,
-) -> Result<()> {
-    if let Some(provenance) = &doc.provenance {
-        put_document(tx, provenance, fetched_at)?;
-    }
-
-    tx.execute(
-        "INSERT INTO publications
-             (id, title, dossier, document_type, vergaderjaar, published_on, url,
-              full_text, blob, fetched_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-         ON CONFLICT (id) DO UPDATE SET
-             title = excluded.title,
-             dossier = excluded.dossier,
-             document_type = excluded.document_type,
-             vergaderjaar = excluded.vergaderjaar,
-             published_on = excluded.published_on,
-             url = excluded.url,
-             full_text = excluded.full_text,
-             blob = excluded.blob,
-             fetched_at = excluded.fetched_at",
-        params![
-            doc.id,
-            doc.title,
-            doc.dossier,
-            doc.document_type,
-            doc.vergaderjaar,
-            doc.published_on,
-            doc.url,
-            doc.full_text,
-            doc.provenance.as_ref().map(|p| p.blob),
-            fetched_at,
-        ],
-    )?;
-    Ok(())
-}
-
 // -- row mapping ---------------------------------------------------------
 
 /// `filter` is `&'static str` so that no string built from input can reach it.
@@ -875,43 +520,5 @@ fn article_from_row(row: &Row) -> rusqlite::Result<Article> {
         illustrations: row.get::<_, i64>("illustrations")? as u32,
         versie_id: row.get("versie_id")?,
         status: row.get("status")?,
-    })
-}
-
-const CASE_SELECT: &str = "SELECT id, court, decided_on, published_on, procedure_type, summary,
-                                  full_text, blob, fetched_at
-                           FROM cases";
-
-fn case_from_row(row: &Row) -> rusqlite::Result<Case> {
-    Ok(Case {
-        id: row.get("id")?,
-        court: row.get("court")?,
-        decided_on: row.get("decided_on")?,
-        published_on: row.get("published_on")?,
-        procedure_type: row.get("procedure_type")?,
-        summary: row.get("summary")?,
-        full_text: row.get("full_text")?,
-        blob: row.get("blob")?,
-        fetched_at: row.get("fetched_at")?,
-        relations: Vec::new(),
-    })
-}
-
-const PUBLICATION_SELECT: &str = "SELECT id, title, dossier, document_type, vergaderjaar,
-                                         published_on, url, full_text, blob, fetched_at
-                                  FROM publications";
-
-fn publication_from_row(row: &Row) -> rusqlite::Result<Publication> {
-    Ok(Publication {
-        id: row.get("id")?,
-        title: row.get("title")?,
-        dossier: row.get("dossier")?,
-        document_type: row.get("document_type")?,
-        vergaderjaar: row.get("vergaderjaar")?,
-        published_on: row.get("published_on")?,
-        url: row.get("url")?,
-        full_text: row.get("full_text")?,
-        blob: row.get("blob")?,
-        fetched_at: row.get("fetched_at")?,
     })
 }

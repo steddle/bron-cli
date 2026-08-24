@@ -29,8 +29,11 @@ const REPOSITORY: &str = "https://repository.officiele-overheidspublicaties.nl/b
 /// checking resolve against.
 pub fn versions(client: &Client, law: &BwbId) -> Result<Vec<VersionMeta>> {
     let url = format!("{REPOSITORY}/{law}/manifest.xml");
+    // Read and let go: a manifest is parsed into windows and digests, and no
+    // ledger row or offset ever names the file it came out of. Only the version
+    // XML below is kept, because `update` records it and stores spans into it.
     let fetched = client
-        .fetch_url(&url)
+        .read_url(&url)
         .with_context(|| format!("cannot read the manifest for {law}"))?;
 
     parse_manifest(law, &fetched.text)

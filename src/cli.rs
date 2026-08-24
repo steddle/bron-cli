@@ -316,11 +316,11 @@ pub enum Case {
     /// Fetches one decision by ECLI.
     Show { ecli: String },
 
-    /// What the corpus can say about appeal or cassation.
+    /// What the decision's own relations say about appeal or cassation.
     ///
-    /// Three answers, never two: appealed, no_published_successor, unknown. The
-    /// middle one is a claim about what bron holds on the day it looked, not
-    /// about whether an appeal was brought.
+    /// Two answers and never a boolean: appealed, or no_published_successor
+    /// dated to the moment bron read the decision. The second is a claim about
+    /// what the register held then, not about whether an appeal was brought.
     Appeal { ecli: String },
 }
 

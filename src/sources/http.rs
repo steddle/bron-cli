@@ -79,12 +79,27 @@ pub type WaitReporter = Box<dyn Fn(&str, Duration) + Send + Sync>;
 /// What a fetch does with what comes back.
 #[derive(Debug, Clone, Copy)]
 enum Reading {
-    /// Freeze it, and refuse it where the server answered an error status.
+    /// Keep it, and refuse it where the server answered an error status.
     ///
-    /// What every publisher fetch wants. The bytes are the evidence an offset
-    /// will point into, and the [`reqwest::Error`] carrying the code is what
-    /// lets [`crate::error::from_source`] tell a 404 from a dead network.
+    /// For bytes something will come back for. In this crate that is the
+    /// wetgeving corpus alone: `update` writes a ledger row naming the digest
+    /// and stores articles whose spans point into these bytes, so the file has
+    /// both an index and a reader.
+    ///
+    /// The [`reqwest::Error`] carrying the code is what lets
+    /// [`crate::error::from_source`] tell a 404 from a dead network.
     Frozen,
+    /// Hash it and let it go, refusing an error status like any other publisher
+    /// fetch.
+    ///
+    /// For a lane that fetches, parses, renders and is done. The digest travels
+    /// with the answer and is what makes it checkable: a reader fetches the URL
+    /// beside it and hashes what arrives. Keeping a second copy here would add
+    /// a file per invocation to a store that is deliberately never evicted,
+    /// that nothing indexes now that no ledger row is written for it, and that
+    /// nothing in this crate can read back. Naming a digest is provenance;
+    /// hoarding an unindexed copy is litter.
+    Hashed,
     /// None of the three, and they go together.
     ///
     /// An answer from the bron service is not evidence: no offset points into
@@ -169,6 +184,12 @@ impl Client {
         self.fetch_on(&self.inner, request, Reading::Frozen)
     }
 
+    /// Sends a prepared request and hashes what comes back without keeping it.
+    /// See [`Reading::Hashed`].
+    pub fn read_bytes(&self, request: RequestBuilder) -> Result<FetchedBytes> {
+        self.fetch_on(&self.inner, request, Reading::Hashed)
+    }
+
     /// Freezes what comes back without taking any redirect it offers.
     ///
     /// Following a redirect returns the bytes of whatever it points at, under
@@ -185,8 +206,8 @@ impl Client {
     /// The policy belongs to the client that *executes* the request rather
     /// than the one that built it, which is why this is a separate fetch and
     /// not a separate builder.
-    pub fn fetch_bytes_unredirected(&self, request: RequestBuilder) -> Result<FetchedBytes> {
-        self.fetch_on(&self.no_redirect, request, Reading::Frozen)
+    pub fn read_bytes_unredirected(&self, request: RequestBuilder) -> Result<FetchedBytes> {
+        self.fetch_on(&self.no_redirect, request, Reading::Hashed)
     }
 
     fn fetch_on(
@@ -202,7 +223,7 @@ impl Client {
         // The shared budget is for the services bron does not run. See
         // [`Reading::Envelope`].
         let bucket = match reading {
-            Reading::Frozen => {
+            Reading::Frozen | Reading::Hashed => {
                 let policy = Policy::for_request(&host, request.url().path());
                 let bucket = Bucket::new(&self.buckets, &host, policy);
                 let waited = bucket.acquire()?;
@@ -267,7 +288,7 @@ impl Client {
         }
 
         let response = match reading {
-            Reading::Frozen => response
+            Reading::Frozen | Reading::Hashed => response
                 .error_for_status()
                 .with_context(|| format!("{url} returned an error status"))?,
             Reading::Envelope => response,
@@ -289,13 +310,13 @@ impl Client {
             .bytes()
             .with_context(|| format!("{url} returned an unreadable body"))?;
 
-        // Frozen before anything is decided about what it says, so a body that
-        // no reading can decode still has a digest to be cited by. An envelope
-        // is hashed and not kept: it is nothing's evidence, and the digest is
-        // still what it would be filed under if it ever were.
+        // Hashed before anything is decided about what it says, so a body that
+        // no reading can decode still has a digest to be cited by. Only what
+        // something will come back for is written down; the digest is the same
+        // either way, and it is the digest that travels.
         let blob = match reading {
             Reading::Frozen => self.blobs.put(&body)?,
-            Reading::Envelope => BlobId::of(&body),
+            Reading::Hashed | Reading::Envelope => BlobId::of(&body),
         };
 
         Ok(FetchedBytes {
@@ -313,34 +334,39 @@ impl Client {
     /// are not guaranteed UTF-8 wants [`Client::fetch_bytes`] and its own
     /// stated decode.
     pub fn fetch(&self, request: RequestBuilder) -> Result<Fetched> {
-        let raw = self.fetch_bytes(request)?;
-        let text = String::from_utf8(raw.bytes)
-            .with_context(|| format!("{} returned a body that is not UTF-8", raw.url))?;
-
-        Ok(Fetched {
-            blob: raw.blob,
-            text,
-            url: raw.url,
-        })
+        decoded(self.fetch_bytes(request)?)
     }
 
     pub fn fetch_url(&self, url: &str) -> Result<Fetched> {
         self.fetch(self.get(url))
     }
 
+    /// Sends a prepared request and decodes what comes back as UTF-8, without
+    /// keeping it. See [`Reading::Hashed`].
+    pub fn read(&self, request: RequestBuilder) -> Result<Fetched> {
+        decoded(self.read_bytes(request)?)
+    }
+
+    pub fn read_url(&self, url: &str) -> Result<Fetched> {
+        self.read(self.get(url))
+    }
+
     /// Reads an answer from a service that speaks the bron envelope. See
     /// [`Reading::Envelope`].
     pub fn fetch_answered(&self, request: RequestBuilder) -> Result<Fetched> {
-        let raw = self.fetch_on(&self.inner, request, Reading::Envelope)?;
-        let text = String::from_utf8(raw.bytes)
-            .with_context(|| format!("{} returned a body that is not UTF-8", raw.url))?;
-
-        Ok(Fetched {
-            blob: raw.blob,
-            text,
-            url: raw.url,
-        })
+        decoded(self.fetch_on(&self.inner, request, Reading::Envelope)?)
     }
+}
+
+fn decoded(raw: FetchedBytes) -> Result<Fetched> {
+    let text = String::from_utf8(raw.bytes)
+        .with_context(|| format!("{} returned a body that is not UTF-8", raw.url))?;
+
+    Ok(Fetched {
+        blob: raw.blob,
+        text,
+        url: raw.url,
+    })
 }
 
 /// A rate-limit refusal, and how long the host asked us to wait.

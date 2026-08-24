@@ -94,7 +94,7 @@ pub fn fetch(client: &Client, id: &PublicationId) -> Result<FetchedPublication> 
     let body = match record.url.as_deref() {
         Some(url) if url.ends_with(".xml") => Some(
             client
-                .fetch_url(url)
+                .read_url(url)
                 .with_context(|| format!("cannot fetch the body of {id}"))?,
         ),
         _ => None,
@@ -119,7 +119,7 @@ pub fn fetch(client: &Client, id: &PublicationId) -> Result<FetchedPublication> 
 }
 
 fn fetch_records(client: &Client, cql: &str, limit: u32) -> Result<Vec<Record>> {
-    let fetched = client.fetch(client.get(ENDPOINT).query(&[
+    let fetched = client.read(client.get(ENDPOINT).query(&[
         ("operation", "searchRetrieve"),
         ("version", "2.0"),
         ("maximumRecords", &limit.to_string()),
