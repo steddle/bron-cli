@@ -599,6 +599,11 @@ fn caveat_line(caveat: &Caveat) -> String {
                  than the question did",
             lanes.join(" and "),
         ),
+        Caveat::UnrankableTexts { scope, count } => format!(
+            "note: {count} text(s) in the {scope} carry no vector, because the model will not \
+             take them in one input, so no ranking reaches them. They are answered by \
+             identifier.",
+        ),
         Caveat::NotCommenced { articles } => format!(
             "note: article(s) {} have not commenced. The register publishes the text they \
                  will have, and it does not apply yet.",

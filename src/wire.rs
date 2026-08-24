@@ -199,6 +199,15 @@ pub enum Caveat {
     /// 'that half of it was never indexed'.
     LanesUnsearched { lanes: Vec<String> },
 
+    /// Texts in a searched lane that carry no vector, because the model will
+    /// not take them in one input, so no ranking can reach them.
+    ///
+    /// Counted over the corpus and not over this answer, which is what `scope`
+    /// says: the same texts are out of every ranking, so narrowing by
+    /// regulation or by date does not narrow the number. They stay answerable
+    /// by identifier, which is the route that does not go through a vector.
+    UnrankableTexts { scope: String, count: u32 },
+
     /// The citation reads more than one way and every reading is answered.
     ///
     /// Not [`Caveat::AmbiguousRendition`]: nothing is discarded here. `3:305a`
@@ -414,6 +423,10 @@ impl Caveat {
             LanesUnsearched {
                 lanes: Vec<String>,
             },
+            UnrankableTexts {
+                scope: String,
+                count: u32,
+            },
             SeveralReadings {
                 readings: Vec<String>,
             },
@@ -458,6 +471,7 @@ impl Caveat {
             Ok(Stated::Unverified) => Self::UpstreamDigestAbsent,
             Ok(Stated::HashDisagrees) => Self::UpstreamDigestDiffers,
             Ok(Stated::Truncated { window }) => Self::Truncated { window },
+            Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
             Ok(Stated::TableFlattened {
                 articles,
                 cell_separator,
@@ -1297,6 +1311,24 @@ mod tests {
             Caveat::stated(stated),
             Caveat::Unrecognised {
                 stated: "something_later".into()
+            }
+        );
+    }
+
+    /// The count of texts no ranking reaches is read under its own name, and
+    /// its scope with it: the number is of the corpus, so a search narrowed to
+    /// one regulation reports the same figure and has to say why.
+    #[test]
+    fn texts_no_ranking_reaches_are_read_with_their_scope() {
+        assert_eq!(
+            Caveat::stated(serde_json::json!({
+                "kind": "unrankable_texts",
+                "scope": "corpus",
+                "count": 64
+            })),
+            Caveat::UnrankableTexts {
+                scope: "corpus".into(),
+                count: 64
             }
         );
     }

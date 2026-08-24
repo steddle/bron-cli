@@ -19,7 +19,7 @@ use bron::wire::{Grade, View};
 #[command(
     name = "bron",
     version,
-    about = "Dutch primary legal sources on your own disk",
+    about = "Dutch primary legal sources, quotable to the byte",
     long_about = "Answers what Dutch law said on a date, and what the courts and the \
                   official publications say, naming the document behind every answer and \
                   the byte range inside it.\n\n\
@@ -62,7 +62,6 @@ pub enum Command {
     #[command(subcommand)]
     Archive(Archive),
 
-    /// Fetches newer versions of laws already held.
     /// Answers which article, from a question or from a citation.
     ///
     /// Distinct from `law search`, which resolves a citeertitel to a BWB id and

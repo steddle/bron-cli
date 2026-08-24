@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/github/v/release/mischasigtermans/bron?label=version)](https://github.com/mischasigtermans/bron/releases)
 [![License](https://img.shields.io/github/license/mischasigtermans/bron)](LICENSE)
 
-Dutch primary legal sources on your own disk.
+Dutch primary legal sources, quotable to the byte.
 
 bron reads legislation, case law and official publications, and every answer names the document it rests on and the byte range inside it. It says what a law said on a given date, not only what it says today. The point isn't search. It's that a claim made here can name the document and the characters behind it, and that the same question asked twice gives the same answer.
 
@@ -136,7 +136,7 @@ Nothing is kept. bron writes one thing between runs, its share of the per-host r
 - Amendment diffs. `bron law changes` matches articles on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
 - An appeal answer that is never a boolean. `no_published_successor` is dated to the moment bron read the decision, because 'nothing published' is a claim about what the register held then and not about whether an appeal was brought.
 - Web archive access for pages no publisher keeps, graded apart from primary sources. Digest checking is three-valued too: only a match is positive evidence, because the index hashes the stored payload and the replay strips its chunk framing.
-- Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers instead of each pacing itself perfectly and together going three times too fast.
+- Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers rather than each pacing itself perfectly and together going three times too fast.
 - Nothing kept between runs. bron writes its share of the rate-limit budget and nothing else, so there is no store to migrate, verify or grow stale.
 
 ## Documentation
@@ -150,7 +150,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## Credits
 
 - [Mischa Sigtermans](https://github.com/mischasigtermans)
-- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen), [de Rechtspraak](https://www.rechtspraak.nl) and the [Internet Archive](https://archive.org). bron fetches on your behalf and stores the result on your own disk. The only material shipped here is the frozen responses under `tests/fixtures/` that the test suite parses; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
+- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen), [de Rechtspraak](https://www.rechtspraak.nl) and the [Internet Archive](https://archive.org). bron fetches on your behalf and keeps none of it. The only material shipped here is the frozen responses under `tests/fixtures/` that the test suite parses; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
 
 ## License
 
