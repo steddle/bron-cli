@@ -1,7 +1,6 @@
 # bron
 
-[![Version](https://img.shields.io/github/v/release/mischasigtermans/bron?label=version)](https://github.com/mischasigtermans/bron/releases)
-[![License](https://img.shields.io/github/license/mischasigtermans/bron)](LICENSE)
+[![License](https://img.shields.io/github/license/steddle/bron-cli)](LICENSE)
 
 Dutch primary legal sources, quotable to the byte.
 
@@ -12,8 +11,8 @@ Nothing is stored. Every answer is fetched, and what makes it checkable is the d
 ## Installation
 
 ```
-git clone https://github.com/mischasigtermans/bron
-cd bron
+git clone https://github.com/steddle/bron-cli.git
+cd bron-cli
 cargo install --path .
 ```
 

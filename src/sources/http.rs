@@ -24,7 +24,7 @@ use crate::ratelimit::{Bucket, Policy};
 const USER_AGENT: &str = concat!(
     "bron/",
     env!("CARGO_PKG_VERSION"),
-    " (+https://github.com/mischasigtermans/bron)"
+    " (+https://github.com/steddle/bron-cli)"
 );
 
 /// rechtspraak's search endpoint refuses anything that does not look like the

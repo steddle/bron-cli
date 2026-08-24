@@ -9,7 +9,7 @@ edition = "2024"
 # so cargo enforces the claim rather than the prose carrying it alone.
 rust-version = "1.85"
 description = "Dutch primary legal sources, quotable to the byte: wetgeving, rechtspraak, kamerstukken"
-repository = "https://github.com/mischasigtermans/bron"
+repository = "https://github.com/steddle/bron-cli"
 readme = "README.md"
 keywords = ["law", "netherlands", "legal", "citation", "archive"]
 categories = ["command-line-utilities", "parser-implementations", "database"]
