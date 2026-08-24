@@ -71,18 +71,26 @@ pub enum Command {
     Archive(Archive),
 
     /// Fetches newer versions of laws already held.
-    /// Searches the corpus text for a question, and answers with identifiers.
+    /// Answers which article, from a question or from a citation.
     ///
     /// Distinct from `law search`, which resolves a citeertitel to a BWB id and
     /// answers which law. This answers which article, across every corpus bron
     /// holds vectors for, and its answer says which of them it actually
     /// searched.
     ///
-    /// The ranking is the one approximate thing in bron and it only orders.
-    /// Every field of a hit is read from a stored row, and resolving one to
-    /// bytes is `law show`, which is arithmetic.
+    /// A term that reads as a citation is looked up rather than ranked. `3:305a`
+    /// put through a vector comes back as the Wft's numerically similar articles
+    /// and never as artikel 3:305a BW, because an identifier is arithmetic and
+    /// nothing about it is approximate. Where a citation reads more than one
+    /// way, every reading is answered: `8:4` is Boek 8 artikel 4 and is also
+    /// Awb artikel 8:4, and choosing between them is interpretation.
+    ///
+    /// The ranking is the one approximate thing in bron and it only orders. A
+    /// lookup carries no distance at all. Every field of either is read from a
+    /// stored row, and resolving one to bytes is `law show`, which is
+    /// arithmetic.
     Find {
-        /// The question, in words.
+        /// The question in words, or the citation.
         query: Vec<String>,
 
         #[arg(long, default_value_t = 20)]

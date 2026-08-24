@@ -6,9 +6,18 @@
 
 use std::io::{self, Write};
 
-use bron::wire::{AppealStatus, Caveat, DigestCheck, Envelope, View, Window};
+use bron::wire::{AppealStatus, Caveat, DigestCheck, Envelope, Found, View, Window};
 
 use crate::run::Answer;
+
+/// Column widths for a citation lookup, named once so the line and everything
+/// written under it cannot drift apart.
+///
+/// `NOT_HELD` is a column and not a suffix: what it says is true of the
+/// rendition, not of the label it would otherwise trail.
+const READING: usize = 8;
+const SOURCE: usize = 11;
+const NOT_HELD: &str = "not held";
 
 pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
     match answer {
@@ -19,35 +28,78 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
             caveats(e.caveats.as_slice(), out)
         }
 
-        Answer::Ranking(e) => {
+        Answer::Found(e) => {
             bound(e, out)?;
 
-            let Some(ranking) = &e.data else {
-                return Ok(());
-            };
+            match &e.data {
+                None => return Ok(()),
 
-            if ranking.hits.is_empty() {
-                // Said in words. A blank screen reads as a failure, and this is
-                // an answer: nothing in what was searched came close.
-                writeln!(out, "nothing in the corpus came close to that")?;
-            }
+                Some(Found::Ranking(ranking)) => {
+                    if ranking.hits.is_empty() {
+                        // Said in words. A blank screen reads as a failure, and
+                        // this is an answer: nothing in what was searched came
+                        // close.
+                        writeln!(out, "nothing in the corpus came close to that")?;
+                    }
 
-            for hit in &ranking.hits {
-                let unit = match &hit.lid {
-                    Some(number) => format!("lid {number}"),
-                    None if hit.unit == "lid" => "lid".to_string(),
-                    None => "article".to_string(),
-                };
+                    for hit in &ranking.hits {
+                        let unit = match &hit.lid {
+                            Some(number) => format!("lid {number}"),
+                            None if hit.unit == "lid" => "lid".to_string(),
+                            None => "article".to_string(),
+                        };
 
-                writeln!(
-                    out,
-                    "{:.3}  {:<11} {:<8} {}  {}",
-                    hit.distance,
-                    hit.source,
-                    unit,
-                    hit.law_id,
-                    hit.label.as_deref().unwrap_or(&hit.number),
-                )?;
+                        writeln!(
+                            out,
+                            "{:.3}  {:<11} {:<8} {}  {}",
+                            hit.distance,
+                            hit.source,
+                            unit,
+                            hit.law_id,
+                            hit.label.as_deref().unwrap_or(&hit.number),
+                        )?;
+                    }
+                }
+
+                // No distance, and the column it would sit in is not left
+                // empty: a lookup is arithmetic and prints what it resolved.
+                // The reading leads every line, because with more than one it
+                // is the answer to which of them the reader meant.
+                Some(Found::Lookup(lookup)) => {
+                    writeln!(out, "{}\n", lookup.citation)?;
+
+                    for entry in &lookup.resolved {
+                        writeln!(
+                            out,
+                            "{:<reading$} {:<source$} {}  {}  {:<holding$} {}",
+                            entry.reading,
+                            entry.source,
+                            entry.law_id,
+                            entry.version,
+                            // Its own column, so the label after it starts in
+                            // the same place on every line rather than being
+                            // pushed along by however long the one above was.
+                            if entry.held { "" } else { NOT_HELD },
+                            entry.label.as_deref().unwrap_or(&entry.number),
+                            reading = READING,
+                            source = SOURCE,
+                            holding = NOT_HELD.len(),
+                        )?;
+                        // A limit on one reading is not a limit on the answer,
+                        // and the reader quoting that line is the one who needs
+                        // it. Indented to the column the line starts in, read
+                        // off that column rather than counted out again here.
+                        for caveat in &entry.caveats {
+                            writeln!(
+                                out,
+                                "{:indent$}{}",
+                                "",
+                                caveat_line(caveat),
+                                indent = READING + 1,
+                            )?;
+                        }
+                    }
+                }
             }
 
             caveats(e.caveats.as_slice(), out)
@@ -473,204 +525,288 @@ fn caveats(caveats: &[Caveat], out: &mut impl Write) -> io::Result<()> {
 
     writeln!(out)?;
     for caveat in caveats {
-        let line = match caveat {
-            Caveat::UnstableOrdering => {
-                "note: ordering comes from a relevance score and is not reproducible".to_string()
-            }
-            Caveat::Truncated { window } => {
-                format!("note: filtered over a window of {window}, matches may be missing")
-            }
-            Caveat::SkippedArticles { count } => {
-                format!("note: {count} article(s) yielded no text and were skipped")
-            }
-            Caveat::AmbiguousArticle { number, paths } => format!(
-                "note: {} articles are numbered {number} in this law; all are shown, \
+        writeln!(out, "{}", caveat_line(caveat))?;
+    }
+    Ok(())
+}
+
+/// One limit, in words.
+///
+/// Separate from the loop above because a limit is not always the answer's:
+/// a citation read two ways carries one per reading, and those belong under
+/// the line they qualify rather than in a block at the end.
+fn caveat_line(caveat: &Caveat) -> String {
+    match caveat {
+        Caveat::UnstableOrdering => {
+            "note: ordering comes from a relevance score and is not reproducible".to_string()
+        }
+        Caveat::Truncated { window } => {
+            format!("note: filtered over a window of {window}, matches may be missing")
+        }
+        Caveat::SkippedArticles { count } => {
+            format!("note: {count} article(s) yielded no text and were skipped")
+        }
+        Caveat::AmbiguousArticle { number, paths } => format!(
+            "note: {} articles are numbered {number} in this law; all are shown, \
                  and their paths are what tell them apart:\n      {}",
-                paths.len(),
-                paths.join("\n      ")
-            ),
-            Caveat::TableFlattened {
-                articles,
-                cell_separator,
-            } => format!(
-                "note: article(s) {} print a table. Its rows are one line each with cells \
+            paths.len(),
+            paths.join("\n      ")
+        ),
+        Caveat::TableFlattened {
+            articles,
+            cell_separator,
+        } => format!(
+            "note: article(s) {} print a table. Its rows are one line each with cells \
                  separated by [{}], so a value belongs to the heading in the same position \
                  on the row above rather than to the line it follows.",
-                articles.join(", "),
-                cell_separator.trim(),
-            ),
-            Caveat::UpstreamDigestDiffers => {
-                "note: the bytes behind this answer do not match the digest the publisher's \
+            articles.join(", "),
+            cell_separator.trim(),
+        ),
+        Caveat::UpstreamDigestDiffers => {
+            "note: the bytes behind this answer do not match the digest the publisher's \
                  manifest states for them. The register is inconsistent about what it hashes, \
                  so this is upstream disagreeing with itself rather than the text being wrong, \
                  and it cannot be settled from here."
-                    .to_string()
-            }
-            Caveat::UpstreamDigestAbsent => {
-                "note: the manifest published no hash for this rendition, so these bytes rest \
+                .to_string()
+        }
+        Caveat::UpstreamDigestAbsent => {
+            "note: the manifest published no hash for this rendition, so these bytes rest \
                  on bron's own capture alone"
-                    .to_string()
-            }
-            Caveat::SeveralReadings { readings } => format!(
-                "note: this citation reads more than one way and every reading is answered: {}. \
+                .to_string()
+        }
+        Caveat::SeveralReadings { readings } => format!(
+            "note: this citation reads more than one way and every reading is answered: {}. \
                  Which was meant is yours to say.",
-                readings.join(", "),
-            ),
-            Caveat::ReadingUnresolved {
-                reading,
-                because,
-                regulation_id,
-                renditions,
-            } => {
-                let mut line = format!("note: the reading {reading} came to nothing ({because})");
-                if let Some(id) = regulation_id {
-                    line.push_str(&format!(", for {id}"));
-                }
-                if !renditions.is_empty() {
-                    line.push_str(&format!(": {}", renditions.join(", ")));
-                }
-                line.push_str(
-                    ". The other reading is answered above; this one was looked for and is not.",
-                );
-                line
+            readings.join(", "),
+        ),
+        Caveat::ReadingUnresolved {
+            reading,
+            because,
+            regulation_id,
+            renditions,
+        } => {
+            let mut line = format!("note: the reading {reading} came to nothing ({because})");
+            if let Some(id) = regulation_id {
+                line.push_str(&format!(", for {id}"));
             }
-            Caveat::HeldTextOnly {
-                held_regulations,
-                known_regulations,
-            } => format!(
-                "note: this is drawn from the {held_regulations} regulation(s) whose text the \
+            if !renditions.is_empty() {
+                line.push_str(&format!(": {}", renditions.join(", ")));
+            }
+            line.push_str(
+                ". The other reading is answered above; this one was looked for and is not.",
+            );
+            line
+        }
+        Caveat::HeldTextOnly {
+            held_regulations,
+            known_regulations,
+        } => format!(
+            "note: this is drawn from the {held_regulations} regulation(s) whose text the \
                  corpus holds, out of {known_regulations} it knows of. What the other \
                  {} would have said is not in this answer.",
-                known_regulations.saturating_sub(*held_regulations),
-            ),
-            Caveat::LanesUnsearched { lanes } => format!(
-                "note: {} hold no vectors and were not searched, so this answer covers less \
+            known_regulations.saturating_sub(*held_regulations),
+        ),
+        Caveat::LanesUnsearched { lanes } => format!(
+            "note: {} hold no vectors and were not searched, so this answer covers less \
                  than the question did",
-                lanes.join(" and "),
-            ),
-            Caveat::NotCommenced { articles } => format!(
-                "note: article(s) {} have not commenced. The register publishes the text they \
+            lanes.join(" and "),
+        ),
+        Caveat::NotCommenced { articles } => format!(
+            "note: article(s) {} have not commenced. The register publishes the text they \
                  will have, and it does not apply yet.",
-                articles.join(", "),
-            ),
-            Caveat::IllustrationOmitted { articles } => format!(
-                "note: article(s) {} print an image, which bron does not hold. Where the image \
+            articles.join(", "),
+        ),
+        Caveat::IllustrationOmitted { articles } => format!(
+            "note: article(s) {} print an image, which bron does not hold. Where the image \
                  is a formula, the text states what its variables mean and not the formula \
                  itself.",
-                articles.join(", "),
-            ),
-            Caveat::Retroactive {
-                in_force_from,
-                first_visible,
-            } => format!(
-                "note: this text applies from {in_force_from} but was only visible from \
+            articles.join(", "),
+        ),
+        Caveat::Retroactive {
+            in_force_from,
+            first_visible,
+        } => format!(
+            "note: this text applies from {in_force_from} but was only visible from \
                  {first_visible}"
-            ),
-            // The reason this lane goes through the service. A withdrawn
-            // rendition keeps its dates, so it wins an ordering by date and is
-            // still not what the register says applies.
-            Caveat::WithdrawnRenditions { excluded } => format!(
-                "note: the publisher has withdrawn {}, which cover(s) this date and were \
+        ),
+        // The reason this lane goes through the service. A withdrawn
+        // rendition keeps its dates, so it wins an ordering by date and is
+        // still not what the register says applies.
+        Caveat::WithdrawnRenditions { excluded } => format!(
+            "note: the publisher has withdrawn {}, which cover(s) this date and were \
                  passed over. This answer is the newest rendition the register still \
                  publishes for it.",
-                excluded.join(", "),
-            ),
-            // Deliberately does not say which one to use. That is transitional
-            // law, and naming a winner here would be a legal judgement wearing
-            // a lookup's clothes.
-            Caveat::AmbiguousRendition { chosen, discarded } => format!(
-                "note: more than one published rendition covers this date. This is {chosen}, \
+            excluded.join(", "),
+        ),
+        // Deliberately does not say which one to use. That is transitional
+        // law, and naming a winner here would be a legal judgement wearing
+        // a lookup's clothes.
+        Caveat::AmbiguousRendition { chosen, discarded } => format!(
+            "note: more than one published rendition covers this date. This is {chosen}, \
                  which commenced last; {} also cover(s) it. Which governs is a question of \
                  transitional law that bron does not answer.",
-                discarded.join(", "),
-            ),
-            Caveat::SupersededKnowledge { visible_until } => format!(
-                "note: the register has since revised what it shows for this date; this text \
+            discarded.join(", "),
+        ),
+        Caveat::SupersededKnowledge { visible_until } => format!(
+            "note: the register has since revised what it shows for this date; this text \
                  was what it showed until {visible_until}"
-            ),
-            Caveat::UnverifiedSlice => {
-                "note: the text beside each span is the service's word for what stands there. \
+        ),
+        Caveat::UnverifiedSlice => {
+            "note: the text beside each span is the service's word for what stands there. \
                  bron did not cut it out of bytes it hashed, so it is a report and not a \
                  proof; fetch the blob and slice it at those offsets to check it."
-                    .to_string()
-            }
-            // Said because the counts above cannot say it. An article left out
-            // of a comparison is left out of its totals too, so silence here
-            // reads as 'nothing changed'.
-            Caveat::ArticlesNotCompared {
-                unidentified_from,
-                unidentified_to,
-                repeated,
-            } => {
-                let mut line = String::from("note: not every article could be compared.");
-                if unidentified_from + unidentified_to > 0 {
-                    // Counted per rendition, and said that way. A missing
-                    // stam-id is the register declining to say whether the one
-                    // here is the one there, so one total would read as two
-                    // articles where there may be one.
-                    line.push_str(&format!(
-                        " {unidentified_from} article(s) in the earlier rendition and \
+                .to_string()
+        }
+        // Said because the counts above cannot say it. An article left out
+        // of a comparison is left out of its totals too, so silence here
+        // reads as 'nothing changed'.
+        Caveat::ArticlesNotCompared {
+            unidentified_from,
+            unidentified_to,
+            repeated,
+        } => {
+            let mut line = String::from("note: not every article could be compared.");
+            if unidentified_from + unidentified_to > 0 {
+                // Counted per rendition, and said that way. A missing
+                // stam-id is the register declining to say whether the one
+                // here is the one there, so one total would read as two
+                // articles where there may be one.
+                line.push_str(&format!(
+                    " {unidentified_from} article(s) in the earlier rendition and \
                          {unidentified_to} in the later carry no stam-id, so nothing says \
                          whether one on either side is the same article."
-                    ));
-                }
-                if !repeated.is_empty() {
-                    line.push_str(&format!(
-                        " The register used stam-id {} more than once inside one rendition, and \
+                ));
+            }
+            if !repeated.is_empty() {
+                line.push_str(&format!(
+                    " The register used stam-id {} more than once inside one rendition, and \
                          picking one of those would be a guess.",
-                        repeated.join(", "),
-                    ));
-                }
-                line.push_str(" They are outside the counts above.");
-                line
+                    repeated.join(", "),
+                ));
             }
-            Caveat::Unrecognised { stated } => format!(
-                "note: the service stated a limit this bron has no name for: {stated}. \
+            line.push_str(" They are outside the counts above.");
+            line
+        }
+        Caveat::Unrecognised { stated } => format!(
+            "note: the service stated a limit this bron has no name for: {stated}. \
                  Upgrade to read what it says."
-            ),
-            Caveat::NoZichtWindow => {
-                "note: the manifest carries no zicht dates, so this question cannot be \
+        ),
+        Caveat::NoZichtWindow => {
+            "note: the manifest carries no zicht dates, so this question cannot be \
                  answered against that window"
-                    .to_string()
-            }
-            Caveat::DigestUnverifiable => {
-                "note: the index recorded no digest for this capture, so these bytes could \
+                .to_string()
+        }
+        Caveat::DigestUnverifiable => {
+            "note: the index recorded no digest for this capture, so these bytes could \
                  not be checked against what the crawl stored"
-                    .to_string()
-            }
-            Caveat::DecodedAs { encoding, declared } => {
-                format!("note: read as {encoding}, {declared}")
-            }
-            Caveat::LossyDecoding => {
-                "note: bytes that could not be decoded were replaced, so the text is not a \
+                .to_string()
+        }
+        Caveat::DecodedAs { encoding, declared } => {
+            format!("note: read as {encoding}, {declared}")
+        }
+        Caveat::LossyDecoding => {
+            "note: bytes that could not be decoded were replaced, so the text is not a \
                  faithful reading of the capture"
-                    .to_string()
-            }
-            Caveat::Revisit => {
-                "note: the archive stored no new bytes for this capture and replayed an \
+                .to_string()
+        }
+        Caveat::Revisit => {
+            "note: the archive stored no new bytes for this capture and replayed an \
                  earlier one, so the content is older than the capture date"
-                    .to_string()
-            }
-            Caveat::ArchiveStatusUnknown => {
-                "note: the archive does not say what the site answered, which is what it \
+                .to_string()
+        }
+        Caveat::ArchiveStatusUnknown => {
+            "note: the archive does not say what the site answered, which is what it \
                  records for a crawl excluded by robots.txt. There is a capture; what it \
                  returned is withheld."
-                    .to_string()
-            }
-            // Said out loud because a tool that can cause the evidence it then
-            // cites should never leave the reader to work out which happened.
-            Caveat::RequestedByBron => {
-                "note: bron asked the archive for this capture; it is not one the archive \
+                .to_string()
+        }
+        // Said out loud because a tool that can cause the evidence it then
+        // cites should never leave the reader to work out which happened.
+        Caveat::RequestedByBron => {
+            "note: bron asked the archive for this capture; it is not one the archive \
                  already held"
-                    .to_string()
-            }
-            Caveat::MoreCaptures => {
-                "note: the archive held more captures than bron asked for, so this list is \
+                .to_string()
+        }
+        Caveat::MoreCaptures => {
+            "note: the archive held more captures than bron asked for, so this list is \
                  not everything"
-                    .to_string()
-            }
-        };
-        writeln!(out, "{line}")?;
+                .to_string()
+        }
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bron::wire::{Cited, Envelope, Found, Lookup};
+
+    use crate::run::Answer;
+
+    fn cited(reading: &str, held: bool, label: Option<&str>, caveats: Vec<Caveat>) -> Cited {
+        Cited {
+            reading: reading.into(),
+            source: "wetgeving".into(),
+            law_id: "BWBR0005291".into(),
+            version: "2025-07-01_0".into(),
+            number: "305a".into(),
+            label: label.map(str::to_string),
+            path: None,
+            content_hash: None,
+            held,
+            caveats,
+        }
+    }
+
+    fn rendered(resolved: Vec<Cited>) -> String {
+        let answer = Answer::Found(Envelope::ok(Found::Lookup(Lookup {
+            citation: "3:305a".into(),
+            resolved,
+        })));
+
+        let mut out = Vec::new();
+        answer.render(&mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    /// A limit on one reading is written under that reading, and it stays under
+    /// it. Counting the indent out by hand would leave two numbers that have to
+    /// agree and nothing making them.
+    #[test]
+    fn a_caveat_starts_where_the_line_it_qualifies_starts() {
+        let text = rendered(vec![cited(
+            "book",
+            true,
+            Some("Artikel 305a"),
+            vec![Caveat::UpstreamDigestAbsent],
+        )]);
+
+        let entry = text.lines().find(|l| l.starts_with("book")).unwrap();
+        let note = text.lines().find(|l| l.trim_start().starts_with("note:")).unwrap();
+
+        let indent = note.len() - note.trim_start().len();
+        let second = entry.find("wetgeving").unwrap();
+
+        assert_eq!(indent, second, "{text}");
+    }
+
+    /// What a rendition holds is true of the rendition, so it has a column of
+    /// its own. Trailing the label would move it by however long the label
+    /// above happened to be.
+    #[test]
+    fn every_label_starts_in_the_same_place_whether_or_not_the_text_is_held() {
+        let text = rendered(vec![
+            cited("book", false, None, Vec::new()),
+            cited("literal", true, Some("Artikel 3:305a"), Vec::new()),
+        ]);
+
+        let unheld = text.lines().find(|l| l.starts_with("book")).unwrap();
+        let held = text.lines().find(|l| l.starts_with("literal")).unwrap();
+
+        assert!(unheld.contains(NOT_HELD), "{text}");
+        assert_eq!(
+            unheld.find("305a").unwrap(),
+            held.find("Artikel 3:305a").unwrap(),
+            "{text}"
+        );
+    }
 }

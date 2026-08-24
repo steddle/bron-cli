@@ -93,10 +93,26 @@ impl Service {
             .fetch_answered(request)
             .map_err(|e| from_source(SERVICE, e))?;
 
-        let unreadable = |e: serde_json::Error| Fault::Upstream {
-            service: SERVICE,
-            source: anyhow::Error::new(e)
-                .context(format!("{} did not answer the bron envelope", fetched.url)),
+        // An unknown variant is this build being behind rather than the
+        // service being broken, and the two want different things done about
+        // them. Serde says which by naming the variant it did not know, the
+        // same distinction `Caveat::Unrecognised` already draws for a limit
+        // this bron has no name for.
+        let unreadable = |e: serde_json::Error| {
+            let known = e.to_string();
+            let context = if known.starts_with("unknown variant") {
+                format!(
+                    "{} answered a shape this bron has no name for. Upgrade to read what it says.",
+                    fetched.url,
+                )
+            } else {
+                format!("{} did not answer the bron envelope", fetched.url)
+            };
+
+            Fault::Upstream {
+                service: SERVICE,
+                source: anyhow::Error::new(e).context(context),
+            }
         };
 
         let envelope: Envelope<T> = serde_json::from_str(&fetched.text).map_err(unreadable)?;

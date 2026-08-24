@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use bron::blob::BlobStore;
 use bron::ids::BwbId;
-use bron::service::{Ask, SearchRequest, Service};
+use bron::service::{Ask, SearchData, SearchRequest, Service};
 use bron::sources::Client;
 use bron::wire::Caveat;
 use wiremock::matchers::{method, path};
@@ -238,7 +238,7 @@ fn asking_for(term: &str) -> SearchRequest {
     }
 }
 
-const RANKING: &str = r#"{"bron":1,"grade":"authority","data":{
+const RANKING: &str = r#"{"bron":1,"grade":"authority","data":{"kind":"ranking",
     "searched":["wetgeving"],
     "hits":[{"source":"wetgeving","unit":"article","regulation_id":"BWBR0005289",
              "expression":"2026-07-16_0","number":"162","label":"Artikel 162","path":null,
@@ -276,17 +276,16 @@ async fn a_ranking_carries_the_limits_the_service_stated() {
     let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let caveats = off_thread(&home, move |client| {
         Service::at(&base)
             .search(&client, &asking_for("onrechtmatige daad"))
-            .map(|answered| (answered.data.searched, answered.caveats))
+            .map(|answered| answered.caveats)
             .map_err(|e| e.to_string())
     })
     .await
     .expect("the service answered");
 
-    assert_eq!(answered.0, vec!["wetgeving".to_string()]);
-    assert_eq!(answered.1, vec![Caveat::Truncated { window: 20 }]);
+    assert_eq!(caveats, vec![Caveat::Truncated { window: 20 }]);
 }
 
 /// The question travels in a POST body precisely so it is not written down.
@@ -336,4 +335,255 @@ async fn a_refusal_from_the_service_says_how_long_it_asked_for() {
     .expect("a 429 must not read as success");
 
     assert!(message.contains("17s"), "{message}");
+}
+
+/// A citation the register reads two ways, answered both ways. The service
+/// keeps this shape apart from a ranking because a resolved entry carries no
+/// distance, and one invented for it would lie about how the answer came about.
+const LOOKUP: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-08-24","as_known_on":"2026-08-24",
+  "data":{"kind":"lookup","citation":"8:4","resolved":[
+    {"reading":"book","source":"wetgeving","regulation_id":"BWBR0005034",
+     "expression":"2026-07-01_0","held":true,"number":"4","label":"Artikel 4",
+     "path":"/Boek8/HoofdstukI/Titeldeel1/Artikel4",
+     "content_hash":"e0bd9a23c78b4c6a14be2e4e87c7ca61b706e1a5edecd4d409416e5998d8d199",
+     "caveats":[]},
+    {"reading":"literal","source":"wetgeving","regulation_id":"BWBR0005537",
+     "expression":"2026-08-15_0","held":true,"number":"8:4","label":"Artikel 8:4",
+     "path":"/Hoofdstuk8/Titeldeel8.1/Afdeling8.1.1/Artikel8:4",
+     "content_hash":"4ba2172e7f7630289a08992d33c6a8b181dd6167300989f143f3a506357c6364",
+     "caveats":[{"kind":"hash_disagrees"}]}]},
+  "caveats":[{"kind":"several_readings","readings":["book","literal"]}]}"#;
+
+/// A reading that resolved to a rendition whose text the corpus does not hold.
+/// The dates resolved and the rendition is named; whether it carries the
+/// article is a fact nobody has yet, so no hash travels.
+const LOOKUP_UNHELD: &str = r#"{"bron":1,"grade":"authority",
+  "data":{"kind":"lookup","citation":"3:305a","resolved":[
+    {"reading":"book","source":"wetgeving","regulation_id":"BWBR0005291",
+     "expression":"2025-07-01_0","held":false,"number":"305a","caveats":[]}]},
+  "caveats":[{"kind":"reading_unresolved","reading":"literal","because":"no_regulation_prints_it"}]}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_citation_is_looked_up_rather_than_ranked() {
+    let server = searching(LOOKUP, 200).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .search(&client, &asking_for("8:4"))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("the service answered");
+
+    let SearchData::Lookup { citation, resolved } = answered.data else {
+        panic!("a citation must not be read as a ranking");
+    };
+
+    assert_eq!(citation, "8:4");
+
+    // Both readings, in the order the service read them. Picking one would be
+    // bron deciding what a citation means, which is interpretation.
+    assert_eq!(
+        resolved
+            .iter()
+            .map(|r| r.reading.as_str())
+            .collect::<Vec<_>>(),
+        ["book", "literal"]
+    );
+    assert_eq!(resolved[0].regulation_id, "BWBR0005034");
+    assert_eq!(resolved[1].number, "8:4");
+
+    // A limit on one reading is that reading's, and travels with it.
+    assert_eq!(resolved[0].caveats.len(), 0);
+    assert_eq!(resolved[1].caveats.len(), 1);
+
+    assert!(
+        answered.caveats.contains(&Caveat::SeveralReadings {
+            readings: vec!["book".into(), "literal".into()],
+        }),
+        "{:?}",
+        answered.caveats
+    );
+}
+
+/// Known but not held is an answer: the dates resolved, the rendition is named,
+/// and there is no hash because nobody has read the text.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reading_that_found_a_rendition_without_text_says_so() {
+    let server = searching(LOOKUP_UNHELD, 200).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .search(&client, &asking_for("3:305a"))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("the service answered");
+
+    let SearchData::Lookup { resolved, .. } = answered.data else {
+        panic!("a citation must not be read as a ranking");
+    };
+
+    assert!(!resolved[0].held);
+    assert!(resolved[0].content_hash.is_none());
+    assert!(resolved[0].label.is_none());
+
+    // The reading that came to nothing says why rather than going missing.
+    assert!(
+        answered.caveats.contains(&Caveat::ReadingUnresolved {
+            reading: "literal".into(),
+            because: "no_regulation_prints_it".into(),
+            regulation_id: None,
+            renditions: Vec::new(),
+        }),
+        "{:?}",
+        answered.caveats
+    );
+}
+
+/// A question is still ranked, and a ranking still carries the distance that
+/// orders it. The two shapes are read apart, not flattened into one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_question_is_still_ranked() {
+    let server = searching(RANKING, 200).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .search(&client, &asking_for("onrechtmatige daad"))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("the service answered");
+
+    let SearchData::Ranking { searched, hits } = answered.data else {
+        panic!("a question must not be read as a citation");
+    };
+
+    assert_eq!(searched, vec!["wetgeving".to_string()]);
+    assert_eq!(hits[0].distance, 0.21);
+}
+
+/// A citation that resolves to nothing is a not-found, never an empty ranking
+/// in its place: an empty list cannot say whether the corpus holds no such
+/// article or the term named none.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_citation_that_resolves_to_nothing_is_not_found() {
+    let body = r#"{"bron":1,"grade":"authority","error":{
+        "kind":"not_found","message":"no article cited as [3:99999]",
+        "detail":["book: BWBR0005291 rendition 2025-07-01_0 does not carry artikel 99999",
+                  "literal: no regulation prints artikel 3:99999"]}}"#;
+    let server = searching(body, 404).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let fault = off_thread(&home, move |client| {
+        Service::at(&base)
+            .search(&client, &asking_for("3:99999"))
+            .err()
+            .map(|e| (e.kind(), e.to_string()))
+    })
+    .await
+    .expect("a citation that resolves to nothing must not read as success");
+
+    assert_eq!(fault.0, "not_found");
+    assert!(
+        fault.1.contains("does not carry artikel 99999"),
+        "{}",
+        fault.1
+    );
+    assert!(fault.1.contains("no regulation prints"), "{}", fault.1);
+}
+
+/// Reads the shape at its tag, so what is wrong with a ranking is reported
+/// against the ranking.
+///
+/// Told apart by shape instead, every one of these falls out the same way: the
+/// ranking fails to match, the lookup fails too, and all that comes back is
+/// that the answer matched no variant of an untagged enum. No field, no type,
+/// no position, on exactly the kind of failure this has to catch.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broken_ranking_is_reported_against_the_ranking() {
+    async fn refused(body: &str) -> String {
+        let server = searching(body, 200).await;
+        let home = Home::new();
+        let base = server.uri();
+
+        off_thread(&home, move |client| {
+            Service::at(&base)
+                .search(&client, &asking_for("onrechtmatige daad"))
+                .err()
+                .map(|e| e.chain().join(" | "))
+        })
+        .await
+        .expect("a broken ranking must not read as success")
+    }
+
+    let hit = r#"{"source":"wetgeving","unit":"article","regulation_id":"BWBR0005289",
+                  "expression":"2026-07-16_0","number":"162","label":"Artikel 162","path":null,
+                  "content_hash":"a61a""#;
+
+    // A field renamed upstream is named as the one that went missing.
+    let renamed = refused(&format!(
+        r#"{{"bron":1,"grade":"authority","data":{{"kind":"ranking",
+           "searched":["wetgeving"],"hitz":[{hit},"distance":0.21}}]}}}}"#
+    ))
+    .await;
+    assert!(renamed.contains("missing field `hits`"), "{renamed}");
+
+    // So is one the service stopped sending.
+    let missing = refused(&format!(
+        r#"{{"bron":1,"grade":"authority","data":{{"kind":"ranking",
+           "searched":["wetgeving"],"hits":[{hit}}}]}}}}"#
+    ))
+    .await;
+    assert!(missing.contains("missing field `distance`"), "{missing}");
+
+    // A field that arrived as the wrong thing is named by what was expected and
+    // where it stands, which is what serde has to say about a value rather than
+    // about a key.
+    let wrong = refused(&format!(
+        r#"{{"bron":1,"grade":"authority","data":{{"kind":"ranking",
+           "searched":["wetgeving"],"hits":[{hit},"distance":"near"}}]}}}}"#
+    ))
+    .await;
+    assert!(wrong.contains("expected f64"), "{wrong}");
+    assert!(wrong.contains("line"), "{wrong}");
+
+    for message in [&renamed, &missing, &wrong] {
+        assert!(!message.contains("did not match any variant"), "{message}");
+    }
+}
+
+/// A shape this bron has no name for is refused rather than read as the other
+/// one. Guessing at it would answer a question the service did not.
+///
+/// And it says which of the two is behind. A reader that reports its own
+/// ignorance as the service answering nonsense sends whoever reads it to the
+/// wrong half of the system.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shape_this_bron_does_not_know_is_refused() {
+    let body = r#"{"bron":1,"grade":"authority","data":{"kind":"something_later","x":1}}"#;
+    let server = searching(body, 200).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let fault = off_thread(&home, move |client| {
+        Service::at(&base)
+            .search(&client, &asking_for("onrechtmatige daad"))
+            .err()
+            .map(|e| (e.kind(), e.chain().join(" | ")))
+    })
+    .await
+    .expect("an unknown shape must not read as success");
+
+    assert_eq!(fault.0, "upstream");
+    assert!(fault.1.contains("something_later"), "{}", fault.1);
+    assert!(fault.1.contains("Upgrade to read what it says"), "{}", fault.1);
+    assert!(!fault.1.contains("did not answer the bron envelope"), "{}", fault.1);
 }

@@ -799,6 +799,76 @@ pub struct Ranking {
     pub hits: Vec<Hit>,
 }
 
+/// One reading of a citation, resolved to an article in a rendition.
+///
+/// No `distance`, and there will not be one. A ranking orders candidates by a
+/// number that only orders; a citation is looked up, and arrives or does not.
+/// Putting a distance here would say the answer came about a way it did not,
+/// and would invite a threshold on something that is not an ordering.
+#[derive(Debug, Serialize)]
+pub struct Cited {
+    /// How the citation was read. `book` takes the first segment as a book of
+    /// the Burgerlijk Wetboek, so `6:162` is Boek 6 artikel 162; `literal`
+    /// takes the whole number as one a regulation prints itself, which the Awb
+    /// and the Wft do. Which the reader meant is theirs to say.
+    pub reading: String,
+    /// Which corpus this came from: `wetgeving` today, more later.
+    pub source: String,
+    pub law_id: String,
+    pub version: String,
+    /// The number as that regulation prints it, which for a book reading is the
+    /// citation with its book taken off.
+    pub number: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// SHA-256 of the text, which is what `law show` resolves. Absent where
+    /// `held` is false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    /// Whether the service holds this rendition's text.
+    ///
+    /// False is an answer and not a miss: the dates resolved and the rendition
+    /// is named, and whether it carries this article is a fact nobody has yet.
+    pub held: bool,
+    /// What limits this reading in particular, as against the answer as a
+    /// whole. The rendition it resolved to may be one the publisher does not
+    /// vouch for, or one of several covering the date.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub caveats: Vec<Caveat>,
+}
+
+/// A citation, and every reading of it that resolved.
+#[derive(Debug, Serialize)]
+pub struct Lookup {
+    /// The citation as the service read it, which is not always as it was
+    /// typed: `6:162 BW` pins the book and reads as `6:162`.
+    pub citation: String,
+    /// In the order the service read them. An answer with more than one is a
+    /// citation that reads more than one way, and picking one of them would be
+    /// bron deciding what it means.
+    pub resolved: Vec<Cited>,
+}
+
+/// What a term turned out to be.
+///
+/// Two shapes rather than one with an optional field, and a tag rather than a
+/// key a consumer has to test for. A ranking is an approximate ordering over
+/// vectors and a lookup is arithmetic over identifiers; the one part of bron
+/// that may not be quoted sits in the first and not in the second, and a
+/// consumer branches on `kind` to know which it is holding.
+///
+/// `kind` is the word [`Caveat`] and [`ErrorBody`] already use for the value a
+/// consumer switches on, and the word the service publishes for this one. One
+/// vocabulary at both ends of the pipe.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Found {
+    Ranking(Ranking),
+    Lookup(Lookup),
+}
+
 /// What happened to one article between two versions of a law.
 ///
 /// Both sides carry their own text, digest and offsets, from two different
@@ -1310,6 +1380,46 @@ mod tests {
                 excluded: vec!["2017-07-01_0".into()]
             }
         );
+    }
+
+    /// A consumer tells the two shapes apart by reading one key, never by
+    /// testing whether another is present. A ranking that happened to resolve
+    /// to one hit and a citation that resolved to one article are different
+    /// answers, and only one of them may be ordered.
+    #[test]
+    fn a_ranking_and_a_lookup_say_which_they_are() {
+        let ranking = Found::Ranking(Ranking {
+            searched: vec!["wetgeving".into()],
+            hits: Vec::new(),
+        });
+        let json = serde_json::to_string(&ranking).unwrap();
+
+        assert!(json.starts_with(r#"{"kind":"ranking""#), "{json}");
+        assert!(json.contains(r#""searched":["wetgeving"]"#), "{json}");
+
+        let lookup = Found::Lookup(Lookup {
+            citation: "3:305a".into(),
+            resolved: vec![Cited {
+                reading: "book".into(),
+                source: "wetgeving".into(),
+                law_id: "BWBR0005291".into(),
+                version: "2025-07-01_0".into(),
+                number: "305a".into(),
+                label: Some("Artikel 305a".into()),
+                path: None,
+                content_hash: Some("8fc1e1eb".into()),
+                held: true,
+                caveats: Vec::new(),
+            }],
+        });
+        let json = serde_json::to_string(&lookup).unwrap();
+
+        assert!(json.starts_with(r#"{"kind":"lookup""#), "{json}");
+
+        // The one field a lookup may never carry. A citation that resolves is
+        // not an 87% match, and a number here invites a threshold on something
+        // that is not an ordering.
+        assert!(!json.contains("distance"), "{json}");
     }
 
     /// Provenance names who froze the bytes. A slice cut from a document bron

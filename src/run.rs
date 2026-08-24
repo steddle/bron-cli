@@ -15,8 +15,8 @@ use bron::db::{self, Db};
 use bron::diff;
 use bron::error::{Fault, Outcome, from_corpus, from_source};
 use bron::ids::{BwbId, Ecli, PublicationId};
-use bron::service::{self, Service};
 use bron::paths;
+use bron::service::{self, Service};
 use bron::sources::{
     Client, FetchedLaw, Source, VersionMeta, bwb, publications, rechtspraak, wayback,
 };
@@ -28,7 +28,7 @@ use crate::render;
 /// One command's result, ready to be written out either way.
 pub enum Answer {
     LawHits(Envelope<Vec<wire::LawHit>>),
-    Ranking(Envelope<wire::Ranking>),
+    Found(Envelope<wire::Found>),
     Versions(Envelope<Vec<wire::VersionSummary>>),
     Changes(Envelope<Box<wire::Changes>>),
     Articles(Envelope<Vec<wire::Article>>),
@@ -69,7 +69,7 @@ impl Answer {
 
         match self {
             Self::LawHits(e) => write(out, e),
-            Self::Ranking(e) => write(out, e),
+            Self::Found(e) => write(out, e),
             Self::Versions(e) => write(out, e),
             Self::Changes(e) => write(out, e),
             Self::Articles(e) => write(out, e),
@@ -200,16 +200,22 @@ fn narrow(
     Ok(narrowed)
 }
 
-/// Ranks the corpus against a question and answers with identifiers.
+/// Answers which article, from a question or from a citation, by identifier.
+///
+/// Two shapes come back and they stay apart. A question is ranked by a vector
+/// and every hit carries the distance that ordered it; a citation is looked up
+/// and carries none, because it arrived or it did not. Flattening them would
+/// put a number beside a resolved citation that says the answer came about a
+/// way it did not.
 ///
 /// The one command with no publisher behind it. Every other route through the
-/// service is an accelerant in front of a source of last resort; a ranking over
-/// the shared corpus has none, because the corpus is the source. So no service
-/// is a refusal rather than an empty answer: reporting nothing found would
-/// record an absence bron never established, which is the distinction the whole
-/// contract rests on. A 404 read as 'nothing matched' would record that same
-/// absence, which is why this reads the service's own envelope like every other
-/// call here.
+/// service is an accelerant in front of a source of last resort; the shared
+/// corpus has none, because it is the source. So no service is a refusal rather
+/// than an empty answer: reporting nothing found would record an absence bron
+/// never established, which is the distinction the whole contract rests on. A
+/// 404 read as 'nothing matched' would record that same absence, and a citation
+/// that resolves to nothing is exactly such a 404, which is why this reads the
+/// service's own envelope like every other call here.
 fn run_find(
     query: &str,
     limit: u32,
@@ -240,36 +246,58 @@ fn run_find(
         },
     )?;
 
-    let found = answered.data;
-    let hits = found
-        .hits
-        .into_iter()
-        .map(|hit| wire::Hit {
-            source: hit.source,
-            unit: hit.unit,
-            law_id: hit.regulation_id,
-            version: hit.expression,
-            number: hit.number,
-            label: hit.label,
-            path: hit.path,
-            lid: hit.lid.and_then(|l| l.number),
-            content_hash: hit.content_hash,
-            distance: hit.distance,
-        })
-        .collect();
+    let found = match answered.data {
+        service::SearchData::Ranking { searched, hits } => wire::Found::Ranking(wire::Ranking {
+            searched,
+            hits: hits
+                .into_iter()
+                .map(|hit| wire::Hit {
+                    source: hit.source,
+                    unit: hit.unit,
+                    law_id: hit.regulation_id,
+                    version: hit.expression,
+                    number: hit.number,
+                    label: hit.label,
+                    path: hit.path,
+                    lid: hit.lid.and_then(|l| l.number),
+                    content_hash: hit.content_hash,
+                    distance: hit.distance,
+                })
+                .collect(),
+        }),
+        service::SearchData::Lookup { citation, resolved } => wire::Found::Lookup(wire::Lookup {
+            citation,
+            // In the order they arrived. Every reading is answered, because
+            // choosing between them is interpretation and bron does not do any.
+            resolved: resolved.into_iter().map(cited).collect(),
+        }),
+    };
 
-    // Which lanes hold no vectors is the service's claim and travels as one.
-    // Working it out again from `searched` would be a second place for the same
-    // fact to be stated, and the two said it twice in one answer.
-    Ok(Answer::Ranking(
-        Envelope::ok(wire::Ranking {
-            searched: found.searched,
-            hits,
-        })
-        .bound_to(date, view)
-        .via(ResolvedVia::Mirror)
-        .with_caveats(answered.caveats),
+    // Which lanes hold no vectors, and which readings came to nothing, are the
+    // service's claims and travel as such. Working either out again here would
+    // be a second place for the same fact to be stated.
+    Ok(Answer::Found(
+        Envelope::ok(found)
+            .bound_to(date, view)
+            .via(ResolvedVia::Mirror)
+            .with_caveats(answered.caveats),
     ))
+}
+
+/// One reading of a citation, in the shape a consumer parses.
+fn cited(entry: service::Cited) -> wire::Cited {
+    wire::Cited {
+        reading: entry.reading,
+        source: entry.source,
+        law_id: entry.regulation_id,
+        version: entry.expression,
+        number: entry.number,
+        label: entry.label,
+        path: entry.path,
+        content_hash: entry.content_hash,
+        held: entry.held,
+        caveats: entry.caveats.into_iter().map(Caveat::stated).collect(),
+    }
 }
 
 /// Fetches one version, through the service when there is one.
@@ -600,7 +628,11 @@ fn run_law(
                         )
                     }),
                     after: change.after.map(|at| {
-                        side(&after.articles[at], &after.expression.label, &after_provenance)
+                        side(
+                            &after.articles[at],
+                            &after.expression.label,
+                            &after_provenance,
+                        )
                     }),
                 });
             }
@@ -609,8 +641,14 @@ fn run_law(
             // asked for it. `--all` decides which articles are in the list at
             // all, and a caveat about the request cannot see that.
             if articles.iter().any(|change| {
-                change.before.as_ref().is_some_and(wire::Side::reports_a_slice)
-                    || change.after.as_ref().is_some_and(wire::Side::reports_a_slice)
+                change
+                    .before
+                    .as_ref()
+                    .is_some_and(wire::Side::reports_a_slice)
+                    || change
+                        .after
+                        .as_ref()
+                        .is_some_and(wire::Side::reports_a_slice)
             }) {
                 caveats.push(Caveat::UnverifiedSlice);
             }
@@ -987,11 +1025,7 @@ fn run_db(command: &DbCommand) -> Outcome<Answer> {
 // -- shared --------------------------------------------------------------
 
 /// One side of a comparison, with the span that places it.
-fn side(
-    article: &service::Article,
-    version: &str,
-    provenance: &wire::Provenance,
-) -> wire::Side {
+fn side(article: &service::Article, version: &str, provenance: &wire::Provenance) -> wire::Side {
     wire::Side {
         version: version.to_string(),
         excerpt: excerpt(article.span, article.raw.as_deref()),
@@ -1355,7 +1389,10 @@ mod reading_tests {
     /// with a number the register never printed would be bron writing text.
     #[test]
     fn an_article_without_leden_reads_as_itself() {
-        assert_eq!(content(&article(vec![paragraph(None, "Eén geheel.")])), "Eén geheel.");
+        assert_eq!(
+            content(&article(vec![paragraph(None, "Eén geheel.")])),
+            "Eén geheel."
+        );
     }
 
     /// A repealed article is a single empty lid. Keeping it would give every

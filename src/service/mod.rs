@@ -40,7 +40,7 @@ pub use model::{
     Article, Articles, Ask, BlobProvenance, Expression, Paragraph, Regulation, Span, Verified,
     Window,
 };
-pub use search::{SearchData, SearchHit, SearchLid, SearchRequest};
+pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
 
 use client::SERVICE;
 
