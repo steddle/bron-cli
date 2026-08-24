@@ -20,10 +20,10 @@ use bron::wire::{Grade, View};
     name = "bron",
     version,
     about = "Dutch primary legal sources on your own disk",
-    long_about = "Fetches legislation, case law and official publications, freezes the bytes \
-                  that arrived, and stores what was read out of them with byte offsets back \
-                  into those bytes.\n\n\
-                  Exit codes: 0 ok, 1 usage, 2 not found, 3 network, 4 upstream, 5 corpus."
+    long_about = "Answers what Dutch law said on a date, and what the courts and the \
+                  official publications say, naming the document behind every answer and \
+                  the byte range inside it.\n\n\
+                  Exit codes: 0 ok, 1 usage, 2 not found, 3 network, 4 upstream, 5 local."
 )]
 pub struct Cli {
     /// Machine-readable output. Implies --quiet.
@@ -33,14 +33,6 @@ pub struct Cli {
     /// No progress reporting on stderr.
     #[arg(long, global = true)]
     pub quiet: bool,
-
-    /// Read every byte from the publisher, ignoring BRON_MIRROR.
-    ///
-    /// The mirror only ever serves bytes, and only bytes that hash to the
-    /// digest the publisher stated in the manifest, which bron reads directly
-    /// either way. This pins a single run to the publisher regardless.
-    #[arg(long, global = true)]
-    pub direct: bool,
 
     #[command(subcommand)]
     pub command: Command,
@@ -99,15 +91,6 @@ pub enum Command {
         #[command(flatten)]
         moment: Moment,
     },
-
-    Update(UpdateArgs),
-
-    /// Checks that every frozen document still matches its digest.
-    Verify,
-
-    /// The corpus itself.
-    #[command(subcommand)]
-    Db(DbCommand),
 }
 
 impl Command {
@@ -360,24 +343,6 @@ impl From<CollectionArg> for Collection {
     }
 }
 
-#[derive(Debug, Args)]
-pub struct UpdateArgs {
-    /// Only these laws. Without arguments, everything already held.
-    pub ids: Vec<String>,
-
-    /// Fetches even what already looks current.
-    #[arg(long)]
-    pub force: bool,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum DbCommand {
-    /// Path to the corpus.
-    Path,
-    /// Row counts per kind.
-    Stats,
-}
-
 /// Which moment a question about legislation means.
 ///
 /// Two windows, two questions, and one flag cannot choose between them.
@@ -481,7 +446,8 @@ mod tests {
 
     #[test]
     fn json_and_quiet_are_available_on_every_subcommand() {
-        let cli = Cli::try_parse_from(["bron", "--json", "db", "stats"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["bron", "--json", "law", "versions", "BWBR0005289"]).unwrap();
         assert!(cli.json);
     }
 }

@@ -12,8 +12,6 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use rusqlite::ToSql;
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use serde::Serialize;
 
 /// Error returned when text does not have the shape of an identifier.
@@ -55,19 +53,6 @@ macro_rules! string_id {
         impl Serialize for $name {
             fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
                 s.serialize_str(&self.0)
-            }
-        }
-
-        impl ToSql for $name {
-            fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-                Ok(ToSqlOutput::from(self.0.as_str()))
-            }
-        }
-
-        impl FromSql for $name {
-            fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-                let text = value.as_str()?;
-                text.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
             }
         }
 
@@ -434,21 +419,6 @@ impl Serialize for CaptureId {
     }
 }
 
-impl ToSql for CaptureId {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(self.to_string()))
-    }
-}
-
-impl FromSql for CaptureId {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        value
-            .as_str()?
-            .parse()
-            .map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
-}
-
 impl TryFrom<&str> for CaptureId {
     type Error = InvalidId;
 
@@ -560,40 +530,6 @@ mod tests {
         assert!(PublicationId::from_bwb_reference("").is_none());
     }
 
-    #[test]
-    fn round_trips_through_sqlite() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute("CREATE TABLE t (bwb TEXT, ecli TEXT)", [])
-            .unwrap();
-
-        let bwb: BwbId = "BWBR0005289".parse().unwrap();
-        let ecli: Ecli = "ECLI:NL:HR:2019:1278".parse().unwrap();
-        conn.execute(
-            "INSERT INTO t VALUES (?1, ?2)",
-            rusqlite::params![bwb, ecli],
-        )
-        .unwrap();
-
-        let (back_bwb, back_ecli): (BwbId, Ecli) = conn
-            .query_row("SELECT bwb, ecli FROM t", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .unwrap();
-        assert_eq!(back_bwb, bwb);
-        assert_eq!(back_ecli, ecli);
-    }
-
-    #[test]
-    fn a_corrupt_row_fails_loudly_rather_than_yielding_a_bad_id() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute("CREATE TABLE t (ecli TEXT)", []).unwrap();
-        conn.execute("INSERT INTO t VALUES ('not-an-ecli')", [])
-            .unwrap();
-
-        let result: rusqlite::Result<Ecli> = conn.query_row("SELECT ecli FROM t", [], |r| r.get(0));
-        assert!(result.is_err());
-    }
-
     // -- archive captures -------------------------------------------------
 
     #[test]
@@ -699,19 +635,5 @@ mod tests {
                 "20260806153132/com,steddle)/b",
             ]
         );
-    }
-
-    #[test]
-    fn a_capture_id_survives_the_corpus() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute("CREATE TABLE t (id TEXT)", []).unwrap();
-
-        let id = CaptureId::new("20260806153132".parse().unwrap(), "com,steddle)/");
-        conn.execute("INSERT INTO t VALUES (?1)", [&id]).unwrap();
-
-        let back: CaptureId = conn
-            .query_row("SELECT id FROM t", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(back, id);
     }
 }

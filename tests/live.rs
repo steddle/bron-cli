@@ -19,7 +19,7 @@ use bron::sources::{Client, wayback};
 #[test]
 fn the_index_still_answers_the_columns_bron_pins() {
     let home = tempfile::tempdir().unwrap();
-    let client = Client::with_dirs(home.path().join("blobs"), home.path().join("buckets")).unwrap();
+    let client = Client::with_buckets(home.path().join("buckets")).unwrap();
 
     // example.com is captured constantly and belongs to nobody, so asking for
     // it costs the archive nothing and tells us what we need.

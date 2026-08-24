@@ -34,23 +34,6 @@ pub enum Grade {
     Archive,
 }
 
-/// Which route the bytes behind an answer took.
-///
-/// A dossier may not be able to hide that it read through an intermediary, even
-/// one whose bytes are addressed by the hash of themselves.
-///
-/// `mirror` is published contract and keeps its name. The module behind it is
-/// [`crate::service`]: there is no publisher behind the address any more for a
-/// caller of this lane to be mirrored from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResolvedVia {
-    /// Straight from the body that published it.
-    Publisher,
-    /// Through the bron service.
-    Mirror,
-}
-
 /// Which of the two validity windows a date was resolved against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,14 +57,6 @@ pub struct Envelope<T> {
     pub as_of: Option<NaiveDate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<View>,
-    /// Which route the bytes behind this answer took.
-    ///
-    /// Present only where bytes were resolved at all, and never inferred. A
-    /// dossier must not be able to hide that its text came through an
-    /// intermediary, even one whose bytes were checked against the publisher's
-    /// own digest.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_via: Option<ResolvedVia>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,7 +73,6 @@ impl<T: Serialize> Envelope<T> {
         Self {
             bron: CONTRACT,
             grade: Grade::Authority,
-            resolved_via: None,
             as_of: None,
             view: None,
             data: Some(data),
@@ -143,12 +117,6 @@ impl<T: Serialize> Envelope<T> {
         self.caveats = caveats;
         self
     }
-
-    /// Records which route the bytes behind this answer took.
-    pub fn via(mut self, route: ResolvedVia) -> Self {
-        self.resolved_via = Some(route);
-        self
-    }
 }
 
 impl Envelope<()> {
@@ -162,7 +130,6 @@ impl Envelope<()> {
         Self {
             bron: CONTRACT,
             grade,
-            resolved_via: None,
             as_of: None,
             view: None,
             data: None,
@@ -238,6 +205,17 @@ pub enum Caveat {
     /// is Boek 3 artikel 305a and is also, in a law that prints the colon
     /// itself, artikel 3:305a, and which the reader meant is theirs to say.
     SeveralReadings { readings: Vec<String> },
+
+    /// The service said two things about one reading of a citation that cannot
+    /// both be true, so the reading is answered as though its text is not held.
+    ///
+    /// `held` and the three fields that belong to it travel separately on the
+    /// wire, so the two can disagree: a rendition said to be held with no hash
+    /// to resolve, or one said not to be held with a hash beside it. Answering
+    /// either as though nothing were wrong would put a reader one step from a
+    /// citation nobody can check, and dropping the whole answer would take the
+    /// other readings of the citation with it.
+    ReadingContradicted { reading: String, stated: String },
 
     /// A reading of a citation that came to nothing, and why.
     ///
@@ -615,37 +593,11 @@ impl Excerpt {
 // -- laws ----------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-pub struct Law {
-    pub id: String,
-    pub title: String,
-    pub version_count: u32,
-}
-
-impl From<model::Law> for Law {
-    fn from(law: model::Law) -> Self {
-        Self {
-            id: law.id.into_string(),
-            title: law.title,
-            version_count: law.version_count,
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
 pub struct Window {
     pub from: NaiveDate,
     /// Absent when open-ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub until: Option<NaiveDate>,
-}
-
-impl From<model::Validity> for Window {
-    fn from(validity: model::Validity) -> Self {
-        Self {
-            from: validity.from,
-            until: validity.until,
-        }
-    }
 }
 
 impl From<crate::service::Window> for Window {
@@ -796,6 +748,30 @@ pub struct Ranking {
     pub hits: Vec<Hit>,
 }
 
+/// Whether the rendition a reading resolved to has its text held, and what
+/// that makes available.
+///
+/// One type rather than a flag beside three optional fields. `held: true` with
+/// no `content_hash` is not a state that can exist, and saying so in prose left
+/// sixteen combinations spellable for two facts.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case", tag = "held")]
+pub enum Held {
+    /// It is, and it carries this article. `content_hash` is the SHA-256 of the
+    /// text, which is what `law show` resolves.
+    Text {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        content_hash: String,
+    },
+    /// It is not. An answer and not a miss: the dates resolved and the
+    /// rendition is named, and whether it carries this article is a fact nobody
+    /// has yet.
+    None,
+}
+
 /// One reading of a citation, resolved to an article in a rendition.
 ///
 /// No `distance`, and there will not be one. A ranking orders candidates by a
@@ -816,19 +792,8 @@ pub struct Cited {
     /// The number as that regulation prints it, which for a book reading is the
     /// citation with its book taken off.
     pub number: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    /// SHA-256 of the text, which is what `law show` resolves. Absent where
-    /// `held` is false.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_hash: Option<String>,
-    /// Whether the service holds this rendition's text.
-    ///
-    /// False is an answer and not a miss: the dates resolved and the rendition
-    /// is named, and whether it carries this article is a fact nobody has yet.
-    pub held: bool,
+    #[serde(flatten)]
+    pub held: Held,
     /// What limits this reading in particular, as against the answer as a
     /// whole. The rendition it resolved to may be one the publisher does not
     /// vouch for, or one of several covering the date.
@@ -1253,63 +1218,6 @@ impl From<model::Capture> for Capture {
 
 // -- housekeeping --------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-pub struct Stats {
-    pub path: String,
-    pub laws: u32,
-    pub versions: u32,
-    pub articles: u32,
-    pub cases: u32,
-    pub publications: u32,
-    pub documents: u32,
-}
-
-impl From<crate::db::Stats> for Stats {
-    fn from(stats: crate::db::Stats) -> Self {
-        Self {
-            path: stats.path.display().to_string(),
-            laws: stats.laws,
-            versions: stats.versions,
-            articles: stats.articles,
-            cases: stats.cases,
-            publications: stats.publications,
-            documents: stats.documents,
-        }
-    }
-}
-
-/// What `bron verify` can and cannot say.
-///
-/// Every count here is about the corpus alone: whether the bytes on this disk
-/// still hash to the name they are filed under. That is the wetgeving corpus
-/// and nothing else, because it is the only thing that keeps bytes: the other
-/// lanes fetch, parse, render and let go, and name the digest of what they read
-/// rather than a file. It says nothing about whether those bytes are the ones
-/// the publisher vouched for either. A document whose upstream digest disagrees
-/// is `intact` all the same, because the two are different claims and
-/// collapsing them is the inference this crate exists to refuse.
-#[derive(Debug, Serialize)]
-pub struct Verification {
-    /// What these counts are about, said rather than assumed.
-    ///
-    /// Zero is the ordinary answer on a machine that has never run
-    /// `bron update`, and `{"documents":0,"intact":0}` alone reads as 'nothing
-    /// bron holds is broken' where the truth is 'bron holds nothing'. A caller
-    /// that ran only `case`, `publication` or `archive` has verified exactly
-    /// nothing, and is entitled to see that from the answer.
-    pub scope: &'static str,
-    pub documents: u32,
-    pub intact: u32,
-    pub missing: Vec<String>,
-    pub corrupt: Vec<String>,
-}
-
-impl Verification {
-    pub fn is_intact(&self) -> bool {
-        self.missing.is_empty() && self.corrupt.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1420,6 +1328,37 @@ mod tests {
         );
     }
 
+    /// A held rendition and an unheld one are two states, and one type says
+    /// which. A flag beside three optional fields left sixteen combinations
+    /// spellable, fourteen of which cannot happen.
+    #[test]
+    fn a_reading_says_what_the_service_holds_for_it() {
+        let cited = |held| Cited {
+            reading: "book".into(),
+            source: "wetgeving".into(),
+            law_id: "BWBR0005291".into(),
+            version: "2025-07-01_0".into(),
+            number: "305a".into(),
+            held,
+            caveats: Vec::new(),
+        };
+
+        let json = serde_json::to_string(&cited(Held::Text {
+            label: Some("Artikel 305a".into()),
+            path: None,
+            content_hash: "8fc1e1eb".into(),
+        }))
+        .unwrap();
+
+        assert!(json.contains(r#""held":"text""#), "{json}");
+        assert!(json.contains(r#""content_hash":"8fc1e1eb""#), "{json}");
+
+        let json = serde_json::to_string(&cited(Held::None)).unwrap();
+
+        assert!(json.contains(r#""held":"none""#), "{json}");
+        assert!(!json.contains("content_hash"), "{json}");
+    }
+
     /// A record the register publishes without a body says so, rather than
     /// arriving as one whose provenance went missing. The digest is the whole
     /// of how an answer from this lane is checked.
@@ -1459,23 +1398,6 @@ mod tests {
         assert!(!json.contains("provenance"), "{json}");
     }
 
-    /// Zero is the ordinary answer on a machine that never ran `bron update`,
-    /// and four zeroes on their own read as 'nothing is broken' where the truth
-    /// is 'nothing is held'.
-    #[test]
-    fn a_verification_names_what_it_checked() {
-        let json = serde_json::to_string(&Verification {
-            scope: "corpus",
-            documents: 0,
-            intact: 0,
-            missing: Vec::new(),
-            corrupt: Vec::new(),
-        })
-        .unwrap();
-
-        assert!(json.contains(r#""scope":"corpus""#), "{json}");
-    }
-
     /// A consumer tells the two shapes apart by reading one key, never by
     /// testing whether another is present. A ranking that happened to resolve
     /// to one hit and a citation that resolved to one article are different
@@ -1499,10 +1421,11 @@ mod tests {
                 law_id: "BWBR0005291".into(),
                 version: "2025-07-01_0".into(),
                 number: "305a".into(),
-                label: Some("Artikel 305a".into()),
-                path: None,
-                content_hash: Some("8fc1e1eb".into()),
-                held: true,
+                held: Held::Text {
+                    label: Some("Artikel 305a".into()),
+                    path: None,
+                    content_hash: "8fc1e1eb".into(),
+                },
                 caveats: Vec::new(),
             }],
         });

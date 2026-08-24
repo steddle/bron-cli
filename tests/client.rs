@@ -7,7 +7,7 @@
 //!
 //! These are the paths least exercised in ordinary use and most expensive to
 //! get wrong, because each fails by looking like something else. A refusal that
-//! is not honoured looks like a slow host; a blob written after decoding rather
+//! is not honoured looks like a slow host; a digest taken after decoding rather
 //! than before looks fine until the first body that is not UTF-8.
 //!
 //! [`bron::sources::Client`] is deliberately blocking, so every call into it
@@ -17,28 +17,22 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use bron::blob::{BlobId, BlobStore};
+use bron::blob::BlobId;
 use bron::sources::Client;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Somewhere for one test's blobs and buckets to live.
+/// Somewhere for one test's rate-limit buckets to live.
 struct Home {
-    _dir: tempfile::TempDir,
-    blobs: PathBuf,
+    dir: tempfile::TempDir,
     buckets: PathBuf,
 }
 
 impl Home {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let blobs = dir.path().join("blobs");
         let buckets = dir.path().join("buckets");
-        Self {
-            _dir: dir,
-            blobs,
-            buckets,
-        }
+        Self { dir, buckets }
     }
 
     /// The bucket file's two lines: when the last request returned, and until
@@ -70,9 +64,9 @@ where
     T: Send + 'static,
     F: FnOnce(Client) -> T + Send + 'static,
 {
-    let (blobs, buckets) = (home.blobs.clone(), home.buckets.clone());
+    let buckets = home.buckets.clone();
 
-    tokio::task::spawn_blocking(move || f(Client::with_dirs(blobs, buckets).unwrap()))
+    tokio::task::spawn_blocking(move || f(Client::with_buckets(buckets).unwrap()))
         .await
         .unwrap()
 }
@@ -101,7 +95,7 @@ async fn a_refusal_writes_a_backoff_deadline_every_process_can_see() {
     let url = format!("{}/refused", server.uri());
 
     let error = off_thread(&home, move |client| {
-        client.fetch_url(&url).err().map(|e| e.to_string())
+        client.read_url(&url).err().map(|e| e.to_string())
     })
     .await
     .expect("a 429 must not read as success");
@@ -134,7 +128,7 @@ async fn retry_after_is_read_from_the_header_and_not_from_the_body() {
 
     let home = Home::new();
     let url = format!("{}/refused", server.uri());
-    off_thread(&home, move |client| client.fetch_url(&url).is_ok()).await;
+    off_thread(&home, move |client| client.read_url(&url).is_ok()).await;
 
     let ahead = home.hold_off_ms(&server.address().ip().to_string());
     assert!(ahead > 25_000, "the header asked for 30s; got {ahead}ms");
@@ -146,7 +140,7 @@ async fn an_uncapped_retry_after_cannot_hold_a_run_hostage() {
     let home = Home::new();
     let url = format!("{}/refused", server.uri());
 
-    off_thread(&home, move |client| client.fetch_url(&url).is_ok()).await;
+    off_thread(&home, move |client| client.read_url(&url).is_ok()).await;
 
     // A day is what the host asked for. One url must not be able to stop a
     // whole run, so the ceiling wins.
@@ -165,7 +159,7 @@ async fn a_refusal_without_a_header_still_holds_callers_off() {
 
     let home = Home::new();
     let url = format!("{}/refused", server.uri());
-    off_thread(&home, move |client| client.fetch_url(&url).is_ok()).await;
+    off_thread(&home, move |client| client.read_url(&url).is_ok()).await;
 
     // No Retry-After is not permission to carry straight on.
     let ahead = home.hold_off_ms(&server.address().ip().to_string());
@@ -189,7 +183,7 @@ async fn the_pacing_clock_is_stamped_when_a_request_returns() {
     let before = now_millis();
 
     off_thread(&home, move |client| {
-        client.fetch_url(&url).map(|_| ()).unwrap()
+        client.read_url(&url).map(|_| ()).unwrap()
     })
     .await;
 
@@ -221,9 +215,9 @@ async fn a_body_that_is_not_utf8_still_leaves_a_digest_behind() {
         let url = url.clone();
         move |client| {
             // The decoding path refuses it, which is right for the XML lanes.
-            let decoded = client.fetch(client.get(&url)).is_err();
+            let decoded = client.read(client.get(&url)).is_err();
             // The byte path takes it.
-            let raw = client.fetch_bytes(client.get(&url)).unwrap();
+            let raw = client.read_bytes(client.get(&url)).unwrap();
             (decoded, (raw.bytes, raw.blob))
         }
     })
@@ -236,32 +230,6 @@ async fn a_body_that_is_not_utf8_still_leaves_a_digest_behind() {
         BlobId::of(&bytes),
         "the digest is of exactly what arrived"
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_blob_is_frozen_before_anything_tries_to_read_it() {
-    let bytes = vec![0x00, 0xFF, 0x01, 0xFE];
-
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/binary"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes.clone()))
-        .mount(&server)
-        .await;
-
-    let home = Home::new();
-    let url = format!("{}/binary", server.uri());
-
-    // Fails on the decode, after the bytes have already been written.
-    off_thread(&home, move |client| client.fetch(client.get(&url)).is_ok()).await;
-
-    let held = BlobStore::new(&home.blobs)
-        .get(&BlobId::of(&bytes))
-        .unwrap();
-
-    // The whole premise: a response no reading can turn into text is still
-    // citable, because the bytes were frozen before anyone tried to read them.
-    assert_eq!(held, bytes);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -278,7 +246,7 @@ async fn an_error_status_names_the_url_that_produced_it() {
 
     let chain = off_thread(&home, {
         let url = url.clone();
-        move |client| client.fetch_url(&url).err().map(|e| format!("{e:#}"))
+        move |client| client.read_url(&url).err().map(|e| format!("{e:#}"))
     })
     .await
     .expect("a 404 must not read as success");
@@ -303,7 +271,7 @@ async fn provenance_records_the_address_actually_dialled() {
 
     let recorded = off_thread(&home, move |client| {
         client
-            .fetch(client.get(&url).query(&[("q", "burgerlijk")]))
+            .read(client.get(&url).query(&[("q", "burgerlijk")]))
             .unwrap()
             .url
     })
@@ -338,7 +306,7 @@ async fn a_replay_fetch_stops_at_a_redirect_instead_of_taking_it() {
 
     let followed = off_thread(&home, {
         let url = url.clone();
-        move |client| client.fetch_bytes(client.get(&url)).map(|r| r.bytes).ok()
+        move |client| client.read_bytes(client.get(&url)).map(|r| r.bytes).ok()
     })
     .await;
 
@@ -382,7 +350,7 @@ async fn a_host_that_refuses_the_connection_still_slows_every_caller() {
     let url = "http://127.0.0.1:1/gone".to_string();
 
     let error = off_thread(&home, move |client| {
-        client.fetch_url(&url).err().map(|e| format!("{e:#}"))
+        client.read_url(&url).err().map(|e| format!("{e:#}"))
     })
     .await
     .expect("an unreachable host is a failure");
@@ -396,12 +364,11 @@ async fn a_host_that_refuses_the_connection_still_slows_every_caller() {
     );
 }
 
-/// A lane that fetches, parses, renders and is done keeps no copy. The digest
-/// is the same either way and is what travels with the answer; a second copy
-/// on disk would be a file per invocation in a store that is deliberately never
-/// evicted, that no ledger row names and that nothing here can read back.
+/// bron holds nothing between runs but its share of the rate-limit budget. The
+/// digest of what was read travels with the answer and is what makes it
+/// checkable; a copy on disk would be a file per invocation that nothing reads.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_hashed_read_names_its_bytes_without_keeping_them() {
+async fn a_read_names_its_bytes_and_writes_nothing_but_the_budget() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/decision"))
@@ -411,41 +378,48 @@ async fn a_hashed_read_names_its_bytes_without_keeping_them() {
 
     let home = Home::new();
     let url = format!("{}/decision", server.uri());
-    let blobs = home.blobs.clone();
 
-    let (digest, held) = off_thread(&home, move |client| {
-        let fetched = client.read_url(&url).expect("the publisher answered");
-        let held = BlobStore::new(&blobs).contains(&fetched.blob);
-        (fetched.blob, held)
+    let digest = off_thread(&home, move |client| {
+        client.read_url(&url).expect("the publisher answered").blob
     })
     .await;
 
-    // The digest is the one the bytes would have been filed under.
     assert_eq!(digest, BlobId::of(b"<uitspraak/>"));
-    assert!(!held, "a hashed read wrote a blob nothing will come back for");
+
+    let written: Vec<_> = walk(home.dir.path())
+        .into_iter()
+        .map(|p| {
+            p.strip_prefix(home.dir.path())
+                .unwrap()
+                .display()
+                .to_string()
+        })
+        .collect();
+
+    assert_eq!(
+        written.len(),
+        1,
+        "a read left more than its bucket behind: {written:?}"
+    );
+    assert!(written[0].starts_with("buckets/"), "{written:?}");
 }
 
-/// The one lane that keeps them. `update` writes a ledger row naming this
-/// digest and stores articles whose spans point into these bytes, so the file
-/// has both an index and a reader.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_frozen_fetch_keeps_what_something_will_come_back_for() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/toestand"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("<toestand/>"))
-        .mount(&server)
-        .await;
+/// Every file under a directory, so a test can say what a run left behind
+/// rather than what it went looking for.
+fn walk(root: &std::path::Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return found;
+    };
 
-    let home = Home::new();
-    let url = format!("{}/toestand", server.uri());
-    let blobs = home.blobs.clone();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(walk(&path));
+        } else {
+            found.push(path);
+        }
+    }
 
-    let held = off_thread(&home, move |client| {
-        let fetched = client.fetch_url(&url).expect("the publisher answered");
-        BlobStore::new(&blobs).contains(&fetched.blob)
-    })
-    .await;
-
-    assert!(held, "the corpus lane must keep the bytes its spans point into");
+    found
 }

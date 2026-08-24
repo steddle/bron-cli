@@ -453,98 +453,6 @@ impl UrlKey {
     }
 }
 
-/// bron's own guess at the key the index would assign an address.
-///
-/// A separate type from [`UrlKey`] with no conversion between them, so the rule
-/// below is checked by the compiler rather than promised in a comment.
-///
-/// Used for exactly one thing: looking in the corpus for a capture that may
-/// already be held, before asking the archive. Identity always comes from the
-/// index's own `urlkey`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ApproxUrlKey(String);
-
-impl ApproxUrlKey {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Guesses the key the index would assign an address.
-///
-/// The archive keys its index on a SURT form: host labels reversed and
-/// comma-joined, then `)/` and the path. `https://steddle.com/pricing` becomes
-/// `com,steddle)/pricing`.
-///
-/// # The invariant
-///
-/// **This is never coarser than SURT.** Every simplification here must keep
-/// apart at least everything the archive keeps apart. Two addresses the archive
-/// would give different keys must never collapse to one key here.
-///
-/// That is the whole safety argument, and it is directional. Being *finer* than
-/// SURT costs a lookup that misses and a fetch that was not needed. Being
-/// *coarser* returns a capture of a different page, which is a wrong answer
-/// wearing a cache hit. So: query parameters are not sorted, session ids are
-/// not stripped, nothing is percent-decoded and nothing is punycoded, all of
-/// which distinguish addresses the archive merges. Only the default port for
-/// the scheme is dropped, because that is the only port the archive itself
-/// treats as absent.
-pub fn urlkey_of(url: &str) -> Result<ApproxUrlKey> {
-    let url = url.trim();
-    let (scheme, rest) = match url.split_once("://") {
-        Some((scheme, rest)) => (scheme.to_ascii_lowercase(), rest),
-        None => (String::new(), url),
-    };
-
-    let (authority, path) = match rest.split_once('/') {
-        Some((authority, path)) => (authority, path),
-        None => (rest, ""),
-    };
-
-    // Credentials are not part of the key.
-    let authority = authority
-        .rsplit('@')
-        .next()
-        .unwrap_or(authority)
-        .to_ascii_lowercase();
-
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((host, port)) => (host, Some(port)),
-        None => (authority.as_str(), None),
-    };
-
-    // A non-default port is part of the address as far as the archive is
-    // concerned, so dropping every port would merge two pages into one key and
-    // hand back a capture of the wrong one.
-    let default = match scheme.as_str() {
-        "https" => "443",
-        _ => "80",
-    };
-    let host = match port {
-        Some(port) if port != default => &authority,
-        _ => host,
-    };
-
-    if host.is_empty() {
-        bail!("{url} names no host");
-    }
-
-    // www is not a distinct site as far as the index is concerned.
-    let host = host.strip_prefix("www.").unwrap_or(host);
-    let (host, suffix) = match host.split_once(':') {
-        Some((host, port)) => (host, format!(":{port}")),
-        None => (host, String::new()),
-    };
-    let reversed: Vec<&str> = host.split('.').rev().collect();
-
-    Ok(ApproxUrlKey(format!(
-        "{}{suffix})/{}",
-        reversed.join(","),
-        path.to_ascii_lowercase()
-    )))
-}
-
 // -- digests -------------------------------------------------------------
 
 /// How the replayed bytes stand against the digest the index recorded.
@@ -1311,78 +1219,6 @@ mod tests {
         assert!(parse_index(r#"[[],["com,steddle)/x 20260101"]]"#).is_err());
     }
 
-    // -- urlkeys ----------------------------------------------------------
-
-    fn key(url: &str) -> String {
-        urlkey_of(url).unwrap().as_str().to_string()
-    }
-
-    #[test]
-    fn an_address_reduces_to_the_key_the_index_sorts_on() {
-        assert_eq!(key("https://steddle.com/"), "com,steddle)/");
-        assert_eq!(key("https://steddle.com"), "com,steddle)/");
-        assert_eq!(key("https://steddle.com/pricing"), "com,steddle)/pricing");
-        assert_eq!(key("https://a.b.example.org/x"), "org,example,b,a)/x");
-    }
-
-    #[test]
-    fn spellings_of_one_address_reduce_together() {
-        // The whole reason identity is the key and not the address: these are
-        // one record, and keying on the address would make them several.
-        let canonical = key("https://steddle.com/pricing");
-
-        for spelling in [
-            "http://steddle.com/pricing",
-            "https://www.steddle.com/pricing",
-            "https://STEDDLE.COM/Pricing",
-            // The default port for the scheme, which the archive treats as
-            // absent too.
-            "https://steddle.com:443/pricing",
-            "http://steddle.com:80/pricing",
-        ] {
-            assert_eq!(key(spelling), canonical, "{spelling}");
-        }
-    }
-
-    #[test]
-    fn a_non_default_port_is_kept_because_the_index_keeps_it() {
-        // The direction that matters. Being finer than the archive costs a
-        // lookup that misses; being coarser hands back a capture of a
-        // different page, which is a wrong answer wearing a cache hit.
-        assert_ne!(
-            key("https://steddle.com:8080/x"),
-            key("https://steddle.com/x")
-        );
-        assert_ne!(
-            key("http://steddle.com:8080/x"),
-            key("http://steddle.com/x")
-        );
-
-        // ...and the port survives into the key rather than being smuggled
-        // into a host label.
-        assert!(key("https://steddle.com:8080/x").contains("8080"));
-    }
-
-    #[test]
-    fn queries_are_left_alone_because_touching_them_could_only_merge() {
-        // Not sorted, not stripped, not decoded: every one of those would risk
-        // collapsing two addresses the archive keeps apart.
-        assert_ne!(
-            key("https://steddle.com/x?a=1&b=2"),
-            key("https://steddle.com/x?b=2&a=1")
-        );
-        assert_ne!(
-            key("https://steddle.com/x?a=1"),
-            key("https://steddle.com/x")
-        );
-    }
-
-    #[test]
-    fn an_address_with_no_host_is_refused() {
-        assert!(urlkey_of("https:///nothing").is_err());
-        assert!(urlkey_of("").is_err());
-    }
-
     // -- digests ----------------------------------------------------------
 
     #[test]
@@ -1807,7 +1643,10 @@ mod tests {
     /// the oldest capture rather than the newest. Both look like an answer.
     #[test]
     fn the_newest_capture_on_a_date_is_asked_for_by_bounding_and_counting_back() {
-        let asked = newest_query("https://steddle.com/pricing", Some("2024-06-01".parse().unwrap()));
+        let asked = newest_query(
+            "https://steddle.com/pricing",
+            Some("2024-06-01".parse().unwrap()),
+        );
 
         assert!(asked.contains(&("limit", "-1".to_string())), "{asked:?}");
         assert!(
@@ -1835,5 +1674,4 @@ mod tests {
         assert!(asked.contains(&("limit", "-1".to_string())), "{asked:?}");
         assert!(!asked.iter().any(|(key, _)| *key == "to"), "{asked:?}");
     }
-
 }

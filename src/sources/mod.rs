@@ -4,7 +4,6 @@
 //! the document it was parsed from and byte spans into it, but not yet stored
 //! and not yet stamped with a fetch time. Persisting is [`crate::db`]'s job.
 
-pub mod bwb;
 pub mod publications;
 pub mod rechtspraak;
 pub mod wayback;
@@ -17,8 +16,8 @@ pub use http::{Client, Fetched, FetchedBytes};
 use chrono::NaiveDate;
 
 use crate::blob::BlobId;
-use crate::ids::{BwbId, Ecli, PublicationId};
-use crate::model::{Relation, Span, Validity};
+use crate::ids::{Ecli, PublicationId};
+use crate::model::Relation;
 
 /// A document to parse, paired with everything needed to record where it came
 /// from.
@@ -75,112 +74,6 @@ impl From<Source<'_>> for Provenance {
             byte_len: source.byte_len,
         }
     }
-}
-
-/// One published version of a law, as the manifest describes it.
-///
-/// Available without downloading the text, which is what makes both `--as-of`
-/// resolution and update checking cheap.
-#[derive(Debug, Clone, PartialEq)]
-pub struct VersionMeta {
-    /// Upstream's label, e.g. `2026-07-16_0`.
-    pub version: String,
-    pub in_force: Validity,
-    /// Absent when the manifest omits the zicht dates.
-    ///
-    /// Never defaulted to `in_force`: substituting one window for the other is
-    /// exactly what [`crate::model::Validity`] exists to prevent, and a default
-    /// performs that substitution silently.
-    pub visible: Option<Validity>,
-    /// The publisher's own digest of the version XML, when supplied.
-    pub upstream_hash: Option<String>,
-    pub byte_len: Option<u64>,
-}
-
-impl VersionMeta {
-    /// True when this text applied before the register showed it.
-    ///
-    /// Retroactive effect is the ordinary case in tax legislation: 612 of the
-    /// 733 versions of the Wet IB 2001 apply from before they were visible. It
-    /// is what makes the two windows answer differently, and it is a fact read
-    /// off the manifest rather than a judgement about which one governs.
-    pub fn is_retroactive(&self) -> bool {
-        self.visible
-            .is_some_and(|zicht| zicht.from > self.in_force.from)
-    }
-}
-
-/// A law and its articles, as published in a single version.
-#[derive(Debug, Clone, PartialEq)]
-pub struct FetchedLaw {
-    pub id: BwbId,
-    pub title: String,
-    pub law_type: Option<String>,
-    pub version: String,
-    pub in_force: Validity,
-    /// Absent when the manifest omits the zicht dates. See [`VersionMeta`].
-    pub visible: Option<Validity>,
-    pub upstream_hash: Option<String>,
-    pub provenance: Provenance,
-    pub articles: Vec<FetchedArticle>,
-    /// Articles present in the source that yielded no text, and were therefore
-    /// not stored. A legal corpus that drops articles must at least count them.
-    pub skipped_articles: u32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct FetchedArticle {
-    /// Upstream's stable identity for this article across versions.
-    ///
-    /// Numbers repeat within a law and paths move when a law is restructured;
-    /// this does neither. It is what makes a diff between two versions an
-    /// identity match rather than a guess: of the 340 articles in BW6, 335
-    /// carry the same stam-id in the 2023 text as in the 2026 one.
-    pub stam_id: Option<String>,
-    pub number: String,
-    pub label: Option<String>,
-    pub title: Option<String>,
-    pub path: Option<String>,
-    /// Rendered text, derived from the leden for reading and indexing.
-    pub content: String,
-    /// Byte range of the whole `<artikel>` element in the source document.
-    pub span: Span,
-    pub leden: Vec<FetchedLid>,
-    /// The publication that put this article in this form, e.g. `stb-2023-41`.
-    ///
-    /// This is the amending act, which is where transitional law lives. bron
-    /// does not read it; it makes it reachable.
-    pub amended_by: Option<PublicationId>,
-    /// What that publication did: `nieuwe-regeling`, `wijziging`, `nieuw`,
-    /// `vervallen`. Upstream's vocabulary, unmapped.
-    pub effect: Option<String>,
-    /// The day this article took the form it has here.
-    ///
-    /// For a repealed provision it is the day it went, which is the difference
-    /// between knowing a provision is gone and knowing when.
-    pub in_force_from: Option<NaiveDate>,
-    /// How many tables this article prints, so an answer can say its text is a
-    /// linearisation rather than a grid.
-    pub tables: u32,
-    /// How many images this article prints, none of which bron holds.
-    pub illustrations: u32,
-    /// Upstream's identity for this text of this article.
-    pub versie_id: Option<String>,
-    /// `goed`, or `nogniet` where the provision has not commenced.
-    pub status: Option<String>,
-    /// The Juriconnect reference the register states for this article.
-    pub jci: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct FetchedLid {
-    pub number: Option<String>,
-    pub content: String,
-    /// Byte range of the `<lid>` element, or of the article's own text when the
-    /// article has no lid structure.
-    pub span: Span,
-    /// The Juriconnect reference the register states for this lid.
-    pub jci: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

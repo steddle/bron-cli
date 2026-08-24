@@ -9,36 +9,27 @@
 //! implementation of one rule is one that falls behind: the CLI went on
 //! choosing a withdrawn rendition for months after the service stopped.
 //!
-//! **Bytes are safe to take from it.** A blob is named by the SHA-256 of its
-//! own content, and the manifest states a SHA-512 for every rendition, so a
-//! body that does not hash to what was asked for is refused. `update` still
-//! holds the service to the publisher's digest and falls back to the publisher
-//! when it cannot answer.
+//! **Nothing has to be taken on trust.** Every answer names the blob it was
+//! read from, addressed by the hash of its own content, and the offsets of the
+//! article inside it. Fetch those bytes, hash them, slice them, and either they
+//! say what bron said or they do not.
 //!
-//! **An answer says it came through here.** [`crate::wire::ResolvedVia`] is on
-//! every wetgeving answer, and `--direct`, or `BRON_MIRROR=`, takes this
-//! address out of the path entirely, which for this lane means there is no
-//! answer to give.
-//!
-//! The environment variable, the flag and the value `mirror` in `resolved_via`
-//! are published contract and keep their names. Only this module was renamed,
-//! because there is no publisher behind the address any more for a caller to
-//! be mirrored from.
+//! There is no second route. `BRON_MIRROR` points this at another deployment
+//! and nothing points it at a publisher, because resolving a date against the
+//! register means holding every manifest the register publishes and that is
+//! what the service is for.
 
 pub mod client;
 pub mod model;
 pub mod search;
 
-use anyhow::{Context, Result, bail};
-
 use crate::error::{Fault, Outcome};
 use crate::ids::BwbId;
-use crate::sources::{Client, Fetched, VersionMeta};
+use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, BlobProvenance, Expression, Paragraph, Regulation, Span, Verified,
-    Window,
+    Article, Articles, Ask, BlobProvenance, Expression, Paragraph, Regulation, Span, Window,
 };
 pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -51,39 +42,52 @@ const ENV: &str = "BRON_MIRROR";
 ///
 /// A default rather than an opt-in, because the reason the service exists is to
 /// ask the government once for everybody, and a setting nobody sets collapses
-/// no rate limit at all.
-///
-/// Two things keep that honest. Every answer names the route it took in
-/// `resolved_via`, and every span it carries points into a blob named by the
-/// hash of its own content, so a reader who wants to check a quotation can
-/// fetch those bytes and cut them again. `--direct`, or `BRON_MIRROR=`, takes
-/// this address out of the path.
+/// no rate limit at all. What keeps that honest is that every span it carries
+/// points into a blob named by the hash of its own content, so a reader who
+/// wants to check a quotation can fetch those bytes and cut them again.
 const DEFAULT: &str = "https://bron.steddle.com/api/v1";
 
+#[derive(Debug)]
 pub struct Service {
     base: String,
 }
 
 impl Service {
-    /// The service this invocation should use, if any.
+    /// The service this invocation reads through.
     ///
-    /// `--direct` wins over everything, so a single run can always be pinned to
-    /// the publisher without editing anyone's shell profile. Setting the
-    /// variable to an empty string is the same opt-out made durable; unsetting
-    /// it restores [`DEFAULT`], because "I never configured this" and "I turned
-    /// this off" are different intentions and only one of them is silence.
-    pub fn resolve(direct: bool) -> Option<Self> {
-        if direct {
-            return None;
+    /// Always one. An empty setting used to mean "turn this off", and there is
+    /// nothing left to turn it off in favour of: every lane either reads the
+    /// service or reads a publisher directly, and no lane does both. A setting
+    /// that names no service is refused rather than silently ignored, because
+    /// whoever wrote it meant something by it and is owed the news that it
+    /// cannot be done.
+    ///
+    /// The refusal quotes what was set, and asks whether the value names a
+    /// service rather than whether it survived normalising. `""`, `"/"` and
+    /// `"/api/v1"` all normalise away to nothing, but `"example.com"` and
+    /// `"/some/path"` do not, and those two used to reach the first request and
+    /// fail there as `upstream`: a value the caller typed wrong, charged to the
+    /// service. One rule, an address with a scheme and a host, refuses all five
+    /// on the same sentence and at the caller's own exit code.
+    pub fn resolve() -> Outcome<Self> {
+        let Ok(configured) = std::env::var(ENV) else {
+            return Ok(Self::at(DEFAULT));
+        };
+
+        let service = Self::at(&configured);
+
+        let names_a_service = reqwest::Url::parse(&service.base)
+            .is_ok_and(|url| url.has_host() && matches!(url.scheme(), "http" | "https"));
+
+        if !names_a_service {
+            return Err(Fault::usage(format!(
+                "{ENV} is set to [{configured}], which names no service. The legislation lane \
+                 reads the bron service and there is no publisher route left to fall back to; \
+                 unset it to use {DEFAULT}, or point it at another deployment."
+            )));
         }
 
-        let service = Self::at(std::env::var(ENV).as_deref().unwrap_or(DEFAULT));
-
-        if service.base.is_empty() {
-            return None;
-        }
-
-        Some(service)
+        Ok(service)
     }
 
     /// The service at one address. [`Service::resolve`] decides which one a run
@@ -175,63 +179,6 @@ impl Service {
     pub fn blob_url(&self, digest: &str) -> String {
         format!("{}/api/v1/blobs/{digest}", self.base)
     }
-
-    /// A version's bytes, when the service has them.
-    ///
-    /// `Ok(None)` is the service saying it does not hold this version, which is
-    /// an ordinary answer and a reason to ask the publisher. `Err` is the
-    /// service failing, which is also a reason to ask the publisher but is
-    /// worth saying out loud: a service that is quietly unreachable looks
-    /// exactly like one that is quietly empty, and the difference is the whole
-    /// question of whether the thing is working.
-    pub fn version_bytes(
-        &self,
-        client: &Client,
-        law: &BwbId,
-        meta: &VersionMeta,
-    ) -> Result<Option<Fetched>> {
-        // Without a stated digest there is nothing to hold the answer to, so
-        // there is no safe way to accept it from anywhere but the publisher.
-        if meta.upstream_hash.is_none() {
-            return Ok(None);
-        }
-
-        let Some(digest) = self.digest_of(client, law, &meta.version)? else {
-            return Ok(None);
-        };
-
-        self.blob(client, &digest).map(Some)
-    }
-
-    /// Which blob holds a version, according to the service.
-    fn digest_of(&self, client: &Client, law: &BwbId, version: &str) -> Result<Option<String>> {
-        let answered = self.expressions(client, law).map_err(anyhow::Error::new)?;
-
-        Ok(digest_for(answered.data, version))
-    }
-
-    fn blob(&self, client: &Client, digest: &str) -> Result<Fetched> {
-        if !is_sha256_hex(digest) {
-            bail!("the service named a blob that is not a sha-256 digest: {digest}");
-        }
-
-        client
-            .fetch_url(&self.blob_url(digest))
-            .with_context(|| format!("cannot read blob {digest} from the service"))
-    }
-}
-
-/// Which blob to ask for, out of what the service listed.
-///
-/// A rendition the service checked and found wrong is skipped: its bytes would
-/// fail the publisher's digest on arrival too, so asking for them costs a round
-/// trip and buys nothing. One it said nothing about is asked for, because
-/// nothing was said and the check on arrival is what decides either way.
-fn digest_for(rows: Vec<Expression>, version: &str) -> Option<String> {
-    rows.into_iter()
-        .find(|row| row.label == version)
-        .filter(|row| row.verified != Verified::Differs)
-        .and_then(|row| row.blob)
 }
 
 /// Trims a configured base down to what the paths above are appended to.
@@ -288,11 +235,41 @@ mod tests {
 
     #[test]
     fn an_unset_environment_falls_back_to_the_default_service() {
-        let service = with_env(None, || Service::resolve(false));
+        let service = with_env(None, Service::resolve);
         assert_eq!(
             service.expect("the default").base(),
             "https://bron.steddle.com"
         );
+    }
+
+    /// A setting is refused for naming no service, not for surviving
+    /// `normalise` badly. Two of these reached the first request and came back
+    /// as `upstream`, which charged the service for what the caller typed.
+    #[test]
+    fn a_setting_that_names_no_service_is_a_usage_failure() {
+        for named in ["", "   ", "/", "/api/v1", "example.com", "/some/path", "bron.steddle.com"] {
+            let refused = with_env(Some(named), Service::resolve);
+
+            let fault = refused
+                .err()
+                .unwrap_or_else(|| panic!("[{named}] names no service and must be refused"));
+
+            assert_eq!(fault.kind(), "usage", "[{named}]");
+            assert!(fault.to_string().contains(named.trim()), "[{named}]");
+        }
+    }
+
+    #[test]
+    fn an_address_with_a_scheme_and_a_host_is_taken_either_way_it_is_written() {
+        for named in [
+            "https://bron.test",
+            "https://bron.test/",
+            "https://bron.test/api/v1",
+            "http://127.0.0.1:8080",
+        ] {
+            let service = with_env(Some(named), Service::resolve);
+            assert!(service.is_ok(), "[{named}] names a service");
+        }
     }
 
     #[test]
@@ -303,16 +280,8 @@ mod tests {
     }
 
     #[test]
-    fn direct_beats_the_environment() {
-        // A single run has to be pinnable to the publisher without editing a
-        // shell profile, so the flag wins.
-        let service = with_env(Some("https://bron.test"), || Service::resolve(true));
-        assert!(service.is_none());
-    }
-
-    #[test]
     fn a_configured_service_is_used_and_its_trailing_slash_is_not() {
-        let service = with_env(Some("https://bron.test/"), || Service::resolve(false));
+        let service = with_env(Some("https://bron.test/"), Service::resolve);
         // Joined with "/api/v1/..." above, so a kept slash would ask for "//api/v1".
         assert_eq!(service.expect("a service").base(), "https://bron.test");
     }
@@ -342,61 +311,24 @@ mod tests {
         );
     }
 
+    /// An empty setting used to turn the service off. There is nothing left to
+    /// turn it off in favour of, so it is refused rather than quietly read as
+    /// silence: whoever wrote it meant something by it.
+    ///
+    /// `/api/v1` and `/` are not empty and normalise away to nothing all the
+    /// same, so the refusal quotes what was set rather than calling it empty.
     #[test]
-    fn a_blank_setting_turns_the_service_off_rather_than_restoring_the_default() {
-        // The durable form of --direct. Silence means the default; an empty
-        // value means someone decided.
-        assert!(with_env(Some(""), || Service::resolve(false)).is_none());
-        assert!(with_env(Some("   "), || Service::resolve(false)).is_none());
-    }
+    fn a_setting_that_names_no_service_is_refused_and_quoted_back() {
+        for nothing in ["", "   ", "/", "/api/v1"] {
+            let refused =
+                with_env(Some(nothing), Service::resolve).expect_err("this names no service");
 
-    fn row(label: &str, blob: Option<&str>, verified: Verified) -> Expression {
-        Expression {
-            label: label.to_string(),
-            in_force: Window {
-                from: "2024-01-01".parse().unwrap(),
-                until: None,
-            },
-            as_known: None,
-            upstream_hash: None,
-            size: None,
-            held: blob.is_some(),
-            verified,
-            blob: blob.map(str::to_string),
+            assert_eq!(refused.kind(), "usage");
+            assert!(
+                refused.to_string().contains(&format!("[{nothing}]")),
+                "the refusal must quote what was set: {refused}"
+            );
         }
-    }
-
-    #[test]
-    fn the_blob_for_a_version_is_the_one_listed_against_its_label() {
-        let rows = vec![
-            row("2024-01-01_0", Some("aa"), Verified::Matches),
-            row("2026-07-16_0", Some("bb"), Verified::Matches),
-        ];
-        assert_eq!(digest_for(rows, "2026-07-16_0").as_deref(), Some("bb"));
-    }
-
-    #[test]
-    fn a_rendition_the_service_checked_and_found_wrong_is_not_worth_fetching() {
-        // Its bytes would fail the publisher's digest on arrival, so asking for
-        // them costs a round trip and buys nothing.
-        let rows = vec![row("2024-01-01_0", Some("aa"), Verified::Differs)];
-        assert_eq!(digest_for(rows, "2024-01-01_0"), None);
-    }
-
-    /// Nothing said is not the same as checked and wrong. Reading it as a
-    /// refusal would route every fetch to the publisher the day the service
-    /// stopped sending the field, with nothing but `resolved_via` to show it.
-    #[test]
-    fn a_rendition_the_service_said_nothing_about_is_still_asked_for() {
-        let rows = vec![row("2024-01-01_0", Some("aa"), Verified::Unstated)];
-        assert_eq!(digest_for(rows, "2024-01-01_0").as_deref(), Some("aa"));
-    }
-
-    #[test]
-    fn a_version_the_service_does_not_hold_yields_nothing() {
-        let rows = vec![row("2024-01-01_0", None, Verified::Matches)];
-        assert_eq!(digest_for(rows, "2024-01-01_0"), None);
-        assert_eq!(digest_for(Vec::new(), "2024-01-01_0"), None);
     }
 
     #[test]

@@ -28,31 +28,12 @@ pub fn find_all<'a>(
         .filter(move |n| n.tag_name().name() == name && n.tag_name().namespace() == Some(namespace))
 }
 
-/// First descendant with this local name, ignoring namespaces.
-///
-/// The BWB document body declares no namespace at all, so this is the right
-/// tool there and the wrong one inside an SRU envelope.
-pub fn find_local<'a>(node: Elem<'a>, name: &'static str) -> Option<Elem<'a>> {
-    node.descendants().find(|n| n.tag_name().name() == name)
-}
-
 pub fn find_all_local<'a>(
     node: Elem<'a>,
     name: &'static str,
 ) -> impl Iterator<Item = Elem<'a>> + 'a {
     node.descendants()
         .filter(move |n| n.tag_name().name() == name)
-}
-
-/// Direct children with this local name.
-///
-/// Unlike [`find_all_local`] this does not descend, so a nested repeat of the
-/// same tag is not collected twice.
-pub fn children_local<'a>(
-    node: Elem<'a>,
-    name: &'static str,
-) -> impl Iterator<Item = Elem<'a>> + 'a {
-    node.children().filter(move |n| n.tag_name().name() == name)
 }
 
 /// True when the node sits anywhere inside a `<meta-data>` block.
@@ -72,14 +53,6 @@ pub fn find_all_content<'a>(
     name: &'static str,
 ) -> impl Iterator<Item = Elem<'a>> + 'a {
     find_all_local(node, name).filter(|n| !in_metadata(*n))
-}
-
-/// Text of the element's own immediate text nodes, ignoring child elements.
-///
-/// `<citeertitel>Burgerlijk Wetboek Boek 6<meta-data>…</meta-data></citeertitel>`
-/// yields just the title. Using [`inner_text`] there would append the metadata.
-pub fn own_text(node: Elem) -> Option<String> {
-    collect(node.children().filter(|n| n.is_text()))
 }
 
 /// Text of every descendant text node, joined. The equivalent of itertext.
@@ -150,17 +123,6 @@ mod tests {
     }
 
     #[test]
-    fn own_text_stops_at_child_elements() {
-        let doc = parse(
-            "<citeertitel>Burgerlijk Wetboek Boek 6<meta-data><x>junk</x></meta-data></citeertitel>",
-        );
-        assert_eq!(
-            own_text(doc.root_element()).as_deref(),
-            Some("Burgerlijk Wetboek Boek 6")
-        );
-    }
-
-    #[test]
     fn inner_text_collects_children() {
         let doc = parse("<al>Verbintenissen <nadruk>kunnen</nadruk> ontstaan.</al>");
         assert_eq!(
@@ -170,9 +132,8 @@ mod tests {
     }
 
     #[test]
-    fn children_do_not_descend_but_descendants_do() {
+    fn descendants_are_found_at_every_depth() {
         let doc = parse("<artikel><lid><lid>nested</lid></lid></artikel>");
-        assert_eq!(children_local(doc.root_element(), "lid").count(), 1);
         assert_eq!(find_all_local(doc.root_element(), "lid").count(), 2);
     }
 

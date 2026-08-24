@@ -20,6 +20,16 @@ const NS_GZD: &str = "http://standaarden.overheid.nl/sru";
 const NS_WETGEVING: &str = "http://standaarden.overheid.nl/wetgeving/";
 const NS_DCTERMS: &str = "http://purl.org/dc/terms/";
 
+/// Removes CQL's unescapable quote without joining the words around it.
+///
+/// CQL string literals have no escape syntax, so a quote in a term would
+/// terminate it early and draw a parse diagnostic instead of results. Replaced
+/// with a space and never removed: deleting it welds two words into a third
+/// nobody asked for.
+fn strip_quotes(text: &str) -> String {
+    text.replace('"', " ")
+}
+
 /// Which collection to search. The values are upstream's own
 /// `w.publicatienaam`, which is why they are Dutch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +72,7 @@ pub fn search(client: &Client, query: &Query) -> Result<Vec<PublicationHit>> {
     let mut cql: Vec<String> = query
         .terms
         .split_whitespace()
-        .map(|term| format!("cql.textAndIndexes=\"{}\"", super::bwb::strip_quotes(term)))
+        .map(|term| format!("cql.textAndIndexes=\"{}\"", strip_quotes(term)))
         .collect();
 
     cql.push(format!(
@@ -70,10 +80,7 @@ pub fn search(client: &Client, query: &Query) -> Result<Vec<PublicationHit>> {
         query.collection.as_str()
     ));
     if let Some(dossier) = query.dossier {
-        cql.push(format!(
-            "w.dossiernummer=\"{}\"",
-            super::bwb::strip_quotes(dossier)
-        ));
+        cql.push(format!("w.dossiernummer=\"{}\"", strip_quotes(dossier)));
     }
 
     Ok(fetch_records(client, &cql.join(" and "), query.limit)?

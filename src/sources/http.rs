@@ -1,13 +1,13 @@
 //! One HTTP client for every source.
 //!
-//! Every response is frozen into the blob store before it is parsed, and the
-//! digest travels with the text. A caller that stores a fact can therefore
-//! always name the exact bytes it read that fact from.
+//! Every response is hashed before it is parsed and the digest travels with the
+//! text, so a caller that states a fact can always name the exact bytes it read
+//! that fact from. Nothing is kept: a digest beside the address it came from is
+//! what makes an answer checkable, and a reader checks one by fetching that
+//! address and hashing what arrives.
 //!
-//! There is no freshness cache here. A content-addressed store cannot be
-//! consulted before a fetch, because the key is the answer. Skipping a refetch
-//! is the corpus's decision, made from what it already holds: the BWB manifest
-//! names the current version, so an update compares versions, not bodies.
+//! There is no cache here and no store behind it. bron holds nothing between
+//! runs but its share of the rate-limit budget.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -15,7 +15,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use reqwest::blocking::RequestBuilder;
 
-use crate::blob::{BlobId, BlobStore};
+use crate::blob::BlobId;
+use crate::error::OwnDoing;
 use crate::paths;
 use crate::ratelimit::{Bucket, Policy};
 
@@ -76,31 +77,20 @@ impl Fetched {
 /// than look hung.
 pub type WaitReporter = Box<dyn Fn(&str, Duration) + Send + Sync>;
 
+/// Said when the shared budget itself is what bron cannot use. See
+/// [`OwnDoing`]: the host on the other end had nothing to do with it.
+const BUDGET: OwnDoing = OwnDoing("bron cannot use the rate-limit budget on this machine");
+
 /// What a fetch does with what comes back.
 #[derive(Debug, Clone, Copy)]
 enum Reading {
-    /// Keep it, and refuse it where the server answered an error status.
-    ///
-    /// For bytes something will come back for. In this crate that is the
-    /// wetgeving corpus alone: `update` writes a ledger row naming the digest
-    /// and stores articles whose spans point into these bytes, so the file has
-    /// both an index and a reader.
+    /// A publisher's answer. Hashed, and refused where the server answered an
+    /// error status.
     ///
     /// The [`reqwest::Error`] carrying the code is what lets
     /// [`crate::error::from_source`] tell a 404 from a dead network.
-    Frozen,
-    /// Hash it and let it go, refusing an error status like any other publisher
-    /// fetch.
-    ///
-    /// For a lane that fetches, parses, renders and is done. The digest travels
-    /// with the answer and is what makes it checkable: a reader fetches the URL
-    /// beside it and hashes what arrives. Keeping a second copy here would add
-    /// a file per invocation to a store that is deliberately never evicted,
-    /// that nothing indexes now that no ledger row is written for it, and that
-    /// nothing in this crate can read back. Naming a digest is provenance;
-    /// hoarding an unindexed copy is litter.
     Hashed,
-    /// None of the three, and they go together.
+    /// Neither of those, and none of the budget.
     ///
     /// An answer from the bron service is not evidence: no offset points into
     /// it, no ledger row names it, and what it does point at is a blob already
@@ -131,7 +121,6 @@ pub struct Client {
     /// The same client, except that it reports a redirect rather than taking
     /// it. See [`Client::get_unredirected`].
     no_redirect: reqwest::blocking::Client,
-    blobs: BlobStore,
     buckets: PathBuf,
     on_wait: Option<WaitReporter>,
 }
@@ -141,18 +130,18 @@ impl Client {
         Ok(Self {
             inner: build(reqwest::redirect::Policy::default())?,
             no_redirect: build(reqwest::redirect::Policy::none())?,
-            blobs: BlobStore::new(paths::blob_dir()?),
-            buckets: paths::bucket_dir()?,
+            buckets: paths::bucket_dir().context(OwnDoing(
+                "bron has nowhere to keep its share of the rate-limit budget",
+            ))?,
             on_wait: None,
         })
     }
 
-    /// A client whose blobs and buckets land somewhere specific. For tests.
-    pub fn with_dirs(blobs: impl Into<PathBuf>, buckets: impl Into<PathBuf>) -> Result<Self> {
+    /// A client whose rate-limit buckets land somewhere specific. For tests.
+    pub fn with_buckets(buckets: impl Into<PathBuf>) -> Result<Self> {
         Ok(Self {
             inner: build(reqwest::redirect::Policy::default())?,
             no_redirect: build(reqwest::redirect::Policy::none())?,
-            blobs: BlobStore::new(blobs),
             buckets: buckets.into(),
             on_wait: None,
         })
@@ -172,20 +161,10 @@ impl Client {
         self.inner.post(url)
     }
 
-    pub fn blobs(&self) -> &BlobStore {
-        &self.blobs
-    }
-
-    /// Sends a prepared request and freezes what comes back, undecoded.
+    /// Sends a prepared request and hashes what comes back, undecoded.
     ///
     /// The URL is taken from the built request rather than from the caller, so
     /// provenance records the address actually dialled, query string and all.
-    pub fn fetch_bytes(&self, request: RequestBuilder) -> Result<FetchedBytes> {
-        self.fetch_on(&self.inner, request, Reading::Frozen)
-    }
-
-    /// Sends a prepared request and hashes what comes back without keeping it.
-    /// See [`Reading::Hashed`].
     pub fn read_bytes(&self, request: RequestBuilder) -> Result<FetchedBytes> {
         self.fetch_on(&self.inner, request, Reading::Hashed)
     }
@@ -223,10 +202,10 @@ impl Client {
         // The shared budget is for the services bron does not run. See
         // [`Reading::Envelope`].
         let bucket = match reading {
-            Reading::Frozen | Reading::Hashed => {
+            Reading::Hashed => {
                 let policy = Policy::for_request(&host, request.url().path());
                 let bucket = Bucket::new(&self.buckets, &host, policy);
-                let waited = bucket.acquire()?;
+                let waited = bucket.acquire().context(BUDGET)?;
                 if !waited.is_zero()
                     && let Some(report) = &self.on_wait
                 {
@@ -241,7 +220,7 @@ impl Client {
         // Stamped on return rather than on dispatch: a call that spent a minute
         // inside its own retries must not hand the next one a free pass.
         if let Some(bucket) = &bucket {
-            bucket.released()?;
+            bucket.released().context(BUDGET)?;
         }
 
         let response = match response {
@@ -258,7 +237,7 @@ impl Client {
                 let error = match &bucket {
                     Some(bucket) => error.context(format!(
                         "cannot reach {host}; holding off for {}s",
-                        bucket.unreachable()?.as_secs()
+                        bucket.unreachable().context(BUDGET)?.as_secs()
                     )),
                     None => error.context(format!("cannot reach {host}")),
                 };
@@ -275,7 +254,7 @@ impl Client {
             match &bucket {
                 Some(bucket) => anyhow::bail!(
                     "{host} refused the request; holding off for {}s",
-                    bucket.refused(backoff)?.as_secs()
+                    bucket.refused(backoff).context(BUDGET)?.as_secs()
                 ),
                 None => match backoff {
                     Some(wait) => anyhow::bail!(
@@ -288,7 +267,7 @@ impl Client {
         }
 
         let response = match reading {
-            Reading::Frozen | Reading::Hashed => response
+            Reading::Hashed => response
                 .error_for_status()
                 .with_context(|| format!("{url} returned an error status"))?,
             Reading::Envelope => response,
@@ -311,13 +290,8 @@ impl Client {
             .with_context(|| format!("{url} returned an unreadable body"))?;
 
         // Hashed before anything is decided about what it says, so a body that
-        // no reading can decode still has a digest to be cited by. Only what
-        // something will come back for is written down; the digest is the same
-        // either way, and it is the digest that travels.
-        let blob = match reading {
-            Reading::Frozen => self.blobs.put(&body)?,
-            Reading::Hashed | Reading::Envelope => BlobId::of(&body),
-        };
+        // no reading can decode still has a digest to be cited by.
+        let blob = BlobId::of(&body);
 
         Ok(FetchedBytes {
             content_encoding,
@@ -330,19 +304,8 @@ impl Client {
 
     /// Sends a prepared request and decodes what comes back as UTF-8.
     ///
-    /// The three lanes over publisher XML all want this. A lane whose bodies
-    /// are not guaranteed UTF-8 wants [`Client::fetch_bytes`] and its own
-    /// stated decode.
-    pub fn fetch(&self, request: RequestBuilder) -> Result<Fetched> {
-        decoded(self.fetch_bytes(request)?)
-    }
-
-    pub fn fetch_url(&self, url: &str) -> Result<Fetched> {
-        self.fetch(self.get(url))
-    }
-
-    /// Sends a prepared request and decodes what comes back as UTF-8, without
-    /// keeping it. See [`Reading::Hashed`].
+    /// The lanes over publisher XML all want this. A lane whose bodies are not
+    /// guaranteed UTF-8 wants [`Client::read_bytes`] and its own stated decode.
     pub fn read(&self, request: RequestBuilder) -> Result<Fetched> {
         decoded(self.read_bytes(request)?)
     }

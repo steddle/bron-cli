@@ -3,8 +3,8 @@
 //! Every rendition, window and span in this lane is the service's answer, so
 //! what has to be proved offline is how bron reads one: that a limit the
 //! service states reaches the caller, that a failure keeps the kind and the
-//! detail the service gave it, and that an envelope is read without being
-//! frozen. Search is here too, because it is the one call whose parameter is
+//! detail the service gave it, and that the two shapes an answer comes in are
+//! read apart. Search is here too, because it is the one call whose parameter is
 //! the caller's own question and the one whose answer must never be mistaken
 //! for an absence.
 //!
@@ -14,7 +14,6 @@
 
 use std::path::PathBuf;
 
-use bron::blob::BlobStore;
 use bron::ids::BwbId;
 use bron::service::{Ask, SearchData, SearchRequest, Service};
 use bron::sources::Client;
@@ -22,23 +21,17 @@ use bron::wire::Caveat;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Somewhere for one test's blobs and buckets to live.
+/// Somewhere for one test's rate-limit buckets to live.
 struct Home {
     _dir: tempfile::TempDir,
-    blobs: PathBuf,
     buckets: PathBuf,
 }
 
 impl Home {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let blobs = dir.path().join("blobs");
         let buckets = dir.path().join("buckets");
-        Self {
-            _dir: dir,
-            blobs,
-            buckets,
-        }
+        Self { _dir: dir, buckets }
     }
 }
 
@@ -47,9 +40,9 @@ where
     T: Send + 'static,
     F: FnOnce(Client) -> T + Send + 'static,
 {
-    let (blobs, buckets) = (home.blobs.clone(), home.buckets.clone());
+    let buckets = home.buckets.clone();
 
-    tokio::task::spawn_blocking(move || f(Client::with_dirs(blobs, buckets).unwrap()))
+    tokio::task::spawn_blocking(move || f(Client::with_buckets(buckets).unwrap()))
         .await
         .unwrap()
 }
@@ -192,29 +185,6 @@ async fn a_failure_keeps_the_kind_and_the_detail_the_service_gave_it() {
     assert!(fault.1.contains("2016-06-16_0"), "{}", fault.1);
 }
 
-/// An envelope is nothing's evidence: no offset points into it, no ledger row
-/// names it, and what it does point at is a blob already addressed by the hash
-/// of itself. Freezing one would put a copy of every answer ever read in a
-/// store that is deliberately never evicted.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_answer_from_the_service_is_read_without_being_frozen() {
-    let server = answering(ANSWER, 200).await;
-    let home = Home::new();
-    let base = server.uri();
-    let blobs = home.blobs.clone();
-
-    let held = off_thread(&home, move |client| {
-        Service::at(&base)
-            .articles(&client, &law(), &asking())
-            .expect("the service answered");
-
-        BlobStore::new(&blobs).contains(&bron::blob::BlobId::of(ANSWER.as_bytes()))
-    })
-    .await;
-
-    assert!(!held, "the envelope was written to the blob store");
-}
-
 async fn searching(body: &str, status: u16) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -286,28 +256,6 @@ async fn a_ranking_carries_the_limits_the_service_stated() {
     .expect("the service answered");
 
     assert_eq!(caveats, vec![Caveat::Truncated { window: 20 }]);
-}
-
-/// The question travels in a POST body precisely so it is not written down.
-/// Freezing the answer writes it down anyway: the ranking for that question,
-/// under a digest, in a store the guideline says is never evicted.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_ranking_is_read_without_being_frozen() {
-    let server = searching(RANKING, 200).await;
-    let home = Home::new();
-    let base = server.uri();
-    let blobs = home.blobs.clone();
-
-    let held = off_thread(&home, move |client| {
-        Service::at(&base)
-            .search(&client, &asking_for("onrechtmatige daad"))
-            .expect("the service answered");
-
-        BlobStore::new(&blobs).contains(&bron::blob::BlobId::of(RANKING.as_bytes()))
-    })
-    .await;
-
-    assert!(!held, "the ranking was written to the blob store");
 }
 
 /// The service shares no rate-limit budget, so nothing writes a deadline for
@@ -428,6 +376,8 @@ async fn a_reading_that_found_a_rendition_without_text_says_so() {
         panic!("a citation must not be read as a ranking");
     };
 
+    // The service's own shape: a flag and three fields that are only there when
+    // it is set. What bron answers with is one type that cannot say both.
     assert!(!resolved[0].held);
     assert!(resolved[0].content_hash.is_none());
     assert!(resolved[0].label.is_none());
@@ -584,6 +534,60 @@ async fn a_shape_this_bron_does_not_know_is_refused() {
 
     assert_eq!(fault.0, "upstream");
     assert!(fault.1.contains("something_later"), "{}", fault.1);
-    assert!(fault.1.contains("Upgrade to read what it says"), "{}", fault.1);
-    assert!(!fault.1.contains("did not answer the bron envelope"), "{}", fault.1);
+    assert!(
+        fault.1.contains("Upgrade to read what it says"),
+        "{}",
+        fault.1
+    );
+    assert!(
+        !fault.1.contains("did not answer the bron envelope"),
+        "{}",
+        fault.1
+    );
+}
+
+/// The service sends `held` and the three fields that belong with it as
+/// separate keys, so the two can disagree in either direction. Both are said
+/// out loud, and neither takes the citation's other readings down with it: one
+/// malformed row must not lose a sound one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reading_the_service_contradicts_itself_about_still_arrives() {
+    let body = r#"{"bron":1,"grade":"authority","data":{"kind":"lookup","citation":"8:4",
+      "resolved":[
+        {"reading":"book","source":"wetgeving","regulation_id":"BWBR0005034",
+         "expression":"2026-07-01_0","held":true,"number":"4","label":"Artikel 4",
+         "content_hash":"e0bd9a23","caveats":[]},
+        {"reading":"literal","source":"wetgeving","regulation_id":"BWBR0005537",
+         "expression":"2026-08-15_0","held":true,"number":"8:4","caveats":[]}]}}"#;
+    let server = searching(body, 200).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .search(&client, &asking_for("8:4"))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("one malformed reading must not sink the answer");
+
+    let SearchData::Lookup { resolved, .. } = answered.data else {
+        panic!("a citation must not be read as a ranking");
+    };
+
+    // Both readings arrive, in the order the service read them.
+    assert_eq!(
+        resolved
+            .iter()
+            .map(|r| r.reading.as_str())
+            .collect::<Vec<_>>(),
+        ["book", "literal"]
+    );
+
+    // The sound one keeps what it came with.
+    assert_eq!(resolved[0].content_hash.as_deref(), Some("e0bd9a23"));
+
+    // The contradiction is readable as the service sent it: held, no hash.
+    assert!(resolved[1].held);
+    assert!(resolved[1].content_hash.is_none());
 }

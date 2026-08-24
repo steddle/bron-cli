@@ -19,14 +19,14 @@ use std::process::ExitCode;
 /// | 2 | not found: well-formed request, no such thing |
 /// | 3 | network: unreachable, timed out, refused |
 /// | 4 | upstream: reachable, but the answer could not be read |
-/// | 5 | corpus: the local database or blob store is unusable |
+/// | 5 | local: this machine could not do its part |
 pub mod exit {
     pub const OK: u8 = 0;
     pub const USAGE: u8 = 1;
     pub const NOT_FOUND: u8 = 2;
     pub const NETWORK: u8 = 3;
     pub const UPSTREAM: u8 = 4;
-    pub const CORPUS: u8 = 5;
+    pub const LOCAL: u8 = 5;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -56,9 +56,14 @@ pub enum Fault {
         source: anyhow::Error,
     },
 
-    /// The local corpus is missing, unreadable, or failing verification.
+    /// bron could not do its own part on this machine.
+    ///
+    /// Not the network and not what came back over it: an HTTP client that
+    /// would not build, a rate-limit directory that cannot be created, a stdout
+    /// that will not take the answer. Nothing here is worth retrying against
+    /// the same machine, which is what tells it apart from the two above.
     #[error("{0}")]
-    Corpus(#[source] anyhow::Error),
+    Local(#[source] anyhow::Error),
 }
 
 impl Fault {
@@ -68,7 +73,7 @@ impl Fault {
             Self::NotFound(_) => exit::NOT_FOUND,
             Self::Network { .. } => exit::NETWORK,
             Self::Upstream { .. } => exit::UPSTREAM,
-            Self::Corpus(_) => exit::CORPUS,
+            Self::Local(_) => exit::LOCAL,
         }
     }
 
@@ -80,7 +85,7 @@ impl Fault {
             Self::NotFound(_) => "not_found",
             Self::Network { .. } => "network",
             Self::Upstream { .. } => "upstream",
-            Self::Corpus(_) => "corpus",
+            Self::Local(_) => "local",
         }
     }
 
@@ -117,12 +122,35 @@ impl Fault {
 
 pub type Outcome<T> = std::result::Result<T, Fault>;
 
+/// Marks a failure as this machine's rather than a service's, and says what
+/// bron was trying to do at the time.
+///
+/// A lane wraps everything it does in [`from_source`], which knows how to tell
+/// a 404 from a dead network and reads anything else as the service answering
+/// badly. That is right for a malformed body and wrong for a rate-limit
+/// directory bron cannot create: reported as the archive misbehaving, it is a
+/// failure a pipeline would retry against a host that was never at fault.
+///
+/// It carries the sentence rather than being a bare tag, because it ends up
+/// outermost and is therefore what a reader sees first; what actually went
+/// wrong follows it in the cause chain.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct OwnDoing(pub &'static str);
+
 /// Classifies a failure from a source module.
 ///
 /// Reqwest is the only thing that can tell reachability from unreadability, and
 /// by the time an error reaches the command layer it is an opaque chain, so the
 /// split is made by looking for a transport error anywhere in that chain.
 pub fn from_source(service: &'static str, error: anyhow::Error) -> Fault {
+    // bron's own end, wherever in the chain it was marked. Checked first: a
+    // failure this machine caused is not the service's to answer for, whatever
+    // else the chain says about it.
+    if error.downcast_ref::<OwnDoing>().is_some() {
+        return Fault::Local(error);
+    }
+
     let statuses: Vec<reqwest::StatusCode> = error
         .chain()
         .filter_map(|e| e.downcast_ref::<reqwest::Error>())
@@ -158,8 +186,8 @@ pub fn from_source(service: &'static str, error: anyhow::Error) -> Fault {
     }
 }
 
-pub fn from_corpus(error: anyhow::Error) -> Fault {
-    Fault::Corpus(error)
+pub fn from_local(error: anyhow::Error) -> Fault {
+    Fault::Local(error)
 }
 
 #[cfg(test)]
@@ -186,7 +214,7 @@ mod tests {
             .code(),
             4
         );
-        assert_eq!(Fault::Corpus(anyhow::anyhow!("x")).code(), 5);
+        assert_eq!(Fault::Local(anyhow::anyhow!("x")).code(), 5);
     }
 
     #[test]
@@ -215,6 +243,17 @@ mod tests {
             chain.iter().any(|l| l.contains("connection refused")),
             "{chain:?}"
         );
+    }
+
+    /// A directory bron cannot create is not the archive answering badly, and
+    /// a pipeline told otherwise retries a host that was never at fault.
+    #[test]
+    fn a_failure_of_our_own_is_not_charged_to_the_service() {
+        let ours = anyhow::Error::new(std::io::Error::other("Not a directory"))
+            .context("cannot create /etc/hosts/buckets")
+            .context(OwnDoing("bron cannot use the rate-limit budget on this machine"));
+
+        assert_eq!(from_source("web.archive.org", ours).kind(), "local");
     }
 
     #[test]

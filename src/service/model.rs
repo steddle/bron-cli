@@ -24,36 +24,6 @@ pub struct Regulation {
     pub regulation_type: Option<String>,
 }
 
-/// How the service's copy of a rendition stands against the publisher's digest.
-///
-/// Three answers, never two. Collapsing `Unstated` onto "not verified" would
-/// have a service that stopped sending the field route every fetch to the
-/// publisher, with `resolved_via: publisher` as the only symptom anyone could
-/// see. It is also the wrong answer: nothing was said, so nothing is known, and
-/// bytes bron has not yet been given cannot be ruled out in advance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(from = "Option<bool>")]
-pub enum Verified {
-    /// Checked, and the stored bytes hash to the SHA-512 the manifest names.
-    Matches,
-    /// Checked, and they do not. Asking for them would fail the same check on
-    /// arrival, so the round trip buys nothing.
-    Differs,
-    /// The service did not say.
-    #[default]
-    Unstated,
-}
-
-impl From<Option<bool>> for Verified {
-    fn from(stated: Option<bool>) -> Self {
-        match stated {
-            Some(true) => Self::Matches,
-            Some(false) => Self::Differs,
-            None => Self::Unstated,
-        }
-    }
-}
-
 /// One rendition, as the manifest describes it and the corpus holds it.
 #[derive(Debug, Deserialize)]
 pub struct Expression {
@@ -68,8 +38,6 @@ pub struct Expression {
     pub size: Option<u64>,
     /// True where the service holds this rendition's text.
     pub held: bool,
-    #[serde(default)]
-    pub verified: Verified,
     pub blob: Option<String>,
 }
 
@@ -166,28 +134,4 @@ pub struct Ask<'a> {
     /// Ask for the publisher's own bytes at every span. Off by default, so no
     /// markup travels for an answer nobody will read it in.
     pub raw: bool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Checked-and-matching, checked-and-not, and nothing said are three
-    /// answers. A service that stops sending the field must not read as one
-    /// that checked and found a mismatch.
-    #[test]
-    fn a_verification_the_service_did_not_state_is_its_own_answer() {
-        #[derive(Deserialize)]
-        struct Row {
-            #[serde(default)]
-            verified: Verified,
-        }
-
-        let read = |json: &str| serde_json::from_str::<Row>(json).unwrap().verified;
-
-        assert_eq!(read(r#"{"verified":true}"#), Verified::Matches);
-        assert_eq!(read(r#"{"verified":false}"#), Verified::Differs);
-        assert_eq!(read(r#"{"verified":null}"#), Verified::Unstated);
-        assert_eq!(read("{}"), Verified::Unstated);
-    }
 }

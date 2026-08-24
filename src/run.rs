@@ -10,19 +10,14 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
-use bron::blob::BlobStore;
-use bron::db::{self, Db};
 use bron::diff;
-use bron::error::{Fault, Outcome, from_corpus, from_source};
+use bron::error::{Fault, Outcome, from_local, from_source};
 use bron::ids::{BwbId, Ecli, PublicationId};
-use bron::paths;
 use bron::service::{self, Service};
-use bron::sources::{
-    Client, FetchedLaw, Source, VersionMeta, bwb, publications, rechtspraak, wayback,
-};
-use bron::wire::{self, Caveat, Envelope, ResolvedVia, View};
+use bron::sources::{Client, publications, rechtspraak, wayback};
+use bron::wire::{self, Caveat, Envelope, View};
 
-use crate::cli::{Archive, Case, Cli, Command, DbCommand, Law, Publication, UpdateArgs};
+use crate::cli::{Archive, Case, Cli, Command, Law, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -39,27 +34,6 @@ pub enum Answer {
     Publication(Envelope<Box<wire::Publication>>),
     CaptureHits(Envelope<Vec<wire::CaptureHit>>),
     Capture(Box<Envelope<Box<wire::Capture>>>),
-    Updated(Envelope<Vec<Updated>>),
-    Verified(Envelope<wire::Verification>),
-    Stats(Envelope<wire::Stats>),
-    Path(Envelope<String>),
-}
-
-/// What one law did during an update.
-#[derive(Debug, Serialize)]
-pub struct Updated {
-    pub id: String,
-    pub outcome: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub articles: Option<u32>,
-    /// Present when this law failed. The batch continues either way, which is
-    /// the one place a printed-only error is the right shape.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }
 
 impl Answer {
@@ -81,10 +55,6 @@ impl Answer {
             Self::Publication(e) => write(out, e),
             Self::CaptureHits(e) => write(out, e),
             Self::Capture(e) => write(out, e),
-            Self::Updated(e) => write(out, e),
-            Self::Verified(e) => write(out, e),
-            Self::Stats(e) => write(out, e),
-            Self::Path(e) => write(out, e),
         }
     }
 
@@ -98,10 +68,10 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
     let today = Utc::now().date_naive();
 
     // Resolved once, so every fetch in a run takes the same route.
-    let service = Service::resolve(cli.direct);
+    let service = Service::resolve()?;
 
     match &cli.command {
-        Command::Law(law) => run_law(law, today, quiet, service.as_ref()),
+        Command::Law(law) => run_law(law, today, quiet, &service),
         Command::Case(case) => run_case(case, quiet),
         Command::Publication(pub_) => run_publication(pub_, quiet),
         Command::Archive(archive) => run_archive(archive, today, quiet),
@@ -109,17 +79,7 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
             query,
             limit,
             moment,
-        } => run_find(
-            &query.join(" "),
-            *limit,
-            moment,
-            today,
-            quiet,
-            service.as_ref(),
-        ),
-        Command::Update(args) => run_update(args, quiet, service.as_ref()),
-        Command::Verify => run_verify(),
-        Command::Db(command) => run_db(command),
+        } => run_find(&query.join(" "), *limit, moment, today, quiet, &service),
     }
 }
 
@@ -224,13 +184,12 @@ fn run_find(
     moment: &crate::cli::Moment,
     today: NaiveDate,
     quiet: bool,
-    service: Option<&Service>,
+    service: &Service,
 ) -> Outcome<Answer> {
     if query.trim().is_empty() {
         return Err(Fault::usage("say what to search for"));
     }
 
-    let service = self::service(service)?;
     let (date, view) = moment.resolve(today);
     let (as_of, as_known_on) = match view {
         View::InForce => (Some(date.to_string()), None),
@@ -247,6 +206,8 @@ fn run_find(
             as_known_on,
         },
     )?;
+
+    let mut caveats = answered.caveats;
 
     let found = match answered.data {
         service::SearchData::Ranking { searched, hits } => wire::Found::Ranking(wire::Ranking {
@@ -267,12 +228,18 @@ fn run_find(
                 })
                 .collect(),
         }),
-        service::SearchData::Lookup { citation, resolved } => wire::Found::Lookup(wire::Lookup {
-            citation,
+        service::SearchData::Lookup { citation, resolved } => {
             // In the order they arrived. Every reading is answered, because
             // choosing between them is interpretation and bron does not do any.
-            resolved: resolved.into_iter().map(cited).collect(),
-        }),
+            let read: Vec<_> = resolved.into_iter().map(cited).collect();
+
+            caveats.extend(read.iter().filter_map(|(_, caveat)| caveat.clone()));
+
+            wire::Found::Lookup(wire::Lookup {
+                citation,
+                resolved: read.into_iter().map(|(entry, _)| entry).collect(),
+            })
+        }
     };
 
     // Which lanes hold no vectors, and which readings came to nothing, are the
@@ -281,99 +248,68 @@ fn run_find(
     Ok(Answer::Found(
         Envelope::ok(found)
             .bound_to(date, view)
-            .via(ResolvedVia::Mirror)
-            .with_caveats(answered.caveats),
+            .with_caveats(caveats),
     ))
 }
 
-/// One reading of a citation, in the shape a consumer parses.
-fn cited(entry: service::Cited) -> wire::Cited {
-    wire::Cited {
-        reading: entry.reading,
-        source: entry.source,
-        law_id: entry.regulation_id,
-        version: entry.expression,
-        number: entry.number,
-        label: entry.label,
-        path: entry.path,
-        content_hash: entry.content_hash,
-        held: entry.held,
-        caveats: entry.caveats.into_iter().map(Caveat::stated).collect(),
-    }
-}
-
-/// Fetches one version, through the service when there is one.
+/// One reading of a citation, in the shape a consumer parses, and the caveat it
+/// earns where the service contradicted itself about it.
 ///
-/// `meta` always came from the publisher's own manifest, which `update` reads
-/// directly, so the digest a served body is held to is the publisher's. That is
-/// what makes the two routes interchangeable: whichever answers, the bytes are
-/// the ones the publisher published or they are refused.
+/// The service sends a flag and three fields that only belong with it set, so
+/// the two can disagree in either direction. Both directions are said out loud
+/// and neither is answered as though nothing were wrong. Both are answered as
+/// not held, which is the half of the contradiction that claims least: a
+/// missing hash cannot be invented, and one sent under `held: false` is not
+/// something the service is willing to stand behind.
 ///
-/// A service that cannot answer is not a failure. It costs one wasted request
-/// and the publisher is asked instead. One that answers with bytes failing the
-/// digest is a different matter and says so on stderr, because bytes served
-/// under a digest they do not match is the one thing it must never do.
-///
-/// Which of the two answered is not reported. `update` writes bytes into the
-/// corpus and the corpus records the document, not the route; an answer that
-/// names a route is one read back out of the service, and it names its own.
-fn fetch_version(
-    client: &Client,
-    service: Option<&Service>,
-    law: &BwbId,
-    meta: &VersionMeta,
-    quiet: bool,
-) -> anyhow::Result<FetchedLaw> {
-    if let Some(service) = service {
-        let offered = match service.version_bytes(client, law, meta) {
-            Ok(offered) => offered,
-            Err(e) => {
-                if !quiet {
-                    eprintln!(
-                        "bron: {} could not answer, asking the publisher: {e:#}",
-                        service.base()
-                    );
-                }
-                None
-            }
-        };
+/// The caveat names the reading rather than the answer being dropped. A
+/// citation reads more than one way and the other readings are still good; `8:4`
+/// losing its Boek 8 answer because the Awb reading came back malformed would
+/// be one broken row taking a sound one with it.
+fn cited(entry: service::Cited) -> (wire::Cited, Option<Caveat>) {
+    let (held, contradiction) = match (entry.held, entry.content_hash) {
+        (true, Some(content_hash)) => (
+            wire::Held::Text {
+                label: entry.label,
+                path: entry.path,
+                content_hash,
+            },
+            None,
+        ),
+        (false, None) => (wire::Held::None, None),
+        (true, None) => (
+            wire::Held::None,
+            Some(format!(
+                "it holds {} rendition {} and did not say what artikel {} hashes to",
+                entry.regulation_id, entry.expression, entry.number,
+            )),
+        ),
+        (false, Some(_)) => (
+            wire::Held::None,
+            Some(format!(
+                "it does not hold {} rendition {} and sent a hash for artikel {} anyway",
+                entry.regulation_id, entry.expression, entry.number,
+            )),
+        ),
+    };
 
-        if let Some(fetched) = offered {
-            // The service is worth exactly the digest it can be held to.
-            // Anything short of a match, including a version the manifest
-            // states no digest for, goes back to the publisher.
-            if bwb::digest_matches(fetched.text.as_bytes(), meta) == Some(true) {
-                return bwb::parse(Source::from(&fetched), law, meta);
-            }
+    let caveat = contradiction.map(|stated| Caveat::ReadingContradicted {
+        reading: entry.reading.clone(),
+        stated,
+    });
 
-            if !quiet {
-                eprintln!(
-                    "bron: {} served {law} {} without matching the digest the publisher \
-                     stated; asking the publisher instead",
-                    service.base(),
-                    meta.version
-                );
-            }
-        }
-    }
-
-    bwb::fetch(client, law, meta)
-}
-
-/// The service this lane reads through.
-///
-/// A usage failure rather than an empty answer where there is none. Every
-/// rendition a date resolves to, every window and every span in this lane is
-/// the service's answer; with the address taken out of the path there is
-/// nothing left to ask, and reporting nothing found would record an absence
-/// bron never established.
-fn service(service: Option<&Service>) -> Outcome<&Service> {
-    service.ok_or_else(|| {
-        Fault::usage(
-            "the wetgeving lane reads the bron service, so it needs one. Set BRON_MIRROR and \
-             drop --direct. `update` is what still reads the publisher itself.",
-        )
-    })
+    (
+        wire::Cited {
+            reading: entry.reading,
+            source: entry.source,
+            law_id: entry.regulation_id,
+            version: entry.expression,
+            number: entry.number,
+            held,
+            caveats: entry.caveats.into_iter().map(Caveat::stated).collect(),
+        },
+        caveat,
+    )
 }
 
 /// Where the document a rendition's spans point into came from.
@@ -495,13 +431,7 @@ fn excerpt(span: service::Span, raw: Option<&str>) -> wire::Excerpt {
 
 // -- wetgeving -----------------------------------------------------------
 
-fn run_law(
-    law_cmd: &Law,
-    today: NaiveDate,
-    quiet: bool,
-    service: Option<&Service>,
-) -> Outcome<Answer> {
-    let service = self::service(service)?;
+fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> Outcome<Answer> {
     let client = client(quiet)?;
 
     match law_cmd {
@@ -520,7 +450,6 @@ fn run_law(
                         })
                         .collect(),
                 )
-                .via(ResolvedVia::Mirror)
                 .with_caveats(answered.caveats),
             ))
         }
@@ -544,7 +473,6 @@ fn run_law(
                         })
                         .collect(),
                 )
-                .via(ResolvedVia::Mirror)
                 .with_caveats(answered.caveats),
             ))
         }
@@ -663,7 +591,6 @@ fn run_law(
                     articles,
                     summary,
                 }))
-                .via(ResolvedVia::Mirror)
                 .with_caveats(caveats),
             ))
         }
@@ -741,7 +668,6 @@ fn run_law(
             Ok(Answer::Articles(
                 Envelope::ok(articles)
                     .bound_to(date, view)
-                    .via(ResolvedVia::Mirror)
                     .with_caveats(caveats),
             ))
         }
@@ -773,7 +699,10 @@ fn decision(ecli: &Ecli, quiet: bool) -> Outcome<(bron::sources::FetchedCase, Da
 /// upstream states them. Dated to when bron looked, because
 /// `no_published_successor` is a claim about what the register held at that
 /// moment and it began going stale as it was made.
-fn appeal(relations: &[bron::model::Relation], read_at: DateTime<Utc>) -> bron::model::AppealStatus {
+fn appeal(
+    relations: &[bron::model::Relation],
+    read_at: DateTime<Utc>,
+) -> bron::model::AppealStatus {
     use bron::model::{AppealStatus, Direction};
 
     let successors: Vec<Ecli> = relations
@@ -902,148 +831,6 @@ fn run_publication(cmd: &Publication, quiet: bool) -> Outcome<Answer> {
                     body,
                 },
             ))))
-        }
-    }
-}
-
-// -- update --------------------------------------------------------------
-
-fn run_update(args: &UpdateArgs, quiet: bool, service: Option<&Service>) -> Outcome<Answer> {
-    let mut db = open_db()?;
-    let client = client(quiet)?;
-
-    let laws: Vec<BwbId> = if args.ids.is_empty() {
-        db.laws()
-            .map_err(from_corpus)?
-            .into_iter()
-            .map(|l| l.id)
-            .collect()
-    } else {
-        args.ids
-            .iter()
-            .map(|id| parse_id(id))
-            .collect::<Outcome<_>>()?
-    };
-
-    // One timestamp for the whole run, so every row written here agrees.
-    let stamped_at = Utc::now();
-    let mut report = Vec::new();
-
-    for law in laws {
-        // A per-item failure is logged and the batch continues. This is the one
-        // place an error is only ever printed, so anyhow is the right shape.
-        match update_one(
-            &client, &mut db, &law, args.force, stamped_at, service, quiet,
-        ) {
-            Ok(updated) => report.push(updated),
-            Err(e) => report.push(Updated {
-                id: law.into_string(),
-                outcome: "failed",
-                from: None,
-                to: None,
-                articles: None,
-                error: Some(e.to_string()),
-            }),
-        }
-    }
-
-    Ok(Answer::Updated(Envelope::ok(report)))
-}
-
-fn update_one(
-    client: &Client,
-    db: &mut Db,
-    law: &BwbId,
-    force: bool,
-    stamped_at: chrono::DateTime<Utc>,
-    service: Option<&Service>,
-    quiet: bool,
-) -> anyhow::Result<Updated> {
-    let metas = bwb::versions(client, law)?;
-    let current = bwb::current_version(&metas)
-        .ok_or_else(|| anyhow::anyhow!("{law} has no current version"))?;
-
-    let held = db.newest_version(law)?;
-    let from = held.as_ref().map(|v| v.version.clone());
-
-    if !force && from.as_deref() == Some(current.version.as_str()) {
-        return Ok(Updated {
-            id: law.to_string(),
-            outcome: "current",
-            from,
-            to: None,
-            articles: None,
-            error: None,
-        });
-    }
-
-    let fetched = fetch_version(client, service, law, current, quiet)?;
-    let articles = fetched.articles.len() as u32;
-
-    let tx = db.transaction()?;
-    db::put_law_version(&tx, &fetched, stamped_at)?;
-    tx.commit()?;
-
-    Ok(Updated {
-        id: law.to_string(),
-        outcome: "updated",
-        from,
-        to: Some(current.version.clone()),
-        articles: Some(articles),
-        error: None,
-    })
-}
-
-// -- verify --------------------------------------------------------------
-
-fn run_verify() -> Outcome<Answer> {
-    let db = open_db()?;
-    let blobs = BlobStore::new(paths::blob_dir().map_err(from_corpus)?);
-
-    let documents = db.documents().map_err(from_corpus)?;
-    let mut missing = Vec::new();
-    let mut corrupt = Vec::new();
-
-    for document in &documents {
-        if !blobs.contains(&document.blob) {
-            missing.push(document.blob.to_hex());
-        } else if !blobs.verify(&document.blob).map_err(from_corpus)? {
-            corrupt.push(document.blob.to_hex());
-        }
-    }
-
-    let verification = wire::Verification {
-        // The one thing that keeps bytes. See `Verification::scope`.
-        scope: "corpus",
-        documents: documents.len() as u32,
-        intact: (documents.len() - missing.len() - corrupt.len()) as u32,
-        missing,
-        corrupt,
-    };
-
-    if !verification.is_intact() {
-        return Err(Fault::Corpus(anyhow::anyhow!(
-            "{} document(s) missing, {} corrupt",
-            verification.missing.len(),
-            verification.corrupt.len()
-        )));
-    }
-
-    Ok(Answer::Verified(Envelope::ok(verification)))
-}
-
-// -- corpus --------------------------------------------------------------
-
-fn run_db(command: &DbCommand) -> Outcome<Answer> {
-    match command {
-        DbCommand::Path => {
-            let path = paths::db_path().map_err(from_corpus)?;
-            Ok(Answer::Path(Envelope::ok(path.display().to_string())))
-        }
-        DbCommand::Stats => {
-            let db = open_db()?;
-            let stats = db.stats().map_err(from_corpus)?;
-            Ok(Answer::Stats(Envelope::ok(stats.into())))
         }
     }
 }
@@ -1367,12 +1154,8 @@ where
     text.parse().map_err(|e| Fault::usage(format!("{e}")))
 }
 
-fn open_db() -> Outcome<Db> {
-    Db::open().map_err(from_corpus)
-}
-
 fn client(quiet: bool) -> Outcome<Client> {
-    let client = Client::new().map_err(from_corpus)?;
+    let client = Client::new().map_err(from_local)?;
     if quiet {
         return Ok(client);
     }
@@ -1627,7 +1410,10 @@ mod archive_tests {
     fn fetched(timestamp: &str, status: wayback::ArchiveStatus, body: &[u8]) -> FetchedCapture {
         // The key is the archive's, taken from the index row, so a fixture
         // writes one out rather than deriving one and calling it the same thing.
-        let id = CaptureId::new(timestamp.parse().unwrap(), "com,steddle)/pricing".to_string());
+        let id = CaptureId::new(
+            timestamp.parse().unwrap(),
+            "com,steddle)/pricing".to_string(),
+        );
 
         FetchedCapture {
             id,
@@ -1658,7 +1444,11 @@ mod archive_tests {
     #[test]
     fn a_capture_keeps_the_date_it_was_taken_apart_from_the_date_it_was_read() {
         let capture = read_capture(
-            fetched("20240101120000", wayback::ArchiveStatus::Answered(200), b"old"),
+            fetched(
+                "20240101120000",
+                wayback::ArchiveStatus::Answered(200),
+                b"old",
+            ),
             false,
             read_at(),
         );
@@ -1689,7 +1479,11 @@ mod archive_tests {
     #[test]
     fn a_captured_error_page_reads_as_not_the_page() {
         let capture = read_capture(
-            fetched("20240101120000", wayback::ArchiveStatus::Answered(404), b"404"),
+            fetched(
+                "20240101120000",
+                wayback::ArchiveStatus::Answered(404),
+                b"404",
+            ),
             false,
             read_at(),
         );
@@ -1702,7 +1496,11 @@ mod archive_tests {
     /// and an index that recorded no digest is not a clean bill of health.
     #[test]
     fn a_capture_with_no_index_digest_is_not_read_as_a_verified_one() {
-        let mut old = fetched("20040101120000", wayback::ArchiveStatus::Answered(200), b"ancient");
+        let mut old = fetched(
+            "20040101120000",
+            wayback::ArchiveStatus::Answered(200),
+            b"ancient",
+        );
         old.digest = None;
         old.verified = wayback::Verified::Absent;
 
@@ -1718,7 +1516,13 @@ mod archive_tests {
     /// did, so this is the caller's own knowledge and not the capture's.
     #[test]
     fn a_capture_bron_asked_for_says_so() {
-        let row = || fetched("20240101120000", wayback::ArchiveStatus::Answered(200), b"x");
+        let row = || {
+            fetched(
+                "20240101120000",
+                wayback::ArchiveStatus::Answered(200),
+                b"x",
+            )
+        };
 
         let found = read_capture(row(), false, read_at());
         assert!(!found.requested);
@@ -1733,7 +1537,11 @@ mod archive_tests {
     /// running a text extractor over it would invent a document.
     #[test]
     fn a_capture_that_is_not_text_carries_bytes_and_a_digest_and_no_content() {
-        let mut binary = fetched("20240101120000", wayback::ArchiveStatus::Answered(200), b"%PDF");
+        let mut binary = fetched(
+            "20240101120000",
+            wayback::ArchiveStatus::Answered(200),
+            b"%PDF",
+        );
         binary.reading = wayback::Reading::Binary;
         binary.mime_type = Some("application/pdf".into());
 
@@ -1790,5 +1598,63 @@ mod archive_tests {
             appeal(&[], read_at()),
             AppealStatus::NoPublishedSuccessor { as_of: read_at() }
         );
+    }
+}
+
+#[cfg(test)]
+mod citation_tests {
+    use super::cited;
+    use bron::service;
+    use bron::wire::{Caveat, Held};
+
+    fn entry(held: bool, content_hash: Option<&str>) -> service::Cited {
+        service::Cited {
+            reading: "literal".into(),
+            source: "wetgeving".into(),
+            regulation_id: "BWBR0005537".into(),
+            expression: "2026-08-15_0".into(),
+            held,
+            number: "8:4".into(),
+            label: Some("Artikel 8:4".into()),
+            path: None,
+            content_hash: content_hash.map(str::to_string),
+            caveats: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_reading_the_service_holds_carries_what_resolves_it() {
+        let (read, caveat) = cited(entry(true, Some("4ba2172e")));
+
+        assert!(caveat.is_none());
+        assert!(matches!(
+            read.held,
+            Held::Text { ref content_hash, .. } if content_hash == "4ba2172e"
+        ));
+    }
+
+    #[test]
+    fn a_reading_the_service_does_not_hold_carries_nothing_to_resolve() {
+        let (read, caveat) = cited(entry(false, None));
+
+        assert!(caveat.is_none());
+        assert!(matches!(read.held, Held::None));
+    }
+
+    /// Both directions of the same disagreement, and both are said. Answering
+    /// either as though nothing were wrong puts a reader one step from a
+    /// citation nobody can check.
+    #[test]
+    fn either_half_of_a_contradiction_is_reported_and_claims_the_less() {
+        for broken in [entry(true, None), entry(false, Some("4ba2172e"))] {
+            let held = broken.held;
+            let (read, caveat) = cited(broken);
+
+            assert!(matches!(read.held, Held::None), "held was {held}");
+            assert!(
+                matches!(caveat, Some(Caveat::ReadingContradicted { ref reading, .. }) if reading == "literal"),
+                "held was {held}, got {caveat:?}"
+            );
+        }
     }
 }

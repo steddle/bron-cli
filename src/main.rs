@@ -16,6 +16,7 @@ use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use clap::Parser;
+use clap::error::ErrorKind;
 
 use bron::error::Fault;
 use bron::wire::{Envelope, Grade};
@@ -24,7 +25,29 @@ use cli::Cli;
 use run::Answer;
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        // clap exits 2 of its own accord, and 2 is not-found here. A command
+        // line it will not accept is a usage failure, and `--help` and
+        // `--version` are what a caller asked for rather than a failure at all.
+        //
+        // Bare `bron` is not among them. clap prints the help for it, but
+        // nobody asked: the command line was incomplete, and a script reading
+        // success for a command that did nothing is the failure that costs.
+        Err(error) => {
+            let asked_for = matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            );
+            let _ = error.print();
+
+            return if asked_for {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(bron::error::exit::USAGE)
+            };
+        }
+    };
 
     // Progress is never written when it could be mistaken for output, and never
     // when nobody is watching.
@@ -34,7 +57,7 @@ fn main() -> ExitCode {
         Ok(answer) => {
             if let Err(e) = emit(&answer, cli.json) {
                 eprintln!("bron: cannot write output: {e}");
-                return ExitCode::from(bron::error::exit::CORPUS);
+                return ExitCode::from(bron::error::exit::LOCAL);
             }
             ExitCode::SUCCESS
         }

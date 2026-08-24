@@ -6,7 +6,7 @@
 
 use std::io::{self, Write};
 
-use bron::wire::{AppealStatus, Body, Caveat, DigestCheck, Envelope, Found, View, Window};
+use bron::wire::{AppealStatus, Body, Caveat, DigestCheck, Envelope, Found, Held, View, Window};
 
 use crate::run::Answer;
 
@@ -76,11 +76,19 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                             entry.source,
                             entry.law_id,
                             entry.version,
-                            // Its own column, so the label after it starts in
+                            // Its own column, so the name after it starts in
                             // the same place on every line rather than being
                             // pushed along by however long the one above was.
-                            if entry.held { "" } else { NOT_HELD },
-                            entry.label.as_deref().unwrap_or(&entry.number),
+                            match &entry.held {
+                                Held::Text { .. } => "",
+                                Held::None => NOT_HELD,
+                            },
+                            match &entry.held {
+                                Held::Text {
+                                    label: Some(label), ..
+                                } => label,
+                                _ => &entry.number,
+                            },
                             reading = READING,
                             source = SOURCE,
                             holding = NOT_HELD.len(),
@@ -365,54 +373,6 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
 
             caveats(&e.caveats, out)
         }
-
-        Answer::Updated(e) => {
-            for law in data(e) {
-                match law.outcome {
-                    "current" => writeln!(out, "{}  current", law.id)?,
-                    "updated" => writeln!(
-                        out,
-                        "{}  {} -> {}  ({} articles)",
-                        law.id,
-                        law.from.as_deref().unwrap_or("new"),
-                        law.to.as_deref().unwrap_or("?"),
-                        law.articles.unwrap_or(0)
-                    )?,
-                    _ => writeln!(
-                        out,
-                        "{}  FAILED  {}",
-                        law.id,
-                        law.error.as_deref().unwrap_or("unknown error")
-                    )?,
-                }
-            }
-            Ok(())
-        }
-
-        Answer::Verified(e) => {
-            let Some(v) = &e.data else { return Ok(()) };
-            writeln!(
-                out,
-                "{} of {} documents in the corpus still hash to their own name",
-                v.intact, v.documents
-            )
-        }
-
-        Answer::Stats(e) => {
-            let Some(s) = &e.data else { return Ok(()) };
-            writeln!(out, "{}", s.path)?;
-            writeln!(out, "  laws          {}", s.laws)?;
-            writeln!(out, "  versions      {}", s.versions)?;
-            writeln!(out, "  articles      {}", s.articles)?;
-            writeln!(out, "  decisions     {}", s.cases)?;
-            writeln!(out, "  publications  {}", s.publications)?;
-            writeln!(out, "  documents     {}", s.documents)
-        }
-
-        Answer::Path(e) => match &e.data {
-            Some(path) => writeln!(out, "{path}"),
-            None => Ok(()),
-        },
     }
 }
 
@@ -602,6 +562,11 @@ fn caveat_line(caveat: &Caveat) -> String {
                  Which was meant is yours to say.",
             readings.join(", "),
         ),
+        Caveat::ReadingContradicted { reading, stated } => format!(
+            "note: the service said two things about the {reading} reading that cannot both be \
+                 true: {stated}. It is answered as though the text is not held, which is the \
+                 half that claims least."
+        ),
         Caveat::ReadingUnresolved {
             reading,
             because,
@@ -772,10 +737,15 @@ mod tests {
             law_id: "BWBR0005291".into(),
             version: "2025-07-01_0".into(),
             number: "305a".into(),
-            label: label.map(str::to_string),
-            path: None,
-            content_hash: None,
-            held,
+            held: if held {
+                Held::Text {
+                    label: label.map(str::to_string),
+                    path: None,
+                    content_hash: "8fc1e1eb".into(),
+                }
+            } else {
+                Held::None
+            },
             caveats,
         }
     }
@@ -804,7 +774,10 @@ mod tests {
         )]);
 
         let entry = text.lines().find(|l| l.starts_with("book")).unwrap();
-        let note = text.lines().find(|l| l.trim_start().starts_with("note:")).unwrap();
+        let note = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("note:"))
+            .unwrap();
 
         let indent = note.len() - note.trim_start().len();
         let second = entry.find("wetgeving").unwrap();

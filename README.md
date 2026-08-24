@@ -7,6 +7,8 @@ Dutch primary legal sources on your own disk.
 
 bron reads legislation, case law and official publications, and every answer names the document it rests on and the byte range inside it. It says what a law said on a given date, not only what it says today. The point isn't search. It's that a claim made here can name the document and the characters behind it, and that the same question asked twice gives the same answer.
 
+Nothing is stored. Every answer is fetched, and what makes it checkable is the digest beside it rather than a copy on your disk.
+
 ## Installation
 
 ```
@@ -18,8 +20,9 @@ cargo install --path .
 ### Requires
 
 - Rust 1.85 or newer, for edition 2024.
-- No system libraries. SQLite is bundled and TLS goes through rustls, so there's no OpenSSL header to find on Linux.
-- `BRON_HOME` to put the corpus and blob store somewhere other than the platform data directory (`~/Library/Application Support/bron` on macOS, `~/.local/share/bron` on Linux), which is what a per-project corpus in CI wants.
+- No system libraries. TLS goes through rustls, so there's no OpenSSL header to find on Linux.
+- A network. bron holds nothing between runs, so every answer is fetched.
+- `BRON_HOME` to put the rate-limit buckets somewhere other than `~/.bron/buckets`, which is what a CI run that should pace itself alone wants.
 - `BRON_IA_ACCESS_KEY` and `BRON_IA_SECRET_KEY` from [archive.org](https://archive.org/account/s3.php), only for `bron archive capture`. Reading the archive needs neither.
 
 ## Quick start
@@ -89,8 +92,11 @@ no published successor known, as of 2026-08-20
 Every command takes `--json` and answers in a versioned envelope:
 
 ```
-$ bron --json db stats
-{"bron":1,"grade":"authority","data":{"path":"/Users/you/Library/Application Support/bron/bron.db","laws":4,"versions":7,"articles":3825,"cases":2,"publications":0,"documents":9}}
+$ bron --json find 6:162 BW
+{"bron":1,"grade":"authority","as_of":"2026-08-24","view":"in_force","data":{"kind":"lookup","citation":"6:162",
+ "resolved":[{"reading":"book","source":"wetgeving","law_id":"BWBR0005289","version":"2026-07-16_0",
+ "number":"162","held":"text","label":"Artikel 162","path":"/Boek6/Titeldeel3/Afdeling1/Artikel162",
+ "content_hash":"f8125445cab2e8d849dacd4a7d5e01fdb8c4b7dad0de796c4f64afafe1626130"}]}}
 ```
 
 Human and JSON output share one code path, so they can't drift apart. On failure the JSON still goes to stdout and the human sentence to stderr, so a caller never has to read stderr to tell one failure from another:
@@ -101,7 +107,7 @@ Human and JSON output share one code path, so they can't drift apart. On failure
 2  not found      well-formed query, nothing of that name exists
 3  network        unreachable, timed out, refused
 4  upstream       reachable, but the answer could not be read
-5  corpus         database or blob store unreadable, missing, or failing verification
+5  local          bron could not do its own part on this machine
 ```
 
 A 404 from upstream is a 2, not a 3. It's the service answering, and reporting it as transport has a pipeline retry something that will never exist.
@@ -112,26 +118,26 @@ A 404 from upstream is a 2, not a 3. It's the service answering, and reporting i
 
 `bron law` reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. Fetch those bytes, hash them, slice them, and either they say what bron said or they do not. Every answer also names the route it took in `resolved_via`, because a dossier must not be able to hide that its text came through an intermediary.
+Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. Fetch those bytes, hash them, slice them, and either they say what bron said or they do not. `provenance.frozen_by` says who froze them: `bron`, for a decision or a publication it fetched itself, or `service`.
 
 ```
 bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
-BRON_MIRROR=https://bron.example.org/api/v1     # somewhere else entirely
+BRON_MIRROR=https://bron.example.org/api/v1     # another deployment
 ```
 
-`bron update` still reads the publisher itself, and holds anything the service hands it to the SHA-512 the publisher's own manifest states before storing a byte of it. `--direct`, or `BRON_MIRROR=`, pins a run to the publisher; for `bron law` that leaves nothing to ask, and it says so.
+Case law, official publications and the web archive are read straight from the publisher, because none of them has an API equivalent and the archive never will: the Internet Archive rate-limits by address, so a service making captures would put every user on one budget.
 
-Answers from the service are read and not kept. Nothing points into one, and what it does point at is a blob addressed by the hash of itself, so freezing a copy of every answer ever read would fill a store that is deliberately never evicted. A question put to `bron find` travels in a POST body for the same reason: neither the question nor its ranking is written down.
+Nothing is kept. bron writes one thing between runs, its share of the per-host rate-limit budget, so every answer is fetched and without a network there is no answer. A question put to `bron find` travels in a POST body for the same reason nothing is written down: the material is public, the interest in it is not.
 
 ## Features
 
 - Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date, and renditions the publisher has withdrawn named rather than quietly served.
-- Content-addressed storage. Each document is held under the SHA-256 of its own bytes, and every article and lid carries a byte range back into it.
+- Content-addressed provenance. Each document is named by the SHA-256 of its own bytes, and every article and lid carries a byte range into it, so a reader can fetch those bytes and cut the quotation again.
 - Amendment diffs. `bron law changes` matches articles on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
 - An appeal answer that is never a boolean. `no_published_successor` is dated to the moment bron read the decision, because 'nothing published' is a claim about what the register held then and not about whether an appeal was brought.
 - Web archive access for pages no publisher keeps, graded apart from primary sources. Digest checking is three-valued too: only a match is positive evidence, because the index hashes the stored payload and the replay strips its chunk framing.
 - Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers instead of each pacing itself perfectly and together going three times too fast.
-- `bron verify` re-hashes every document the corpus holds against its own name, and says that is what it covers.
+- Nothing kept between runs. bron writes its share of the rate-limit budget and nothing else, so there is no store to migrate, verify or grow stale.
 
 ## Documentation
 
