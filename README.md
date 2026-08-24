@@ -22,7 +22,6 @@ cargo install --path .
 - No system libraries. TLS goes through rustls, so there's no OpenSSL header to find on Linux.
 - A network. bron holds nothing between runs, so every answer is fetched.
 - `BRON_HOME` to put the rate-limit buckets somewhere other than `~/.bron/buckets`, which is what a CI run that should pace itself alone wants.
-- `BRON_IA_ACCESS_KEY` and `BRON_IA_SECRET_KEY` from [archive.org](https://archive.org/account/s3.php), only for `bron archive capture`. Reading the archive needs neither.
 
 ## Quick start
 
@@ -111,7 +110,7 @@ Human and JSON output share one code path, so they can't drift apart. On failure
 
 A 404 from upstream is a 2, not a 3. It's the service answering, and reporting it as transport has a pipeline retry something that will never exist.
 
-`grade` separates what a source can carry. `authority` is a statute or a ruling speaking with its own force. `archive` is the Internet Archive's record that a page said something on a day, which is a weaker claim, dated to its capture and never to today.
+`grade` says where an answer's authority comes from. Every source bron reads speaks with its own force, so it is always `authority`; it's stated rather than left implicit because a claim's grade is the one field a consumer should never infer.
 
 ## Reading through the service
 
@@ -124,7 +123,7 @@ bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the ser
 BRON_MIRROR=https://bron.example.org/api/v1     # another deployment
 ```
 
-Case law, official publications and the web archive are read straight from the publisher, because none of them has an API equivalent and the archive never will: the Internet Archive rate-limits by address, so a service making captures would put every user on one budget.
+Case law and official publications are read straight from the publisher, because neither has a service equivalent that would add anything: both registers already answer by identifier, and the digest travels with the answer either way.
 
 Nothing is kept. bron writes one thing between runs, its share of the per-host rate-limit budget, so every answer is fetched and without a network there is no answer. A question put to `bron find` travels in a POST body for the same reason nothing is written down: the material is public, the interest in it is not.
 
@@ -134,7 +133,6 @@ Nothing is kept. bron writes one thing between runs, its share of the per-host r
 - Content-addressed provenance. Each document is named by the SHA-256 of its own bytes, and every article and lid carries a byte range into it, so a reader can fetch those bytes and cut the quotation again.
 - Amendment diffs. `bron law changes` matches articles on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
 - An appeal answer that is never a boolean. `no_published_successor` is dated to the moment bron read the decision, because 'nothing published' is a claim about what the register held then and not about whether an appeal was brought.
-- Web archive access for pages no publisher keeps, graded apart from primary sources. Digest checking is three-valued too: only a match is positive evidence, because the index hashes the stored payload and the replay strips its chunk framing.
 - Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers rather than each pacing itself perfectly and together going three times too fast.
 - Nothing kept between runs. bron writes its share of the rate-limit budget and nothing else, so there is no store to migrate, verify or grow stale.
 

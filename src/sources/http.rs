@@ -18,7 +18,7 @@ use reqwest::blocking::RequestBuilder;
 use crate::blob::BlobId;
 use crate::error::OwnDoing;
 use crate::paths;
-use crate::ratelimit::{Bucket, Policy};
+use crate::ratelimit::Bucket;
 
 /// Identifies bron honestly to the public services it reads.
 const USER_AGENT: &str = concat!(
@@ -38,10 +38,8 @@ pub const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_
 /// A response, frozen, before anything has been decided about its encoding.
 ///
 /// The primitive every fetch goes through. Publisher XML is UTF-8 and decodes
-/// on the way out, but an archived page is whatever the site served in whatever
-/// year it served it, and a capture can be a PDF that never decodes at all. The
-/// blob is written either way, so provenance holds for bytes that no reading
-/// will ever turn into text.
+/// on the way out; the digest is taken first either way, so provenance holds
+/// even for bytes that no reading will ever turn into text.
 pub struct FetchedBytes {
     /// Digest of the exact bytes stored.
     pub blob: BlobId,
@@ -118,9 +116,6 @@ enum Reading {
 
 pub struct Client {
     inner: reqwest::blocking::Client,
-    /// The same client, except that it reports a redirect rather than taking
-    /// it. See [`Client::get_unredirected`].
-    no_redirect: reqwest::blocking::Client,
     buckets: PathBuf,
     on_wait: Option<WaitReporter>,
 }
@@ -144,7 +139,6 @@ impl Client {
             .context(BUDGET)?;
         Ok(Self {
             inner: build(reqwest::redirect::Policy::default())?,
-            no_redirect: build(reqwest::redirect::Policy::none())?,
             buckets,
             on_wait: None,
         })
@@ -172,26 +166,6 @@ impl Client {
         self.fetch_on(&self.inner, request, Reading::Hashed)
     }
 
-    /// Freezes what comes back without taking any redirect it offers.
-    ///
-    /// Following a redirect returns the bytes of whatever it points at, under
-    /// the address that was asked for. For an ordinary fetch that is what a
-    /// caller wants. For a captured redirect it is not: the archive replays a
-    /// captured 301 as a real 301, so following it lands on a *different*
-    /// capture, and checking those bytes against the digest of the one that
-    /// was asked for fails every time, on a capture that is perfectly sound.
-    ///
-    /// Measured on a 400-address sweep: 30% failed this way, and one capture
-    /// produced a different hash on each attempt, because the chain ended
-    /// somewhere that moved between requests.
-    ///
-    /// The policy belongs to the client that *executes* the request rather
-    /// than the one that built it, which is why this is a separate fetch and
-    /// not a separate builder.
-    pub fn read_bytes_unredirected(&self, request: RequestBuilder) -> Result<FetchedBytes> {
-        self.fetch_on(&self.no_redirect, request, Reading::Hashed)
-    }
-
     fn fetch_on(
         &self,
         client: &reqwest::blocking::Client,
@@ -206,8 +180,7 @@ impl Client {
         // [`Reading::Envelope`].
         let bucket = match reading {
             Reading::Hashed => {
-                let policy = Policy::for_request(&host, request.url().path());
-                let bucket = Bucket::new(&self.buckets, &host, policy);
+                let bucket = Bucket::for_host(&self.buckets, &host);
                 let waited = bucket.acquire().context(BUDGET)?;
                 if !waited.is_zero()
                     && let Some(report) = &self.on_wait
@@ -232,10 +205,10 @@ impl Client {
                 // No answer to read. Refused connection, DNS, TLS, timeout:
                 // deliberately all of them, because backing off is right
                 // whatever the cause and none of them is worth telling apart
-                // here. Dropping the connection is how the archive says no
-                // when it has decided about you, and it must slow every
-                // caller exactly as a 429 would; otherwise a run answers
-                // "cannot reach" a few hundred times without ever pausing.
+                // here. Dropping the connection is how a host says no when it
+                // has decided about you, and it must slow every caller
+                // exactly as a 429 would; otherwise a run answers "cannot
+                // reach" a few hundred times without ever pausing.
                 let error = anyhow::Error::new(error);
                 let error = match &bucket {
                     Some(bucket) => error.context(format!(

@@ -19,7 +19,7 @@ use clap::Parser;
 use clap::error::ErrorKind;
 
 use bron::error::Fault;
-use bron::wire::{Envelope, Grade};
+use bron::wire::Envelope;
 
 use cli::Cli;
 use run::Answer;
@@ -62,9 +62,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(fault) => {
-            // The lane is known from the command even when the answer failed,
-            // so the grade is read off it rather than defaulted.
-            report(&fault, cli.json, cli.command.grade());
+            report(&fault, cli.json);
             fault.exit_code()
         }
     }
@@ -80,10 +78,10 @@ fn emit(answer: &Answer, json: bool) -> io::Result<()> {
     }
 }
 
-fn report(fault: &Fault, json: bool, grade: Grade) {
+fn report(fault: &Fault, json: bool) {
     if json {
         // Still JSON on stdout, so a consumer parses one shape either way.
-        if let Ok(text) = serde_json::to_string(&Envelope::failed(fault, grade)) {
+        if let Ok(text) = serde_json::to_string(&Envelope::failed(fault)) {
             println!("{text}");
         }
     }

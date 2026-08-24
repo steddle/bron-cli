@@ -32,7 +32,4 @@ jobs:
         env:
           RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
 
-      # The default feature set only. `live-tests` hits the real Internet
-      # Archive, so it belongs on a manual or nightly trigger and never on a
-      # run that a pull request can fire at will.
       - run: cargo test

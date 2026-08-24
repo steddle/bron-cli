@@ -89,6 +89,11 @@ separate quotas behind one name.
 Which produces `web_archive_org.bucket`, `web_archive_org_save.bucket`, and one
 file per other host.
 
+The `bron` CLI itself dials only the publisher hosts, so every bucket it opens
+is a hostname key at the default interval. The archive keys are defined here
+for the machine's other consumers of that budget — redress-engine's watch
+service paces against `web_archive_org.bucket` from the PHP side.
+
 Two of those deserve their reasons stated, because both were nearly got wrong.
 
 **`archive.org` joins `web.archive.org`'s bucket rather than getting its own.**

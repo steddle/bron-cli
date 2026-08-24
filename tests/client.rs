@@ -283,64 +283,9 @@ async fn provenance_records_the_address_actually_dialled() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_replay_fetch_stops_at_a_redirect_instead_of_taking_it() {
-    // The archive replays a captured 301 as a real 301. Following it fetches a
-    // different capture, whose bytes then cannot match the digest recorded for
-    // the one that was asked for — so a sound capture fails verification.
-    // Measured at 30% of a 400-address sweep before the policy was split.
-    let server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/capture"))
-        .respond_with(ResponseTemplate::new(301).insert_header("Location", "/elsewhere"))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/elsewhere"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("a different capture"))
-        .mount(&server)
-        .await;
-
-    let home = Home::new();
-    let url = format!("{}/capture", server.uri());
-
-    let followed = off_thread(&home, {
-        let url = url.clone();
-        move |client| client.read_bytes(client.get(&url)).map(|r| r.bytes).ok()
-    })
-    .await;
-
-    // The ordinary fetch takes the redirect, which is right for every other lane.
-    assert_eq!(followed.as_deref(), Some(&b"a different capture"[..]));
-
-    let stopped = off_thread(&home, move |client| {
-        client
-            .read_bytes_unredirected(client.get(&url))
-            .map(|r| r.bytes)
-            .ok()
-    })
-    .await
-    .expect("a captured redirect is a capture, not a failure");
-
-    // The redirect's own payload, which for a captured 301 is empty. That is
-    // exactly what the index recorded a digest of, so verification passes
-    // instead of comparing against a page from somewhere else entirely.
-    assert!(
-        stopped.is_empty(),
-        "got {} bytes of someone else's capture",
-        stopped.len()
-    );
-    assert_eq!(
-        bron::sources::wayback::digest_of(&stopped),
-        "3I42H3S6NNFQ2MSVX7XZKYAYSCX5QBYJ",
-        "the empty-payload digest the index carries for a captured redirect"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_host_that_refuses_the_connection_still_slows_every_caller() {
-    // The archive's other way of saying no. It does not answer 429; it drops
-    // the connection, and a caller that only recognises 429 reads that as the
+    // A host's other way of saying no. It does not answer 429; it drops the
+    // connection, and a caller that only recognises 429 reads that as the
     // service being down and keeps dialling. Measured: 171 consecutive
     // requests refused this way in one run, none of them pausing anything.
     // Port 1 is privileged and nothing serves it, so the connection is

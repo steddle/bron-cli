@@ -13,11 +13,12 @@
 //!
 //! # Bucket file format
 //!
-//! One file per budget under the bucket directory, named after the budget's key
-//! with non-alphanumerics replaced by `_`. The key is usually the host, but a
-//! service that throttles one budget across several hostnames maps all of them
-//! onto one key, because the file is the budget. Two lines, each an integer,
-//! LF-separated:
+//! One file per budget under the bucket directory, named after the budget's
+//! key with non-alphanumerics replaced by `_`. A key is a budget rather than a
+//! hostname — `docs/buckets.md` defines the machine's keys, and a service that
+//! throttles one budget across several hostnames maps all of them onto one —
+//! but every host bron dials is its own budget, so here the key is the host.
+//! Two lines, each an integer, LF-separated:
 //!
 //! ```text
 //! 1786032277123
@@ -42,74 +43,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
-/// Minimum gap between two requests to the same host, when nothing else is
-/// known. Hosts with a measured limit override this.
+/// Minimum gap between two requests to the same host: the interval the bucket
+/// spec states for a hostname key.
 const DEFAULT_INTERVAL: Duration = Duration::from_millis(1_000);
 
 /// Ceiling on any single wait, including one the host asked for. An uncapped
 /// `Retry-After` lets one url hold a whole run hostage.
 pub const MAX_BACKOFF: Duration = Duration::from_secs(60);
-
-/// Which budget a request draws from.
-///
-/// A `&'static str` from a match arm rather than a borrowed host, so a caller
-/// cannot pass a hostname where a budget is meant and quietly open a second
-/// bucket for a budget that already has one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BucketKey(pub &'static str);
-
-/// Pacing for one budget.
-#[derive(Debug, Clone, Copy)]
-pub struct Policy {
-    /// The bucket this host shares. Several hosts may name the same one.
-    pub key: BucketKey,
-    pub interval: Duration,
-}
-
-impl Policy {
-    /// The policy for a host.
-    ///
-    /// web.archive.org is the one measured case: three concurrent sweeps pacing
-    /// themselves at 1500 ms each went roughly three times too fast together and
-    /// all three stalled. The limit is per IP, so 1500 ms is the machine's
-    /// budget, not one process's.
-    ///
-    /// The Internet Archive answers on two hostnames — web.archive.org for the
-    /// index, the replay and Save Page Now, archive.org for availability and
-    /// the IAS3 endpoints — and throttles both against the same IP. They name
-    /// one bucket, and it is web.archive.org's, because that file already
-    /// exists and a PHP process on this machine already opens it. Minting a new
-    /// key for the pair would leave the two sides pacing against different
-    /// files, which is the failure this module exists to prevent.
-    pub fn for_host(host: &str) -> Self {
-        Self::for_request(host, "")
-    }
-
-    /// The policy for a request, which sometimes needs more than the host.
-    ///
-    /// Save Page Now answers on the same hostname as the index but is governed
-    /// by a concurrent-session quota rather than by the read rate, and it hands
-    /// back a hold-off when that quota is tripped. Writing that hold-off into
-    /// the read bucket would stall every index query on this machine — this
-    /// process and the PHP one both — over a quota neither of them touched.
-    /// A refusal must only ever slow the budget it came from.
-    pub fn for_request(host: &str, path: &str) -> Self {
-        match host {
-            "web.archive.org" if path.starts_with("/save") => Self {
-                key: BucketKey("web.archive.org/save"),
-                interval: Duration::from_millis(1_500),
-            },
-            "web.archive.org" | "archive.org" => Self {
-                key: BucketKey("web.archive.org"),
-                interval: Duration::from_millis(1_500),
-            },
-            _ => Self {
-                key: BucketKey(""),
-                interval: DEFAULT_INTERVAL,
-            },
-        }
-    }
-}
 
 /// A cross-process token bucket, one per budget.
 pub struct Bucket {
@@ -118,19 +58,23 @@ pub struct Bucket {
 }
 
 impl Bucket {
-    /// The bucket a host draws from, given its policy.
-    ///
-    /// An empty key means the host is its own budget, which is the ordinary
-    /// case and keeps the filename for every unmeasured host exactly as it was.
+    /// The bucket a host draws from: one file per host, at the default
+    /// interval. Every host bron dials is its own budget; a budget shaped any
+    /// other way belongs to another consumer of the machine's budget, and
+    /// `docs/buckets.md` is where its key is defined.
     ///
     /// `dir` must already exist: whoever owns the directory creates it once,
     /// so that a bucket does not re-check it on every wakeup of its wait loop.
-    pub fn new(dir: &Path, host: &str, policy: Policy) -> Self {
-        let BucketKey(key) = policy.key;
-        let key = if key.is_empty() { host } else { key };
+    pub fn for_host(dir: &Path, host: &str) -> Self {
+        Self::with_interval(dir, host, DEFAULT_INTERVAL)
+    }
+
+    /// A bucket paced at a chosen interval. For tests, which need waits
+    /// measured in milliseconds rather than seconds.
+    fn with_interval(dir: &Path, key: &str, interval: Duration) -> Self {
         Self {
             path: dir.join(format!("{}.bucket", sanitize(key))),
-            interval: policy.interval,
+            interval,
         }
     }
 
@@ -178,11 +122,11 @@ impl Bucket {
     /// How long to hold off when a host refuses the connection itself.
     ///
     /// A host under load answers 429. A host that has decided about *you*
-    /// stops answering: the Internet Archive drops the TCP connection, and a
-    /// caller that only recognises 429 reads that as the service being down
-    /// and keeps trying. Measured: 171 consecutive requests refused this way
-    /// in one run, every one of them reported as "cannot reach", none of them
-    /// slowing anything down.
+    /// stops answering: it drops the TCP connection, and a caller that only
+    /// recognises 429 reads that as the service being down and keeps trying.
+    /// Measured: 171 consecutive requests refused this way in one run, every
+    /// one of them reported as "cannot reach", none of them slowing anything
+    /// down.
     ///
     /// Long enough that a run stops hammering, short enough that a genuine
     /// blip costs one pause. Not escalating, because that would need a
@@ -311,17 +255,14 @@ mod tests {
 
     use super::*;
 
-    fn policy(ms: u64) -> Policy {
-        Policy {
-            key: BucketKey(""),
-            interval: Duration::from_millis(ms),
-        }
+    fn bucket(dir: &Path, host: &str, ms: u64) -> Bucket {
+        Bucket::with_interval(dir, host, Duration::from_millis(ms))
     }
 
     #[test]
     fn a_fresh_bucket_does_not_wait() {
         let dir = tempfile::tempdir().unwrap();
-        let bucket = Bucket::new(dir.path(), "example.invalid", policy(10_000));
+        let bucket = bucket(dir.path(), "example.invalid", 10_000);
 
         // `acquire` reports elapsed time, which on a fresh bucket is the lock
         // and the two file operations rather than a sleep. Measured against an
@@ -336,7 +277,7 @@ mod tests {
     #[test]
     fn a_second_caller_waits_for_the_interval() {
         let dir = tempfile::tempdir().unwrap();
-        let bucket = Bucket::new(dir.path(), "example.invalid", policy(150));
+        let bucket = bucket(dir.path(), "example.invalid", 150);
 
         bucket.acquire().unwrap();
         bucket.released().unwrap();
@@ -363,10 +304,10 @@ mod tests {
     #[test]
     fn the_bucket_file_is_the_documented_two_line_format() {
         let dir = tempfile::tempdir().unwrap();
-        let bucket = Bucket::new(dir.path(), "web.archive.org", policy(10));
+        let bucket = bucket(dir.path(), "example.invalid", 10);
         bucket.acquire().unwrap();
 
-        let text = std::fs::read_to_string(dir.path().join("web_archive_org.bucket")).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("example_invalid.bucket")).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text:?}");
         assert!(lines[0].parse::<u64>().unwrap() > 0);
@@ -376,7 +317,7 @@ mod tests {
     #[test]
     fn a_refusal_holds_every_caller_off_and_is_capped() {
         let dir = tempfile::tempdir().unwrap();
-        let bucket = Bucket::new(dir.path(), "example.invalid", policy(10));
+        let bucket = bucket(dir.path(), "example.invalid", 10);
 
         let backoff = bucket.refused(Some(Duration::from_secs(3_600))).unwrap();
         assert_eq!(
@@ -395,7 +336,7 @@ mod tests {
     #[test]
     fn a_retry_never_waits_less_than_ordinary_pacing() {
         let dir = tempfile::tempdir().unwrap();
-        let bucket = Bucket::new(dir.path(), "example.invalid", policy(2_000));
+        let bucket = bucket(dir.path(), "example.invalid", 2_000);
         let backoff = bucket.refused(Some(Duration::from_millis(1))).unwrap();
         assert_eq!(backoff, Duration::from_millis(2_000));
     }
@@ -409,82 +350,15 @@ mod tests {
         )
         .unwrap();
 
-        let bucket = Bucket::new(dir.path(), "example.invalid", policy(10));
+        let bucket = bucket(dir.path(), "example.invalid", 10);
         assert!(bucket.acquire().is_ok());
     }
 
     #[test]
-    fn the_archive_host_carries_the_measured_interval() {
-        assert_eq!(
-            Policy::for_host("web.archive.org").interval,
-            Duration::from_millis(1_500)
-        );
-        assert_eq!(
-            Policy::for_host("archive.org").interval,
-            Duration::from_millis(1_500)
-        );
-        assert_eq!(
-            Policy::for_host("example.invalid").interval,
-            DEFAULT_INTERVAL
-        );
-    }
-
-    #[test]
-    fn both_archive_hosts_draw_from_the_one_bucket_php_already_opens() {
-        let dir = tempfile::tempdir().unwrap();
-
-        for host in ["web.archive.org", "archive.org"] {
-            Bucket::new(dir.path(), host, Policy::for_host(host))
-                .acquire()
-                .unwrap();
-        }
-
-        let files: Vec<_> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-
-        // One IP, one budget, one file. A second file here means the two hosts
-        // pace independently and together go twice too fast.
-        assert_eq!(files, ["web_archive_org.bucket"], "{files:?}");
-    }
-
-    #[test]
-    fn save_page_now_draws_from_its_own_budget() {
-        let dir = tempfile::tempdir().unwrap();
-
-        for (host, path) in [
-            ("web.archive.org", "/cdx/search/cdx"),
-            ("web.archive.org", "/save"),
-        ] {
-            Bucket::new(dir.path(), host, Policy::for_request(host, path))
-                .acquire()
-                .unwrap();
-        }
-
-        let mut files: Vec<_> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        files.sort();
-
-        // Two budgets, two files. One bucket would let a Save Page Now refusal
-        // hold off every index read on the machine, in this process and in the
-        // PHP one, over a quota neither of them spent.
-        assert_eq!(
-            files,
-            ["web_archive_org.bucket", "web_archive_org_save.bucket"],
-            "{files:?}"
-        );
-    }
-
-    #[test]
-    fn an_unmeasured_host_is_still_its_own_bucket() {
+    fn a_host_is_its_own_bucket() {
         let dir = tempfile::tempdir().unwrap();
         let host = "example.invalid";
-        Bucket::new(dir.path(), host, Policy::for_host(host))
-            .acquire()
-            .unwrap();
+        Bucket::for_host(dir.path(), host).acquire().unwrap();
 
         assert!(dir.path().join("example_invalid.bucket").exists());
     }

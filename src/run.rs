@@ -5,7 +5,6 @@
 //! describe different things.
 
 use std::io::{self, Write};
-use std::time::{Duration, Instant};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
@@ -14,10 +13,10 @@ use bron::diff;
 use bron::error::{Fault, Outcome, from_local, from_source};
 use bron::ids::{BwbId, Ecli, PublicationId};
 use bron::service::{self, Service};
-use bron::sources::{Client, publications, rechtspraak, wayback};
+use bron::sources::{Client, publications, rechtspraak};
 use bron::wire::{self, Caveat, Envelope, View};
 
-use crate::cli::{Archive, Case, Cli, Command, Law, Publication};
+use crate::cli::{Case, Cli, Command, Law, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -32,8 +31,6 @@ pub enum Answer {
     Appeal(Envelope<wire::AppealStatus>),
     PublicationHits(Envelope<Vec<wire::PublicationHit>>),
     Publication(Envelope<Box<wire::Publication>>),
-    CaptureHits(Envelope<Vec<wire::CaptureHit>>),
-    Capture(Box<Envelope<Box<wire::Capture>>>),
 }
 
 impl Answer {
@@ -53,8 +50,6 @@ impl Answer {
             Self::Appeal(e) => write(out, e),
             Self::PublicationHits(e) => write(out, e),
             Self::Publication(e) => write(out, e),
-            Self::CaptureHits(e) => write(out, e),
-            Self::Capture(e) => write(out, e),
         }
     }
 
@@ -74,7 +69,6 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
         Command::Law(law) => run_law(law, today, quiet, &service),
         Command::Case(case) => run_case(case, quiet),
         Command::Publication(pub_) => run_publication(pub_, quiet),
-        Command::Archive(archive) => run_archive(archive, today, quiet),
         Command::Find {
             query,
             limit,
@@ -857,296 +851,6 @@ fn compared(expression: &service::Expression, blob: bron::blob::BlobId) -> wire:
     }
 }
 
-// -- the web archive -----------------------------------------------------
-
-/// The service name every archive fault is attributed to.
-const ARCHIVE: &str = "web.archive.org";
-
-fn run_archive(command: &Archive, today: NaiveDate, quiet: bool) -> Outcome<Answer> {
-    match command {
-        Archive::Captures {
-            url,
-            from,
-            to,
-            limit,
-            match_type,
-        } => {
-            let client = client(quiet)?;
-            let query = wayback::IndexQuery {
-                from: *from,
-                to: *to,
-                limit: Some(*limit),
-                match_type: (*match_type).into(),
-            };
-
-            let found =
-                wayback::captures(&client, url, &query).map_err(|e| from_source(ARCHIVE, e))?;
-
-            let mut caveats = Vec::new();
-            if found.truncated {
-                caveats.push(Caveat::MoreCaptures);
-            }
-            if found
-                .rows
-                .iter()
-                .any(|row| row.status == wayback::ArchiveStatus::Unknown)
-            {
-                caveats.push(Caveat::ArchiveStatusUnknown);
-            }
-
-            // An empty list here is an answer: the archive holds nothing for
-            // this address. Only a query that could not be run is a fault.
-            let hits: Vec<wire::CaptureHit> = found.rows.iter().map(Into::into).collect();
-
-            Ok(Answer::CaptureHits(
-                Envelope::archive(hits).with_caveats(caveats),
-            ))
-        }
-
-        Archive::Show { url, as_of } => {
-            let on = as_of.unwrap_or(today);
-            let client = client(quiet)?;
-
-            // The index decides which capture answers the question, and only
-            // then are its bytes read. Asking a store first would answer "the
-            // page in 2025" with whatever happens to be held, which for one
-            // 2016 capture is a nine-year-old page returned in ten
-            // milliseconds with nothing to say so.
-            let row = wayback::capture_on(&client, url, on)
-                .map_err(|e| from_source(ARCHIVE, e))?
-                .ok_or_else(|| Fault::not_found("capture", format!("{url} on or before {on}")))?;
-
-            let fetched =
-                wayback::fetch_capture(&client, &row).map_err(|e| from_source(ARCHIVE, e))?;
-
-            // Not one bron caused. This command reads the index and fetches
-            // what it names; it never asks the archive to make anything.
-            let capture = read_capture(fetched, false, Utc::now());
-            let caveats = capture_caveats(&capture);
-            let bound = capture.captured_at.date_naive();
-
-            Ok(Answer::Capture(Box::new(
-                Envelope::archive(Box::new(capture.into()))
-                    // The date the archive took the capture, which is the only
-                    // date this answer can speak for.
-                    .dated(bound)
-                    .with_caveats(caveats),
-            )))
-        }
-
-        Archive::Capture {
-            url,
-            if_not_archived_within,
-            screenshot,
-            timeout,
-        } => {
-            let credentials =
-                wayback::Credentials::from_env().map_err(|e| Fault::usage(e.to_string()))?;
-            let client = client(quiet)?;
-
-            // What the archive held before asking. A job id proves nothing, so
-            // the capture reported afterwards has to postdate this to be one
-            // bron caused.
-            //
-            // The newest row, not the history: a paged read of every capture can
-            // stop short of the end, and a row missing because the read
-            // truncated reads exactly like a row that was never there.
-            let newest_before =
-                wayback::newest_capture(&client, url, None).map_err(|e| from_source(ARCHIVE, e))?;
-
-            let request = wayback::SaveRequest {
-                url: url.clone(),
-                if_not_archived_within_days: *if_not_archived_within,
-                screenshot: *screenshot,
-            };
-
-            let job = wayback::submit(&client, &credentials, &request)
-                .map_err(|e| from_source(ARCHIVE, e))?;
-
-            if !quiet {
-                eprintln!("bron: the archive is working on {job}");
-            }
-
-            let status = poll(
-                &client,
-                &credentials,
-                &job,
-                Duration::from_secs(*timeout),
-                quiet,
-            )?;
-
-            let Some(stamp) = status.timestamp.clone() else {
-                return Err(Fault::not_found("capture", url));
-            };
-
-            // Confirmation, not the job. The index is what establishes that a
-            // capture exists, and re-reading it is also what makes a resubmit
-            // that returned an old job visible as exactly that.
-            let query = wayback::IndexQuery {
-                from: Some(stamp.date()),
-                ..Default::default()
-            };
-            let after =
-                wayback::captures(&client, url, &query).map_err(|e| from_source(ARCHIVE, e))?;
-
-            let row = after
-                .rows
-                .iter()
-                .find(|row| *row.id.timestamp() == stamp)
-                .ok_or_else(|| {
-                    Fault::not_found(
-                        "capture",
-                        format!(
-                            "{url}: the archive reported {stamp} but the index does not \
-                                 carry it yet"
-                        ),
-                    )
-                })?;
-
-            // Whether bron caused this one, decided against what the archive
-            // held before it was asked. A job id proves nothing: the archive
-            // answers a resubmit with the job of the capture it already had.
-            let fresh = wayback::caused_by_bron(newest_before.as_ref(), &stamp);
-            let fetched =
-                wayback::fetch_capture(&client, row).map_err(|e| from_source(ARCHIVE, e))?;
-
-            let capture = read_capture(fetched, fresh, Utc::now());
-            let caveats = capture_caveats(&capture);
-            let bound = capture.captured_at.date_naive();
-
-            Ok(Answer::Capture(Box::new(
-                Envelope::archive(Box::new(capture.into()))
-                    .dated(bound)
-                    .with_caveats(caveats),
-            )))
-        }
-    }
-}
-
-/// Waits on a job, reporting rather than looking hung.
-///
-/// The decision of what to do next is [`wayback::next`], which is pure. This is
-/// only the part that sleeps, and it is the only part that cannot be tested.
-fn poll(
-    client: &Client,
-    credentials: &wayback::Credentials,
-    job: &str,
-    budget: Duration,
-    quiet: bool,
-) -> Outcome<wayback::SaveStatus> {
-    let started = Instant::now();
-
-    for attempt in 1.. {
-        let status =
-            wayback::job_status(client, credentials, job).map_err(|e| from_source(ARCHIVE, e))?;
-
-        match wayback::next(&status, attempt, started.elapsed(), budget) {
-            wayback::Poll::Done(finished) => return Ok(*finished),
-            wayback::Poll::GaveUp(reason) => {
-                return Err(from_source(ARCHIVE, anyhow::anyhow!("{reason}")));
-            }
-            wayback::Poll::Wait(wait) => {
-                if !quiet {
-                    eprintln!(
-                        "bron: still capturing, {}s elapsed",
-                        started.elapsed().as_secs()
-                    );
-                }
-                std::thread::sleep(wait);
-            }
-        }
-    }
-
-    unreachable!("next() bounds both attempts and elapsed time")
-}
-
-/// One capture, as bron read it.
-///
-/// `requested` is the caller's own knowledge and cannot be read off the
-/// capture: only the command that asked the archive to make one knows that it
-/// did, and it knows by comparing what the index held before against what came
-/// back. See [`wayback::caused_by_bron`].
-fn read_capture(
-    fetched: bron::sources::FetchedCapture,
-    requested: bool,
-    read_at: DateTime<Utc>,
-) -> bron::model::Capture {
-    use bron::model::DigestCheck;
-    use wayback::{Reading, Verified};
-
-    let (content, encoding, encoding_from) = match fetched.reading {
-        Reading::Text {
-            text,
-            encoding,
-            declared,
-            ..
-        } => (
-            Some(text),
-            Some(encoding.to_string()),
-            Some(format!("{declared:?}").to_lowercase()),
-        ),
-        // A capture of a PDF is evidence as bytes and a digest; running a text
-        // extractor over it would invent a document.
-        Reading::Binary => (None, None, None),
-    };
-
-    bron::model::Capture {
-        captured_at: fetched.id.captured_at(),
-        id: fetched.id,
-        original_url: fetched.original,
-        archive_status: fetched.status.code(),
-        index_digest: fetched.digest,
-        verified: Some(match fetched.verified {
-            Verified::Matches => DigestCheck::Matches,
-            Verified::Differs => DigestCheck::Differs,
-            Verified::Absent => DigestCheck::Absent,
-        }),
-        is_revisit: fetched.is_revisit,
-        mime_type: fetched.mime_type,
-        encoding,
-        encoding_from,
-        requested,
-        content,
-        blob: Some(fetched.provenance.blob),
-        fetched_at: read_at,
-    }
-}
-
-/// What limits what may be concluded from one capture.
-fn capture_caveats(capture: &bron::model::Capture) -> Vec<Caveat> {
-    let mut caveats = Vec::new();
-
-    if capture.archive_status.is_none() {
-        caveats.push(Caveat::ArchiveStatusUnknown);
-    }
-    // Said whenever the replay could not be shown to be byte-identical to the
-    // crawl, which covers both a digest that differs and one that is absent.
-    // Neither is a failure and neither is a clean bill of health.
-    if capture.verified != Some(bron::model::DigestCheck::Matches) {
-        caveats.push(Caveat::DigestUnverifiable);
-    }
-    if capture.is_revisit {
-        caveats.push(Caveat::Revisit);
-    }
-    if capture.requested {
-        caveats.push(Caveat::RequestedByBron);
-    }
-    if let (Some(encoding), Some(declared)) = (&capture.encoding, &capture.encoding_from) {
-        // Only worth saying when nothing authoritative declared it; a stated
-        // charset that was honoured is not a limit on anything.
-        if declared == "assumed" {
-            caveats.push(Caveat::DecodedAs {
-                encoding: encoding.clone(),
-                declared: "nothing declared an encoding, so the web's historical default \
-                           was assumed"
-                    .to_string(),
-            });
-        }
-    }
-
-    caveats
-}
-
 fn parse_id<T: std::str::FromStr>(text: &str) -> Outcome<T>
 where
     T::Err: std::fmt::Display,
@@ -1394,162 +1098,13 @@ mod narrow_tests {
 }
 
 #[cfg(test)]
-mod archive_tests {
-    use super::{appeal, capture_caveats, read_capture};
-    use bron::blob::BlobId;
-    use bron::ids::CaptureId;
-    use bron::model::{AppealStatus, Captured, DigestCheck, Direction, Relation};
-    use bron::sources::{FetchedCapture, Provenance, wayback};
-    use bron::wire::Caveat;
+mod appeal_tests {
+    use super::appeal;
+    use bron::model::{AppealStatus, Direction, Relation};
     use chrono::{DateTime, Utc};
 
     fn read_at() -> DateTime<Utc> {
         "2026-08-24T09:00:00Z".parse().unwrap()
-    }
-
-    fn fetched(timestamp: &str, status: wayback::ArchiveStatus, body: &[u8]) -> FetchedCapture {
-        // The key is the archive's, taken from the index row, so a fixture
-        // writes one out rather than deriving one and calling it the same thing.
-        let id = CaptureId::new(
-            timestamp.parse().unwrap(),
-            "com,steddle)/pricing".to_string(),
-        );
-
-        FetchedCapture {
-            id,
-            original: "https://steddle.com/pricing".to_string(),
-            status,
-            digest: Some(wayback::digest_of(body)),
-            verified: wayback::Verified::Matches,
-            is_revisit: false,
-            mime_type: Some("text/html".to_string()),
-            content_type: Some("text/html; charset=utf-8".to_string()),
-            reading: wayback::Reading::Text {
-                decompressed: false,
-                text: String::from_utf8_lossy(body).into_owned(),
-                encoding: "UTF-8",
-                declared: wayback::Declared::Header,
-                lossy: false,
-            },
-            provenance: Provenance {
-                blob: BlobId::of(body),
-                url: "https://web.archive.org/web/x/y".to_string(),
-                byte_len: body.len(),
-            },
-        }
-    }
-
-    /// The capture is from January and it was read in August. An answer bound
-    /// to the read date would date a 2024 page to today.
-    #[test]
-    fn a_capture_keeps_the_date_it_was_taken_apart_from_the_date_it_was_read() {
-        let capture = read_capture(
-            fetched(
-                "20240101120000",
-                wayback::ArchiveStatus::Answered(200),
-                b"old",
-            ),
-            false,
-            read_at(),
-        );
-
-        assert_eq!(
-            capture.captured_at.date_naive(),
-            "2024-01-01".parse::<chrono::NaiveDate>().unwrap()
-        );
-        assert_eq!(capture.fetched_at, read_at());
-    }
-
-    /// Not `No`: there is a capture and the archive will not say what it got.
-    #[test]
-    fn a_withheld_status_reads_as_unknown_rather_than_as_no() {
-        let capture = read_capture(
-            fetched("20240101120000", wayback::ArchiveStatus::Unknown, b"body"),
-            false,
-            read_at(),
-        );
-
-        assert_eq!(capture.archive_status, None);
-        assert_eq!(capture.captured_the_page(), Captured::Unknown);
-        assert!(capture_caveats(&capture).contains(&Caveat::ArchiveStatusUnknown));
-    }
-
-    /// A capture of a 404 is a faithful capture of an error page, and citing it
-    /// as the page is the mistake this distinction exists to prevent.
-    #[test]
-    fn a_captured_error_page_reads_as_not_the_page() {
-        let capture = read_capture(
-            fetched(
-                "20240101120000",
-                wayback::ArchiveStatus::Answered(404),
-                b"404",
-            ),
-            false,
-            read_at(),
-        );
-
-        assert_eq!(capture.archive_status, Some(404));
-        assert_eq!(capture.captured_the_page(), Captured::No);
-    }
-
-    /// Two different answers, kept apart. Only a match is positive evidence,
-    /// and an index that recorded no digest is not a clean bill of health.
-    #[test]
-    fn a_capture_with_no_index_digest_is_not_read_as_a_verified_one() {
-        let mut old = fetched(
-            "20040101120000",
-            wayback::ArchiveStatus::Answered(200),
-            b"ancient",
-        );
-        old.digest = None;
-        old.verified = wayback::Verified::Absent;
-
-        let capture = read_capture(old, false, read_at());
-
-        assert_eq!(capture.verified, Some(DigestCheck::Absent));
-        assert_ne!(capture.verified, Some(DigestCheck::Matches));
-        assert!(capture_caveats(&capture).contains(&Caveat::DigestUnverifiable));
-    }
-
-    /// A tool that can cause the evidence it then cites says which happened.
-    /// Only the command that asked the archive to make a capture knows that it
-    /// did, so this is the caller's own knowledge and not the capture's.
-    #[test]
-    fn a_capture_bron_asked_for_says_so() {
-        let row = || {
-            fetched(
-                "20240101120000",
-                wayback::ArchiveStatus::Answered(200),
-                b"x",
-            )
-        };
-
-        let found = read_capture(row(), false, read_at());
-        assert!(!found.requested);
-        assert!(!capture_caveats(&found).contains(&Caveat::RequestedByBron));
-
-        let caused = read_capture(row(), true, read_at());
-        assert!(caused.requested);
-        assert!(capture_caveats(&caused).contains(&Caveat::RequestedByBron));
-    }
-
-    /// Not text at all. A capture of a PDF is evidence as bytes and a digest;
-    /// running a text extractor over it would invent a document.
-    #[test]
-    fn a_capture_that_is_not_text_carries_bytes_and_a_digest_and_no_content() {
-        let mut binary = fetched(
-            "20240101120000",
-            wayback::ArchiveStatus::Answered(200),
-            b"%PDF",
-        );
-        binary.reading = wayback::Reading::Binary;
-        binary.mime_type = Some("application/pdf".into());
-
-        let capture = read_capture(binary, false, read_at());
-
-        assert!(capture.content.is_none());
-        assert!(capture.encoding.is_none());
-        assert!(capture.blob.is_some());
     }
 
     fn relation(target: &str, direction: Direction) -> Relation {

@@ -12,8 +12,7 @@ use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use bron::sources::publications::Collection;
-use bron::sources::wayback;
-use bron::wire::{Grade, View};
+use bron::wire::View;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -53,15 +52,6 @@ pub enum Command {
     #[command(subcommand)]
     Publication(Publication),
 
-    /// The web archive: pages as a third party recorded them.
-    ///
-    /// What this answers is a different claim from the rest of bron. A statute
-    /// or a ruling speaks with its own authority; a capture is the Internet
-    /// Archive's record that a page said something on a day. Every answer here
-    /// is graded `archive` and dated to its capture, never to today.
-    #[command(subcommand)]
-    Archive(Archive),
-
     /// Answers which article, from a question or from a citation.
     ///
     /// Distinct from `law search`, which resolves a citeertitel to a BWB id and
@@ -90,109 +80,6 @@ pub enum Command {
         #[command(flatten)]
         moment: Moment,
     },
-}
-
-impl Command {
-    /// What an answer from this command rests on.
-    ///
-    /// Known from the command alone, which is what lets a failure carry the
-    /// right grade: a lookup that could not be answered is still a lookup
-    /// against the archive, not against an authority.
-    pub fn grade(&self) -> Grade {
-        match self {
-            Self::Archive(_) => Grade::Archive,
-            _ => Grade::Authority,
-        }
-    }
-}
-
-#[derive(Debug, Subcommand)]
-pub enum Archive {
-    /// Lists what the archive holds for an address, without fetching any of it.
-    ///
-    /// A row whose status is withheld is still listed: the archive records that
-    /// for a crawl excluded by robots.txt, and there being a capture whose
-    /// result is unknown is a different fact from there being no capture.
-    Captures {
-        /// The address as captured, e.g. https://example.com/pricing.
-        url: String,
-
-        /// Only captures taken on or after this date.
-        #[arg(long, value_name = "YYYY-MM-DD")]
-        from: Option<NaiveDate>,
-
-        /// Only captures taken on or before this date, inclusive of the day.
-        #[arg(long, value_name = "YYYY-MM-DD")]
-        to: Option<NaiveDate>,
-
-        #[arg(long, default_value_t = 100)]
-        limit: u32,
-
-        /// How the address matches. A domain-wide enumeration of a large site
-        /// runs to millions of rows; prefix is the usable form.
-        #[arg(long, value_enum, default_value_t = MatchArg::Exact)]
-        match_type: MatchArg,
-    },
-
-    /// Shows a page as it stood on a date.
-    ///
-    /// Resolves the newest capture taken at or before `--as-of`, fetches its
-    /// bytes unmodified, and checks them against the digest the index recorded.
-    Show {
-        url: String,
-
-        /// The date to answer for. Without it, the newest capture there is.
-        #[arg(long, value_name = "YYYY-MM-DD")]
-        as_of: Option<NaiveDate>,
-    },
-
-    /// Asks the archive to capture a page that it may not hold yet.
-    ///
-    /// The only command in bron that writes to a third party, and the only one
-    /// that needs credentials: BRON_IA_ACCESS_KEY and BRON_IA_SECRET_KEY from
-    /// archive.org/account/s3.php. Reading the archive needs neither.
-    ///
-    /// Nothing is reported as captured until an index row postdating the
-    /// submission confirms it. Submitting a URL again returns the job of the
-    /// capture already held, so a job id never establishes that anything new
-    /// was made.
-    Capture {
-        url: String,
-
-        /// Do not make a new capture when one exists inside this many days.
-        #[arg(long, value_name = "DAYS")]
-        if_not_archived_within: Option<u32>,
-
-        /// Also capture a rendered screenshot. Worth having when the claim is
-        /// in the layout of a pricing table rather than in prose.
-        #[arg(long)]
-        screenshot: bool,
-
-        /// How long to wait for the archive before giving up on it.
-        #[arg(long, value_name = "SECONDS", default_value_t = 300)]
-        timeout: u64,
-    },
-}
-
-/// How a CDX query matches the address given.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "kebab-case")]
-pub enum MatchArg {
-    Exact,
-    Prefix,
-    Host,
-    Domain,
-}
-
-impl From<MatchArg> for wayback::MatchType {
-    fn from(arg: MatchArg) -> Self {
-        match arg {
-            MatchArg::Exact => Self::Exact,
-            MatchArg::Prefix => Self::Prefix,
-            MatchArg::Host => Self::Host,
-            MatchArg::Domain => Self::Domain,
-        }
-    }
 }
 
 #[derive(Debug, Subcommand)]

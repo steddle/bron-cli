@@ -128,8 +128,8 @@ pub type Outcome<T> = std::result::Result<T, Fault>;
 /// A lane wraps everything it does in [`from_source`], which knows how to tell
 /// a 404 from a dead network and reads anything else as the service answering
 /// badly. That is right for a malformed body and wrong for a rate-limit
-/// directory bron cannot create: reported as the archive misbehaving, it is a
-/// failure a pipeline would retry against a host that was never at fault.
+/// directory bron cannot create: reported as the publisher misbehaving, it is
+/// a failure a pipeline would retry against a host that was never at fault.
 ///
 /// It carries the sentence rather than being a bare tag, because it ends up
 /// outermost and is therefore what a reader sees first; what actually went
@@ -245,8 +245,8 @@ mod tests {
         );
     }
 
-    /// A directory bron cannot create is not the archive answering badly, and
-    /// a pipeline told otherwise retries a host that was never at fault.
+    /// A directory bron cannot create is not the publisher answering badly,
+    /// and a pipeline told otherwise retries a host that was never at fault.
     #[test]
     fn a_failure_of_our_own_is_not_charged_to_the_service() {
         let ours = anyhow::Error::new(std::io::Error::other("Not a directory"))
@@ -255,7 +255,7 @@ mod tests {
                 "bron cannot use the rate-limit budget on this machine",
             ));
 
-        assert_eq!(from_source("web.archive.org", ours).kind(), "local");
+        assert_eq!(from_source("data.rechtspraak.nl", ours).kind(), "local");
     }
 
     #[test]

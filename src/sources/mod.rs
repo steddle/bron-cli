@@ -7,7 +7,6 @@
 
 pub mod publications;
 pub mod rechtspraak;
-pub mod wayback;
 
 mod http;
 mod xml;
@@ -88,36 +87,6 @@ pub struct FetchedCase {
     pub full_text: Option<String>,
     pub provenance: Provenance,
     pub relations: Vec<Relation>,
-}
-
-/// One capture of one page, as the archive replayed it.
-///
-/// Two dates matter here and they are not the same date. `id` carries when the
-/// archive made the capture; the fetch time bron stamps on the way into the
-/// corpus is when bron read it. An archive answer is bound to the first and
-/// never to the second, which is the whole reason the lane exists.
-///
-/// `status` is what the *site* answered the *archive*, kept apart from anything
-/// a direct fetch would report, because "the site told us" and "a third party
-/// recorded" are different claims about different moments.
-#[derive(Debug, Clone, PartialEq)]
-pub struct FetchedCapture {
-    pub id: crate::ids::CaptureId,
-    /// The address captured, as written. Provenance; identity is `id`.
-    pub original: String,
-    pub status: wayback::ArchiveStatus,
-    /// The archive's own hash of the payload, when the index carried one.
-    pub digest: Option<String>,
-    pub verified: wayback::Verified,
-    /// True when the archive stored no new payload and replayed an earlier
-    /// capture's bytes, so the content is older than this capture's timestamp.
-    pub is_revisit: bool,
-    /// The index's media type for the capture.
-    pub mime_type: Option<String>,
-    /// What the replay actually served it as.
-    pub content_type: Option<String>,
-    pub reading: wayback::Reading,
-    pub provenance: Provenance,
 }
 
 #[derive(Debug, Clone, PartialEq)]

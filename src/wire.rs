@@ -7,9 +7,10 @@
 //!
 //! Two properties every answer carries, because a caller cannot infer either:
 //!
-//! - **Grade.** A statute or a ruling speaks with its own authority. An archive
-//!   capture is a third party's record that a page said something on a day.
-//!   Both are citable and they are not the same claim.
+//! - **Grade.** Where an answer's authority comes from. Every source bron
+//!   reads speaks with its own authority, so today this is always
+//!   `authority`; it is stated rather than left implicit so a consumer never
+//!   has to infer it.
 //! - **The date the answer is bound to.** For an as-of query that is the
 //!   resolved date, never today.
 
@@ -25,13 +26,14 @@ use crate::sources;
 pub const CONTRACT: u32 = 1;
 
 /// Where an answer's authority comes from.
+///
+/// One value, kept on the wire so a consumer reads it rather than infers it:
+/// a claim's grade is the one field the contract says never to guess.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Grade {
     /// The source speaks for itself: a statute, a ruling, a published document.
     Authority,
-    /// A third party recorded that something said this on a date.
-    Archive,
 }
 
 /// Which of the two validity windows a date was resolved against.
@@ -81,35 +83,9 @@ impl<T: Serialize> Envelope<T> {
         }
     }
 
-    /// An answer that rests on a third party's record rather than on a source
-    /// speaking for itself.
-    ///
-    /// A separate constructor rather than a setter on [`Envelope::ok`], so the
-    /// grade is settled where the envelope is built and cannot be left at the
-    /// default by an arm that forgot to downgrade it.
-    pub fn archive(data: T) -> Self {
-        Self {
-            grade: Grade::Archive,
-            ..Self::ok(data)
-        }
-    }
-
     pub fn bound_to(mut self, as_of: NaiveDate, view: View) -> Self {
         self.as_of = Some(as_of);
         self.view = Some(view);
-        self
-    }
-
-    /// Binds an answer to a date that was not resolved against a validity
-    /// window.
-    ///
-    /// An archive capture has no geldigheid and no zicht: it is one record
-    /// taken at one moment, and there is no register whose windows it could be
-    /// read against. Naming a [`View`] here would assert a distinction that
-    /// does not exist for this kind of answer, so the field stays absent and a
-    /// consumer reads its absence as "this date is the answer's own".
-    pub fn dated(mut self, as_of: NaiveDate) -> Self {
-        self.as_of = Some(as_of);
         self
     }
 
@@ -120,16 +96,11 @@ impl<T: Serialize> Envelope<T> {
 }
 
 impl Envelope<()> {
-    /// A failure, graded by the lane that produced it.
-    ///
-    /// A failed archive lookup is not an authority answer that happened to go
-    /// wrong. Nothing branches on this yet, but grade is the one field in the
-    /// contract a consumer is told never to infer, and defaulting it here would
-    /// be bron inferring it.
-    pub fn failed(fault: &Fault, grade: Grade) -> Self {
+    /// A failure, in the same envelope as any answer.
+    pub fn failed(fault: &Fault) -> Self {
         Self {
             bron: CONTRACT,
-            grade,
+            grade: Grade::Authority,
             as_of: None,
             view: None,
             data: None,
@@ -281,10 +252,6 @@ pub enum Caveat {
     /// Neither digest travels. The comparison is the service's, made against
     /// bytes it holds, and printing two hashes here would read as bron having
     /// hashed something.
-    ///
-    /// Distinct from [`Caveat::DigestUnverifiable`], which is the web archive's
-    /// index digest. Two unrelated mechanisms, and collapsing them would make
-    /// one verification story indistinguishable from the other.
     UpstreamDigestDiffers,
     /// The manifest published no hash for this rendition, so these bytes rest
     /// on our own capture alone.
@@ -359,29 +326,6 @@ pub enum Caveat {
     /// goes unsaid because the reader is one release behind is the failure
     /// every caveat here exists to prevent.
     Unrecognised { stated: String },
-    /// The index recorded no digest for this capture, so the replayed bytes
-    /// could not be checked against what the crawl stored. Not a failure and
-    /// not a clean bill of health.
-    DigestUnverifiable,
-    /// The capture's bytes carried no usable encoding label and were read with
-    /// an assumed one. Which rule fired is part of how the text traces back to
-    /// the bytes.
-    DecodedAs { encoding: String, declared: String },
-    /// Bytes that could not be represented in the chosen encoding were replaced.
-    LossyDecoding,
-    /// The archive stored no new payload for this capture and replayed an
-    /// earlier one's bytes. The content is older than the capture timestamp by
-    /// however long the page sat unchanged.
-    Revisit,
-    /// The archive declines to say what the site answered, which is what it
-    /// records for a robots-excluded crawl. There is a capture; what it
-    /// returned is withheld.
-    ArchiveStatusUnknown,
-    /// This capture exists because bron asked for it, not because the archive
-    /// already held it.
-    RequestedByBron,
-    /// The archive had more to say and bron stopped asking.
-    MoreCaptures,
 }
 
 impl Caveat {
@@ -1080,156 +1024,6 @@ impl From<model::PublicationHit> for PublicationHit {
     }
 }
 
-// -- captures ------------------------------------------------------------
-
-/// Whether a capture holds the page itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Captured {
-    Yes,
-    No,
-    /// The archive withholds what the site answered, so this is not knowable.
-    /// A consumer must not read it as `no`.
-    Unknown,
-}
-
-impl From<model::Captured> for Captured {
-    fn from(captured: model::Captured) -> Self {
-        match captured {
-            model::Captured::Yes => Self::Yes,
-            model::Captured::No => Self::No,
-            model::Captured::Unknown => Self::Unknown,
-        }
-    }
-}
-
-/// How a capture's bytes stand against the digest the index recorded.
-///
-/// `matches` proves the replay is byte-identical to what the crawl stored.
-/// `differs` proves nothing: the index digest covers the payload as stored,
-/// chunk framing included, and the replay strips that before serving, so the
-/// two disagree routinely on sound captures. `absent` means the index carried
-/// no digest. None of the three is a failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DigestCheck {
-    Matches,
-    Differs,
-    Absent,
-}
-
-impl From<model::DigestCheck> for DigestCheck {
-    fn from(check: model::DigestCheck) -> Self {
-        match check {
-            model::DigestCheck::Matches => Self::Matches,
-            model::DigestCheck::Differs => Self::Differs,
-            model::DigestCheck::Absent => Self::Absent,
-        }
-    }
-}
-
-/// One capture as the index describes it, without its bytes.
-#[derive(Debug, Serialize)]
-pub struct CaptureHit {
-    /// The archive's identifier for this capture.
-    pub id: String,
-    /// The address to cite, which is the page a reader should open.
-    pub url: String,
-    /// When the archive took the capture. Never today.
-    pub captured_at: DateTime<Utc>,
-    pub original_url: String,
-    /// What the site answered the archive. Absent means the archive declines
-    /// to say, not that there is no capture.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub archive_status: Option<u16>,
-    /// Whether the capture holds the page itself. `unknown` when the archive
-    /// withholds the status, which is not the same claim as `no`.
-    pub captured_the_page: Captured,
-    /// The archive's own hash of the payload. Two captures sharing it are the
-    /// same bytes, which is change detection without a single fetch.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    /// The content is older than `captured_at`; see [`Caveat::Revisit`].
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub revisit: bool,
-}
-
-impl From<&sources::wayback::IndexRow> for CaptureHit {
-    fn from(row: &sources::wayback::IndexRow) -> Self {
-        Self {
-            id: row.id.to_string(),
-            url: row.id.citation_url(&row.original),
-            captured_at: row.id.captured_at(),
-            original_url: row.original.clone(),
-            archive_status: row.status.code(),
-            captured_the_page: row.status.captured_the_page().into(),
-            digest: row.digest.clone(),
-            mime_type: row.mime_type.clone(),
-            revisit: row.is_revisit(),
-        }
-    }
-}
-
-/// One capture, read.
-#[derive(Debug, Serialize)]
-pub struct Capture {
-    pub id: String,
-    pub url: String,
-    pub captured_at: DateTime<Utc>,
-    pub original_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub archive_status: Option<u16>,
-    pub captured_the_page: Captured,
-    /// How the bytes stand against the digest the index recorded. See
-    /// [`DigestCheck`]: only `matches` is positive evidence, and none of the
-    /// three is a failure.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verified: Option<DigestCheck>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub revisit: bool,
-    /// bron asked the archive for this capture rather than finding it.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub requested_by_bron: bool,
-    /// Absent when the capture is not text, which is not a failure: a PDF is
-    /// evidence as bytes and a digest.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub encoding: Option<String>,
-    /// When bron read it, which is not when it was captured.
-    pub fetched_at: DateTime<Utc>,
-}
-
-impl From<model::Capture> for Capture {
-    fn from(capture: model::Capture) -> Self {
-        // Read before the struct is taken apart, since it borrows the whole.
-        let captured_the_page = capture.captured_the_page();
-
-        Self {
-            id: capture.id.to_string(),
-            url: capture.citation_url(),
-            captured_at: capture.captured_at,
-            original_url: capture.original_url,
-            archive_status: capture.archive_status,
-            captured_the_page: captured_the_page.into(),
-            verified: capture.verified.map(Into::into),
-            digest: capture.index_digest,
-            mime_type: capture.mime_type,
-            revisit: capture.is_revisit,
-            requested_by_bron: capture.requested,
-            content: capture.content,
-            encoding: capture.encoding,
-            fetched_at: capture.fetched_at,
-        }
-    }
-}
-
 // -- housekeeping --------------------------------------------------------
 
 #[cfg(test)]
@@ -1256,7 +1050,7 @@ mod tests {
     #[test]
     fn a_failure_is_still_valid_json_with_a_branchable_kind() {
         let fault = Fault::not_found("law", "BWBR0000001");
-        let json = serde_json::to_string(&Envelope::failed(&fault, Grade::Authority)).unwrap();
+        let json = serde_json::to_string(&Envelope::failed(&fault)).unwrap();
         assert!(json.contains(r#""kind":"not_found""#), "{json}");
         assert!(
             !json.contains(r#""data""#),
@@ -1504,15 +1298,5 @@ mod tests {
             "{json}"
         );
         assert!(!ours.frozen.reports());
-    }
-
-    #[test]
-    fn a_failed_archive_lookup_is_not_graded_as_an_authority() {
-        let fault = Fault::not_found("capture", "https://example.com");
-        let envelope = Envelope::failed(&fault, Grade::Archive);
-
-        // Grade is the one field a consumer is told never to infer, so a
-        // failure carries the lane's own grade rather than a default.
-        assert_eq!(envelope.grade, Grade::Archive);
     }
 }

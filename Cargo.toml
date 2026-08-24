@@ -11,7 +11,7 @@ rust-version = "1.85"
 description = "Dutch primary legal sources, quotable to the byte: wetgeving, rechtspraak, kamerstukken"
 repository = "https://github.com/steddle/bron-cli"
 readme = "README.md"
-keywords = ["law", "netherlands", "legal", "citation", "archive"]
+keywords = ["law", "netherlands", "legal", "citation", "rechtspraak"]
 categories = ["command-line-utilities", "parser-implementations", "database"]
 license = "MIT"
 
@@ -19,22 +19,7 @@ license = "MIT"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-# The CDX index digest is base32 over SHA-1, which is the archive's own hash and
-# not a choice: verifying a capture against it is how bron learns whether the
-# replay it was served is the crawl the index recorded.
-data-encoding = "2"
-sha1 = "0.10"
 dirs = "5"
-# An archived page is whatever encoding the site served in whatever year it
-# served it, and the label is often wrong or missing. encoding_rs is the WHATWG
-# algorithm every browser implements, so bron reads a capture the way the
-# browser that saw it did.
-encoding_rs = "0.8"
-# The archive replays a capture in the encoding the crawl stored, so a gzip
-# body arrives as gzip. Decompressing is not reqwest's `gzip` feature's job
-# here: that decodes transparently, and bron must hash what the WARC stored
-# before anything unpacks it.
-flate2 = "1"
 indicatif = "0.17"
 # flock(2) for the cross-process rate-limit bucket, which other languages
 # reach through the same call.
@@ -74,14 +59,6 @@ tempfile = "3"
 # proved against a fixture file: they need a server that misbehaves on cue.
 wiremock = "0.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-
-[features]
-# Tier 2: hits the real services. Manual and nightly only.
-#
-# Guards one test, and only one is warranted: bron pins the CDX column set and
-# asserts the header it gets back, and that is the single contract in this crate
-# the archive can break on its own with nothing local to notice.
-live-tests = []
 
 [profile.release]
 strip = true

@@ -6,7 +6,7 @@
 
 use std::io::{self, Write};
 
-use bron::wire::{AppealStatus, Body, Caveat, DigestCheck, Envelope, Found, Held, View, Window};
+use bron::wire::{AppealStatus, Body, Caveat, Envelope, Found, Held, View, Window};
 
 use crate::run::Answer;
 
@@ -294,84 +294,6 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 }
             }
             caveats(e.caveats.as_slice(), out)
-        }
-
-        Answer::CaptureHits(e) => {
-            let hits = data(e);
-            if hits.is_empty() {
-                // Said in words, because a blank screen reads as a failure and
-                // this is an answer: the archive holds nothing here.
-                writeln!(out, "the archive holds no captures for this address")?;
-            }
-
-            for hit in hits {
-                // The status is the column that decides whether a capture is
-                // worth citing, so it goes next to the date and not in a note.
-                let status = match hit.archive_status {
-                    Some(code) => code.to_string(),
-                    None => "withheld".to_string(),
-                };
-                writeln!(
-                    out,
-                    "{}  {status:>8}  {}{}",
-                    hit.captured_at.format("%Y-%m-%d %H:%M:%S"),
-                    hit.url,
-                    if hit.revisit {
-                        "  (unchanged since an earlier capture)"
-                    } else {
-                        ""
-                    },
-                )?;
-            }
-            caveats(&e.caveats, out)
-        }
-
-        Answer::Capture(e) => {
-            let Some(capture) = &e.data else {
-                return Ok(());
-            };
-
-            // Never "as of today". The date an archive answer speaks for is the
-            // date the capture was taken.
-            writeln!(out, "{}", capture.original_url)?;
-            writeln!(
-                out,
-                "as the archive recorded it on {}",
-                capture.captured_at.format("%Y-%m-%d %H:%M:%S UTC")
-            )?;
-            writeln!(out, "cite: {}", capture.url)?;
-
-            match capture.archive_status {
-                Some(200) => {}
-                Some(code) => writeln!(
-                    out,
-                    "the site answered the archive with HTTP {code}, so this capture holds \
-                     that response and not the page"
-                )?,
-                None => {}
-            }
-
-            if capture.verified == Some(DigestCheck::Matches) {
-                writeln!(out, "verified against the archive's own digest")?;
-            }
-
-            match &capture.content {
-                Some(text) => {
-                    writeln!(out)?;
-                    writeln!(out, "{text}")?;
-                }
-                None => writeln!(
-                    out,
-                    "\nnot text; the capture is held as bytes and a digest{}",
-                    capture
-                        .mime_type
-                        .as_deref()
-                        .map(|m| format!(" ({m})"))
-                        .unwrap_or_default()
-                )?,
-            }
-
-            caveats(&e.caveats, out)
         }
     }
 }
@@ -687,42 +609,6 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::NoZichtWindow => {
             "note: the manifest carries no zicht dates, so this question cannot be \
                  answered against that window"
-                .to_string()
-        }
-        Caveat::DigestUnverifiable => {
-            "note: the index recorded no digest for this capture, so these bytes could \
-                 not be checked against what the crawl stored"
-                .to_string()
-        }
-        Caveat::DecodedAs { encoding, declared } => {
-            format!("note: read as {encoding}, {declared}")
-        }
-        Caveat::LossyDecoding => {
-            "note: bytes that could not be decoded were replaced, so the text is not a \
-                 faithful reading of the capture"
-                .to_string()
-        }
-        Caveat::Revisit => {
-            "note: the archive stored no new bytes for this capture and replayed an \
-                 earlier one, so the content is older than the capture date"
-                .to_string()
-        }
-        Caveat::ArchiveStatusUnknown => {
-            "note: the archive does not say what the site answered, which is what it \
-                 records for a crawl excluded by robots.txt. There is a capture; what it \
-                 returned is withheld."
-                .to_string()
-        }
-        // Said out loud because a tool that can cause the evidence it then
-        // cites should never leave the reader to work out which happened.
-        Caveat::RequestedByBron => {
-            "note: bron asked the archive for this capture; it is not one the archive \
-                 already held"
-                .to_string()
-        }
-        Caveat::MoreCaptures => {
-            "note: the archive held more captures than bron asked for, so this list is \
-                 not everything"
                 .to_string()
         }
     }
