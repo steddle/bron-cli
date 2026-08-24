@@ -257,14 +257,19 @@ impl Client {
             match &bucket {
                 Some(bucket) => anyhow::bail!(
                     "{host} refused the request; holding off for {}s",
-                    bucket.refused(backoff).context(BUDGET)?.as_secs()
+                    bucket
+                        .refused(backoff.asked_for())
+                        .context(BUDGET)?
+                        .as_secs()
                 ),
                 None => match backoff {
-                    Some(wait) => anyhow::bail!(
+                    Refusal::After(wait) => anyhow::bail!(
                         "{host} refused the request and asked for {}s",
                         wait.as_secs()
                     ),
-                    None => anyhow::bail!("{host} refused the request and named no delay"),
+                    Refusal::Unstated => {
+                        anyhow::bail!("{host} refused the request and named no delay")
+                    }
                 },
             }
         }
@@ -335,12 +340,31 @@ fn decoded(raw: FetchedBytes) -> Result<Fetched> {
     })
 }
 
+/// How a host qualified its refusal: it either asked for a delay or named
+/// none. A fact with more than two answers gets a type, so that "no refusal"
+/// and "a refusal with no delay" cannot be confused at a call site.
+#[derive(Clone, Copy)]
+enum Refusal {
+    After(Duration),
+    Unstated,
+}
+
+impl Refusal {
+    /// The delay the host asked for, in the shape [`Bucket::refused`] takes.
+    fn asked_for(self) -> Option<Duration> {
+        match self {
+            Self::After(wait) => Some(wait),
+            Self::Unstated => None,
+        }
+    }
+}
+
 /// A rate-limit refusal, and how long the host asked us to wait.
 ///
 /// `Retry-After` is read from the header, which is where it lives. A well
 /// known MCP implementation parses it out of the response body instead, so it
 /// silently never honours it and always falls back to a default.
-fn refusal(response: &reqwest::blocking::Response) -> Option<Option<Duration>> {
+fn refusal(response: &reqwest::blocking::Response) -> Option<Refusal> {
     if !matches!(response.status().as_u16(), 429 | 503) {
         return None;
     }
@@ -352,7 +376,10 @@ fn refusal(response: &reqwest::blocking::Response) -> Option<Option<Duration>> {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(Duration::from_secs);
 
-    Some(retry_after)
+    Some(match retry_after {
+        Some(wait) => Refusal::After(wait),
+        None => Refusal::Unstated,
+    })
 }
 
 fn build(redirects: reqwest::redirect::Policy) -> Result<reqwest::blocking::Client> {
