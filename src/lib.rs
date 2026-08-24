@@ -1,11 +1,11 @@
-//! Dutch primary legal sources on your disk.
+//! Dutch primary legal sources, quotable to the byte.
 //!
 //! bron reads wetgeving, court decisions and official publications, and answers
 //! with the document each claim rests on and the byte span inside it. Court
-//! decisions and publications are frozen here under the digest of their own
-//! bytes; wetgeving is read through [`service`], which resolves a date against
-//! every manifest the register publishes and names the blob its answer came
-//! out of. The point is not search. The point is that a claim made from bron
+//! decisions and publications are hashed as they are read, so the digest
+//! travels with the answer and nothing is kept; wetgeving is read through
+//! [`service`], which resolves a date against every manifest the register
+//! publishes and names the blob its answer came out of. The point is not search. The point is that a claim made from bron
 //! can name the document and the characters it rests on, and that the same
 //! question asked twice gives the same answer.
 //!

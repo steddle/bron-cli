@@ -247,7 +247,15 @@ mod tests {
     /// as `upstream`, which charged the service for what the caller typed.
     #[test]
     fn a_setting_that_names_no_service_is_a_usage_failure() {
-        for named in ["", "   ", "/", "/api/v1", "example.com", "/some/path", "bron.steddle.com"] {
+        for named in [
+            "",
+            "   ",
+            "/",
+            "/api/v1",
+            "example.com",
+            "/some/path",
+            "bron.steddle.com",
+        ] {
             let refused = with_env(Some(named), Service::resolve);
 
             let fault = refused

@@ -148,7 +148,11 @@ pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
     let mut changes = Vec::new();
 
     for (index, article) in after.iter().enumerate() {
-        let Some(key) = article.stam_id.as_deref().filter(|id| !ambiguous.contains(id)) else {
+        let Some(key) = article
+            .stam_id
+            .as_deref()
+            .filter(|id| !ambiguous.contains(id))
+        else {
             continue;
         };
         let was = old.get(key).copied();
@@ -178,7 +182,11 @@ pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
     }
 
     for (index, article) in before.iter().enumerate() {
-        let Some(key) = article.stam_id.as_deref().filter(|id| !ambiguous.contains(id)) else {
+        let Some(key) = article
+            .stam_id
+            .as_deref()
+            .filter(|id| !ambiguous.contains(id))
+        else {
             continue;
         };
         if !new.contains_key(key) {

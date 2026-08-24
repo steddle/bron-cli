@@ -251,7 +251,9 @@ mod tests {
     fn a_failure_of_our_own_is_not_charged_to_the_service() {
         let ours = anyhow::Error::new(std::io::Error::other("Not a directory"))
             .context("cannot create /etc/hosts/buckets")
-            .context(OwnDoing("bron cannot use the rate-limit budget on this machine"));
+            .context(OwnDoing(
+                "bron cannot use the rate-limit budget on this machine",
+            ));
 
         assert_eq!(from_source("web.archive.org", ours).kind(), "local");
     }

@@ -1,8 +1,9 @@
 //! Upstream services, one module each, plus the shared HTTP and XML plumbing.
 //!
 //! Every module here returns a `Fetched*` value: parsed, carrying the digest of
-//! the document it was parsed from and byte spans into it, but not yet stored
-//! and not yet stamped with a fetch time. Persisting is [`crate::db`]'s job.
+//! the document it was parsed from and byte spans into it. Nothing is kept. The
+//! command layer stamps the moment it read one, because a claim about what a
+//! register held is dated to when bron looked rather than to today.
 
 pub mod publications;
 pub mod rechtspraak;
@@ -57,8 +58,8 @@ impl<'a> From<&'a Fetched> for Source<'a> {
     }
 }
 
-/// Where a stored row came from, carried alongside it so the two can be written
-/// in one call and the ledger cannot be forgotten.
+/// Where a document came from, carried with every value read out of it, so a
+/// claim can always name the bytes and the address they were fetched from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Provenance {
     pub blob: BlobId,
