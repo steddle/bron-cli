@@ -27,6 +27,13 @@ pub struct Answered<T> {
 ///
 /// A failure is not a missing `data`: it is an `error` in the same envelope,
 /// which is why it is read rather than inferred from a status code.
+///
+/// Deliberately permissive, and no serde tag makes the pair an enum. `caveats`
+/// sits beside both fields, so a tagged enum fights the third field, and an
+/// untagged one answers a real deserialisation failure with "matched no
+/// variant", stripped of the field and position — on exactly the failure this
+/// module exists to diagnose. The wire shape stays loose;
+/// [`Answer::try_from`] collapses it exactly once.
 #[derive(Debug, Deserialize)]
 struct Envelope<T> {
     #[serde(default = "none")]
@@ -39,6 +46,44 @@ struct Envelope<T> {
 
 fn none<T>() -> Option<T> {
     None
+}
+
+/// What an envelope legally says: an answer, or a failure in the service's
+/// own terms. Two states, where the wire shape can express four.
+enum Answer<T> {
+    Data(Answered<T>),
+    Failed(Stated),
+}
+
+/// The one place that decides what an envelope's fields mean together, and
+/// the only way out of [`Envelope`], so a second call site cannot resolve the
+/// pair differently. An error wins over any data beside it, and an envelope
+/// stating neither is the service breaking its own contract, which is an
+/// upstream fault.
+impl<T> TryFrom<Envelope<T>> for Answer<T> {
+    type Error = Fault;
+
+    fn try_from(envelope: Envelope<T>) -> Result<Self, Fault> {
+        if let Some(stated) = envelope.error {
+            return Ok(Self::Failed(stated));
+        }
+
+        let Some(data) = envelope.data else {
+            return Err(Fault::Upstream {
+                service: SERVICE,
+                source: anyhow::anyhow!("the service answered neither data nor an error"),
+            });
+        };
+
+        Ok(Self::Data(Answered {
+            data,
+            caveats: envelope
+                .caveats
+                .into_iter()
+                .map(wire::Caveat::stated)
+                .collect(),
+        }))
+    }
 }
 
 /// A failure in the service's own terms.
@@ -117,29 +162,45 @@ impl Service {
 
         let envelope: Envelope<T> = serde_json::from_str(&fetched.text).map_err(unreadable)?;
 
-        if let Some(stated) = envelope.error {
-            return Err(stated.into_fault());
+        match Answer::try_from(envelope)? {
+            Answer::Data(answered) => Ok(answered),
+            Answer::Failed(stated) => Err(stated.into_fault()),
         }
-
-        let data = envelope.data.ok_or_else(|| Fault::Upstream {
-            service: SERVICE,
-            source: anyhow::anyhow!("{} answered neither data nor an error", fetched.url),
-        })?;
-
-        Ok(Answered {
-            data,
-            caveats: envelope
-                .caveats
-                .into_iter()
-                .map(wire::Caveat::stated)
-                .collect(),
-        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A failure beside leftover data is still a failure. Reading the data
+    /// would report success on an answer the service disowned.
+    #[test]
+    fn an_error_wins_over_data_beside_it() {
+        let envelope: Envelope<u32> = serde_json::from_str(
+            r#"{"data":7,"error":{"kind":"usage","message":"limit must be positive"}}"#,
+        )
+        .unwrap();
+
+        match Answer::try_from(envelope) {
+            Ok(Answer::Failed(stated)) => assert_eq!(stated.kind, "usage"),
+            Ok(Answer::Data(answered)) => panic!("read {} as success", answered.data),
+            Err(fault) => panic!("read a stated failure as {fault}"),
+        }
+    }
+
+    /// An envelope stating neither is the service breaking its own contract,
+    /// which is upstream's doing and not the caller's.
+    #[test]
+    fn an_envelope_stating_neither_is_an_upstream_fault() {
+        let envelope: Envelope<u32> = serde_json::from_str(r#"{"bron":1}"#).unwrap();
+
+        match Answer::try_from(envelope) {
+            Err(fault) => assert_eq!(fault.kind(), "upstream"),
+            Ok(Answer::Data(answered)) => panic!("read {} out of thin air", answered.data),
+            Ok(Answer::Failed(stated)) => panic!("invented a failure: {}", stated.message),
+        }
+    }
 
     /// A failure keeps the kind the service gave it. Re-reading a usage failure
     /// as an unreadable answer would have a caller retry what will never work.
