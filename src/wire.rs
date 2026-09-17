@@ -571,27 +571,6 @@ impl From<crate::service::Window> for Window {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub struct LawVersion {
-    pub law_id: String,
-    pub version: String,
-    pub title: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub law_type: Option<String>,
-    /// Geldigheid: when this text was in force.
-    pub in_force: Window,
-    /// Zicht: when the register showed it. Absent when upstream did not say,
-    /// and never inferred from `in_force`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub as_known: Option<Window>,
-    pub article_count: u32,
-    /// The publisher's own digest, when the manifest supplied one. A consumer
-    /// can check a frozen copy against the source rather than only against us.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_hash: Option<String>,
-    pub provenance: Provenance,
-}
-
 /// One entry from a law's manifest: a version that exists, and whether the
 /// corpus holds its text.
 #[derive(Debug, Serialize)]

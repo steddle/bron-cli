@@ -25,7 +25,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
             for hit in data(e) {
                 writeln!(out, "{}  {}", hit.id, hit.title.as_deref().unwrap_or(""))?;
             }
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::Found(e) => {
@@ -69,29 +69,26 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     writeln!(out, "{}\n", lookup.citation)?;
 
                     for entry in &lookup.resolved {
+                        // Holding is its own column, so the name after it
+                        // starts in the same place on every line rather than
+                        // being pushed along by however long the one above was.
+                        let (holding, name) = match &entry.held {
+                            Held::Text { label, .. } => {
+                                ("", label.as_deref().unwrap_or(&entry.number))
+                            }
+                            Held::None => (NOT_HELD, entry.number.as_str()),
+                        };
+
                         writeln!(
                             out,
-                            "{:<reading$} {:<source$} {}  {}  {:<holding$} {}",
+                            "{:<reading$} {:<source$} {}  {}  {holding:<width$} {name}",
                             entry.reading,
                             entry.source,
                             entry.law_id,
                             entry.version,
-                            // Its own column, so the name after it starts in
-                            // the same place on every line rather than being
-                            // pushed along by however long the one above was.
-                            match &entry.held {
-                                Held::Text { .. } => "",
-                                Held::None => NOT_HELD,
-                            },
-                            match &entry.held {
-                                Held::Text {
-                                    label: Some(label), ..
-                                } => label,
-                                _ => &entry.number,
-                            },
                             reading = READING,
                             source = SOURCE,
-                            holding = NOT_HELD.len(),
+                            width = NOT_HELD.len(),
                         )?;
                         // A limit on one reading is not a limit on the answer,
                         // and the reader quoting that line is the one who needs
@@ -110,7 +107,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 }
             }
 
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::Versions(e) => {
@@ -124,7 +121,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 )?;
             }
             writeln!(out, "\n* = the service holds this text")?;
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::Articles(e) => {
@@ -168,7 +165,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 }
                 writeln!(out)?;
             }
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::Changes(e) => {
@@ -216,7 +213,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 writeln!(out)?;
             }
 
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::CaseHits(e) => {
@@ -229,7 +226,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     writeln!(out, "  {summary}")?;
                 }
             }
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::Case(e) => {
@@ -253,13 +250,13 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
             }
             writeln!(out, "\nappeal: {}", appeal(&case.appeal))?;
             writeln!(out, "source: {}", case.provenance.blob)?;
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::Appeal(e) => {
             let Some(status) = &e.data else { return Ok(()) };
             writeln!(out, "{}", appeal(status))?;
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::Publication(e) => {
@@ -283,7 +280,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 )?,
             }
 
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
 
         Answer::PublicationHits(e) => {
@@ -293,7 +290,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     writeln!(out, "  dossier {dossier}")?;
                 }
             }
-            caveats(e.caveats.as_slice(), out)
+            caveats(&e.caveats, out)
         }
     }
 }

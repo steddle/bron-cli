@@ -32,29 +32,22 @@ impl BlobId {
     pub fn of(bytes: &[u8]) -> Self {
         Self(Sha256::digest(bytes).into())
     }
-
-    pub fn to_hex(self) -> String {
-        let mut hex = String::with_capacity(64);
-        for byte in self.0 {
-            use fmt::Write;
-            let _ = write!(hex, "{byte:02x}");
-        }
-        hex
-    }
 }
 
 impl FromStr for BlobId {
     type Err = InvalidDigest;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let invalid = || InvalidDigest(text.to_string());
+
         if text.len() != 64 {
-            return Err(InvalidDigest(text.to_string()));
+            return Err(invalid());
         }
 
         let mut digest = [0u8; 32];
         for (slot, pair) in digest.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
-            let hex = std::str::from_utf8(pair).map_err(|_| InvalidDigest(text.to_string()))?;
-            *slot = u8::from_str_radix(hex, 16).map_err(|_| InvalidDigest(text.to_string()))?;
+            let hex = std::str::from_utf8(pair).map_err(|_| invalid())?;
+            *slot = u8::from_str_radix(hex, 16).map_err(|_| invalid())?;
         }
         Ok(Self(digest))
     }
@@ -71,7 +64,7 @@ impl fmt::Display for BlobId {
 
 impl Serialize for BlobId {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.to_hex())
+        s.collect_str(self)
     }
 }
 
@@ -97,7 +90,7 @@ mod tests {
     #[test]
     fn matches_the_known_sha256_of_the_empty_input() {
         assert_eq!(
-            BlobId::of(b"").to_hex(),
+            BlobId::of(b"").to_string(),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
     }
@@ -105,7 +98,7 @@ mod tests {
     #[test]
     fn hex_round_trips_through_from_str() {
         let id = BlobId::of(b"anything");
-        assert_eq!(id.to_hex().parse::<BlobId>().unwrap(), id);
+        assert_eq!(id.to_string().parse::<BlobId>().unwrap(), id);
         assert_eq!(id.to_string().to_uppercase().parse::<BlobId>().unwrap(), id);
     }
 

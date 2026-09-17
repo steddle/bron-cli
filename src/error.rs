@@ -151,29 +151,24 @@ pub fn from_source(service: &'static str, error: anyhow::Error) -> Fault {
         return Fault::Local(error);
     }
 
-    let statuses: Vec<reqwest::StatusCode> = error
-        .chain()
-        .filter_map(|e| e.downcast_ref::<reqwest::Error>())
-        .filter_map(|e| e.status())
-        .collect();
+    let transport_errors = || {
+        error
+            .chain()
+            .filter_map(|e| e.downcast_ref::<reqwest::Error>())
+    };
 
     // A 404 is upstream answering the question, not upstream failing. Reporting
     // it as a transport problem would have a pipeline retry something that will
     // never exist.
-    if statuses
-        .iter()
-        .any(|s| s.as_u16() == 404 || s.as_u16() == 410)
+    if transport_errors()
+        .filter_map(reqwest::Error::status)
+        .any(|status| matches!(status.as_u16(), 404 | 410))
     {
         // The outermost context line is where the caller named the thing.
         return Fault::NotFound(format!("{service} has nothing here: {error}"));
     }
 
-    let transport = error
-        .chain()
-        .filter_map(|e| e.downcast_ref::<reqwest::Error>())
-        .any(|e| e.is_timeout() || e.is_connect() || e.is_request());
-
-    if transport {
+    if transport_errors().any(|e| e.is_timeout() || e.is_connect() || e.is_request()) {
         Fault::Network {
             service,
             source: error,
@@ -186,10 +181,6 @@ pub fn from_source(service: &'static str, error: anyhow::Error) -> Fault {
     }
 }
 
-pub fn from_local(error: anyhow::Error) -> Fault {
-    Fault::Local(error)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,7 +191,7 @@ mod tests {
         assert_eq!(Fault::not_found("law", "BWBR0000001").code(), 2);
         assert_eq!(
             Fault::Network {
-                service: "bwb",
+                service: "rechtspraak",
                 source: anyhow::anyhow!("x")
             }
             .code(),
@@ -208,7 +199,7 @@ mod tests {
         );
         assert_eq!(
             Fault::Upstream {
-                service: "bwb",
+                service: "rechtspraak",
                 source: anyhow::anyhow!("x")
             }
             .code(),
@@ -231,7 +222,7 @@ mod tests {
             .context("cannot read the manifest for BWBR0005289");
 
         let chain = Fault::Network {
-            service: "bwb",
+            service: "rechtspraak",
             source: inner,
         }
         .chain();
@@ -260,7 +251,7 @@ mod tests {
 
     #[test]
     fn a_non_transport_failure_is_upstream_rather_than_network() {
-        let fault = from_source("bwb", anyhow::anyhow!("malformed XML"));
+        let fault = from_source("rechtspraak", anyhow::anyhow!("malformed XML"));
         assert_eq!(fault.code(), exit::UPSTREAM);
     }
 

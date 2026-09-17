@@ -36,16 +36,10 @@ pub struct Answered<T> {
 /// [`Answer::try_from`] collapses it exactly once.
 #[derive(Debug, Deserialize)]
 struct Envelope<T> {
-    #[serde(default = "none")]
     data: Option<T>,
-    #[serde(default = "none")]
     error: Option<Stated>,
     #[serde(default)]
     caveats: Vec<serde_json::Value>,
-}
-
-fn none<T>() -> Option<T> {
-    None
 }
 
 /// What an envelope legally says: an answer, or a failure in the service's

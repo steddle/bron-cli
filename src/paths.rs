@@ -6,10 +6,6 @@ use anyhow::{Context, Result};
 /// pacing to itself.
 const HOME_ENV: &str = "BRON_HOME";
 
-fn home_override() -> Option<PathBuf> {
-    std::env::var_os(HOME_ENV).map(PathBuf::from)
-}
-
 /// Cross-process rate-limit buckets, and the only thing bron writes.
 ///
 /// `~/.bron/buckets` rather than the platform data directory, because other
@@ -19,11 +15,12 @@ fn home_override() -> Option<PathBuf> {
 /// that should pace itself alone; what must not move is where it lands when
 /// nobody says.
 pub fn bucket_dir() -> Result<PathBuf> {
-    if let Some(home) = home_override() {
-        return Ok(home.join("buckets"));
-    }
-    Ok(dirs::home_dir()
-        .context("no home directory for this user")?
-        .join(".bron")
-        .join("buckets"))
+    let home = match std::env::var_os(HOME_ENV) {
+        Some(home) => PathBuf::from(home),
+        None => dirs::home_dir()
+            .context("no home directory for this user")?
+            .join(".bron"),
+    };
+
+    Ok(home.join("buckets"))
 }

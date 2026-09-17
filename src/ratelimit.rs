@@ -190,16 +190,10 @@ impl State {
 
         // Absent or damaged means no history, which is not an error: the worst
         // case is one unpaced request, and refusing to run is worse.
-        let mut lines = text.lines();
+        let mut fields = text.lines().map(|line| line.trim().parse().unwrap_or(0));
         Ok(Self {
-            last_returned: lines
-                .next()
-                .and_then(|l| l.trim().parse().ok())
-                .unwrap_or(0),
-            hold_off_until: lines
-                .next()
-                .and_then(|l| l.trim().parse().ok())
-                .unwrap_or(0),
+            last_returned: fields.next().unwrap_or(0),
+            hold_off_until: fields.next().unwrap_or(0),
         })
     }
 

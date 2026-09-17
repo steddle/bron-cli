@@ -9,14 +9,16 @@ use std::io::{self, Write};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
+use bron::blob::BlobId;
 use bron::diff;
-use bron::error::{Fault, Outcome, from_local, from_source};
+use bron::error::{Fault, Outcome, from_source};
 use bron::ids::{BwbId, Ecli, PublicationId};
+use bron::model::{AppealStatus, Direction, Relation};
 use bron::service::{self, Service};
-use bron::sources::{Client, publications, rechtspraak};
+use bron::sources::{Client, FetchedCase, publications, rechtspraak};
 use bron::wire::{self, Caveat, Envelope, View};
 
-use crate::cli::{Case, Cli, Command, Law, Publication};
+use crate::cli::{Case, Cli, Command, Law, Moment, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -175,7 +177,7 @@ fn narrow(
 fn run_find(
     query: &str,
     limit: u32,
-    moment: &crate::cli::Moment,
+    moment: &Moment,
     today: NaiveDate,
     quiet: bool,
     service: &Service,
@@ -225,13 +227,14 @@ fn run_find(
         service::SearchData::Lookup { citation, resolved } => {
             // In the order they arrived. Every reading is answered, because
             // choosing between them is interpretation and bron does not do any.
-            let read: Vec<_> = resolved.into_iter().map(cited).collect();
+            let (readings, contradictions): (Vec<_>, Vec<_>) =
+                resolved.into_iter().map(cited).unzip();
 
-            caveats.extend(read.iter().filter_map(|(_, caveat)| caveat.clone()));
+            caveats.extend(contradictions.into_iter().flatten());
 
             wire::Found::Lookup(wire::Lookup {
                 citation,
-                resolved: read.into_iter().map(|(entry, _)| entry).collect(),
+                resolved: readings,
             })
         }
     };
@@ -565,14 +568,10 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             // asked for it. `--all` decides which articles are in the list at
             // all, and a caveat about the request cannot see that.
             if articles.iter().any(|change| {
-                change
-                    .before
-                    .as_ref()
-                    .is_some_and(wire::Side::reports_a_slice)
-                    || change
-                        .after
-                        .as_ref()
-                        .is_some_and(wire::Side::reports_a_slice)
+                [&change.before, &change.after]
+                    .into_iter()
+                    .flatten()
+                    .any(wire::Side::reports_a_slice)
             }) {
                 caveats.push(Caveat::UnverifiedSlice);
             }
@@ -672,15 +671,14 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
 
 /// One decision, and the moment bron read it.
 ///
-/// Fetched every time. There is no corpus in front of this any more, and there
-/// was never much point to one: a decision is immutable once published, so the
-/// only thing a stored copy saved was a request, and the only thing it cost was
-/// a store that had to be kept, verified and migrated.
+/// Fetched every time. A decision is immutable once published, so the only
+/// thing a stored copy would save is a request, and what it would cost is a
+/// store that has to be kept, verified and migrated.
 ///
 /// The moment is bron's own and is stamped once, because it is what an answer
 /// about the absence of a successor is dated to and two reads of the clock
 /// would date two halves of one answer differently.
-fn decision(ecli: &Ecli, quiet: bool) -> Outcome<(bron::sources::FetchedCase, DateTime<Utc>)> {
+fn decision(ecli: &Ecli, quiet: bool) -> Outcome<(FetchedCase, DateTime<Utc>)> {
     let client = client(quiet)?;
     let fetched = rechtspraak::fetch(&client, ecli).map_err(|e| from_source("rechtspraak", e))?;
 
@@ -693,12 +691,7 @@ fn decision(ecli: &Ecli, quiet: bool) -> Outcome<(bron::sources::FetchedCase, Da
 /// upstream states them. Dated to when bron looked, because
 /// `no_published_successor` is a claim about what the register held at that
 /// moment and it began going stale as it was made.
-fn appeal(
-    relations: &[bron::model::Relation],
-    read_at: DateTime<Utc>,
-) -> bron::model::AppealStatus {
-    use bron::model::{AppealStatus, Direction};
-
+fn appeal(relations: &[Relation], read_at: DateTime<Utc>) -> AppealStatus {
     let successors: Vec<Ecli> = relations
         .iter()
         .filter(|relation| relation.direction == Direction::Later)
@@ -843,7 +836,7 @@ fn side(article: &service::Article, version: &str, provenance: &wire::Provenance
     }
 }
 
-fn compared(expression: &service::Expression, blob: bron::blob::BlobId) -> wire::ComparedVersion {
+fn compared(expression: &service::Expression, blob: BlobId) -> wire::ComparedVersion {
     wire::ComparedVersion {
         version: expression.label.clone(),
         in_force: expression.in_force.into(),
@@ -859,7 +852,7 @@ where
 }
 
 fn client(quiet: bool) -> Outcome<Client> {
-    let client = Client::new().map_err(from_local)?;
+    let client = Client::new().map_err(Fault::Local)?;
     if quiet {
         return Ok(client);
     }

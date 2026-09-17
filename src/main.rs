@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use clap::error::ErrorKind;
 
-use bron::error::Fault;
+use bron::error::{Fault, exit};
 use bron::wire::Envelope;
 
 use cli::Cli;
@@ -44,7 +44,7 @@ fn main() -> ExitCode {
             return if asked_for {
                 ExitCode::SUCCESS
             } else {
-                ExitCode::from(bron::error::exit::USAGE)
+                ExitCode::from(exit::USAGE)
             };
         }
     };
@@ -57,7 +57,7 @@ fn main() -> ExitCode {
         Ok(answer) => {
             if let Err(e) = emit(&answer, cli.json) {
                 eprintln!("bron: cannot write output: {e}");
-                return ExitCode::from(bron::error::exit::LOCAL);
+                return ExitCode::from(exit::LOCAL);
             }
             ExitCode::SUCCESS
         }

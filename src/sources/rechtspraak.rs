@@ -51,9 +51,6 @@ pub struct SearchResults {
     pub hits: Vec<CaseHit>,
     /// True when the over-fetch window was exhausted and matches may remain.
     pub truncated: bool,
-    /// True when ordering came from upstream's relevance score, which is not
-    /// reproducible across time.
-    pub ordering_is_unstable: bool,
 }
 
 pub struct Query<'a> {
@@ -166,11 +163,7 @@ pub fn search(client: &Client, query: &Query) -> Result<SearchResults> {
     // way to distinguish exhausted from truncated, so report it as truncated.
     let truncated = hits.len() < query.limit as usize && returned >= page_size;
 
-    Ok(SearchResults {
-        hits,
-        truncated,
-        ordering_is_unstable: true,
-    })
+    Ok(SearchResults { hits, truncated })
 }
 
 /// Fetches one decision by ECLI.

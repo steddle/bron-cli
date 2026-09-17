@@ -148,11 +148,7 @@ pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
     let mut changes = Vec::new();
 
     for (index, article) in after.iter().enumerate() {
-        let Some(key) = article
-            .stam_id
-            .as_deref()
-            .filter(|id| !ambiguous.contains(id))
-        else {
+        let Some(key) = identity(article, &ambiguous) else {
             continue;
         };
         let was = old.get(key).copied();
@@ -182,11 +178,7 @@ pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
     }
 
     for (index, article) in before.iter().enumerate() {
-        let Some(key) = article
-            .stam_id
-            .as_deref()
-            .filter(|id| !ambiguous.contains(id))
-        else {
+        let Some(key) = identity(article, &ambiguous) else {
             continue;
         };
         if !new.contains_key(key) {
@@ -199,6 +191,15 @@ pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
         unidentified,
         repeated,
     }
+}
+
+/// The stam-id an article can be matched on: its own, unless the register used
+/// it more than once.
+fn identity<'a>(article: &'a Article, ambiguous: &HashSet<&str>) -> Option<&'a str> {
+    article
+        .stam_id
+        .as_deref()
+        .filter(|id| !ambiguous.contains(id))
 }
 
 fn nameless(articles: &[Article]) -> u32 {

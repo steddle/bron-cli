@@ -46,12 +46,6 @@ pub struct FetchedBytes {
     pub bytes: Vec<u8>,
     /// The URL actually dialled. Recorded for provenance, never for identity.
     pub url: String,
-    /// What the server said these bytes are, verbatim and unparsed.
-    pub content_type: Option<String>,
-    /// The transfer encoding the server applied, verbatim. Read from the
-    /// header rather than guessed from the leading bytes, so an encoding bron
-    /// cannot undo is named rather than mistaken for content.
-    pub content_encoding: Option<String>,
 }
 
 /// A response, frozen and decoded as UTF-8.
@@ -138,7 +132,7 @@ impl Client {
             .with_context(|| format!("cannot create {}", buckets.display()))
             .context(BUDGET)?;
         Ok(Self {
-            inner: build(reqwest::redirect::Policy::default())?,
+            inner: build()?,
             buckets,
             on_wait: None,
         })
@@ -163,15 +157,10 @@ impl Client {
     /// The URL is taken from the built request rather than from the caller, so
     /// provenance records the address actually dialled, query string and all.
     pub fn read_bytes(&self, request: RequestBuilder) -> Result<FetchedBytes> {
-        self.fetch_on(&self.inner, request, Reading::Hashed)
+        self.fetch_on(request, Reading::Hashed)
     }
 
-    fn fetch_on(
-        &self,
-        client: &reqwest::blocking::Client,
-        request: RequestBuilder,
-        reading: Reading,
-    ) -> Result<FetchedBytes> {
+    fn fetch_on(&self, request: RequestBuilder, reading: Reading) -> Result<FetchedBytes> {
         let request = request.build().context("cannot build request")?;
         let url = request.url().to_string();
         let host = request.url().host_str().unwrap_or_default().to_string();
@@ -192,7 +181,7 @@ impl Client {
             Reading::Envelope => None,
         };
 
-        let response = client.execute(request);
+        let response = self.inner.execute(request);
         // Stamped on return rather than on dispatch: a call that spent a minute
         // inside its own retries must not hand the next one a free pass.
         if let Some(bucket) = &bucket {
@@ -254,18 +243,6 @@ impl Client {
             Reading::Envelope => response,
         };
 
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-
-        let content_encoding = response
-            .headers()
-            .get(reqwest::header::CONTENT_ENCODING)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-
         let body = response
             .bytes()
             .with_context(|| format!("{url} returned an unreadable body"))?;
@@ -275,11 +252,9 @@ impl Client {
         let blob = BlobId::of(&body);
 
         Ok(FetchedBytes {
-            content_encoding,
             blob,
             bytes: body.to_vec(),
             url,
-            content_type,
         })
     }
 
@@ -298,7 +273,7 @@ impl Client {
     /// Reads an answer from a service that speaks the bron envelope. See
     /// [`Reading::Envelope`].
     pub fn fetch_answered(&self, request: RequestBuilder) -> Result<Fetched> {
-        decoded(self.fetch_on(&self.inner, request, Reading::Envelope)?)
+        decoded(self.fetch_on(request, Reading::Envelope)?)
     }
 }
 
@@ -349,16 +324,12 @@ fn refusal(response: &reqwest::blocking::Response) -> Option<Refusal> {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(Duration::from_secs);
 
-    Some(match retry_after {
-        Some(wait) => Refusal::After(wait),
-        None => Refusal::Unstated,
-    })
+    Some(retry_after.map_or(Refusal::Unstated, Refusal::After))
 }
 
-fn build(redirects: reqwest::redirect::Policy) -> Result<reqwest::blocking::Client> {
+fn build() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
-        .redirect(redirects)
         .timeout(Duration::from_secs(180))
         .connect_timeout(Duration::from_secs(15))
         .build()

@@ -30,10 +30,13 @@ impl InvalidId {
     }
 }
 
-/// Generates the shared boilerplate: display, serde, and both SQL directions.
+/// Generates the shared boilerplate: accessors, display, serde and
+/// `TryFrom<&str>`.
 macro_rules! string_id {
     ($name:ident, $kind:literal) => {
         impl $name {
+            pub const KIND: &'static str = $kind;
+
             pub fn as_str(&self) -> &str {
                 &self.0
             }
@@ -61,10 +64,6 @@ macro_rules! string_id {
             fn try_from(text: &str) -> Result<Self, Self::Error> {
                 text.parse()
             }
-        }
-
-        impl $name {
-            pub const KIND: &'static str = $kind;
         }
     };
 }
@@ -124,9 +123,9 @@ impl FromStr for Ecli {
         let text = text.trim();
         let fields: Vec<&str> = text.split(':').collect();
 
-        let valid = match fields[..] {
-            [prefix, country, court, year, ordinal] => {
-                prefix.eq_ignore_ascii_case("ECLI")
+        match fields[..] {
+            [prefix, country, court, year, ordinal]
+                if prefix.eq_ignore_ascii_case("ECLI")
                     && country.len() == 2
                     && country.bytes().all(|b| b.is_ascii_alphabetic())
                     && !court.is_empty()
@@ -136,22 +135,16 @@ impl FromStr for Ecli {
                     && !ordinal.is_empty()
                     && ordinal
                         .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'.')
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'.') =>
+            {
+                // The prefix and country are conventionally uppercase; the
+                // ordinal is not, so only normalise what is safe to normalise.
+                Ok(Self(format!(
+                    "ECLI:{}:{court}:{year}:{ordinal}",
+                    country.to_ascii_uppercase()
+                )))
             }
-            _ => false,
-        };
-
-        if valid {
-            // The prefix and country are conventionally uppercase; the ordinal
-            // is not, so only normalise what is safe to normalise.
-            let mut parts = fields;
-            let prefix = parts[0].to_ascii_uppercase();
-            let country = parts[1].to_ascii_uppercase();
-            parts[0] = &prefix;
-            parts[1] = &country;
-            Ok(Self(parts.join(":")))
-        } else {
-            Err(InvalidId::new(Self::KIND, text))
+            _ => Err(InvalidId::new(Self::KIND, text)),
         }
     }
 }

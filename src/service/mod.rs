@@ -82,8 +82,8 @@ impl Service {
         if !names_a_service {
             return Err(Fault::usage(format!(
                 "{ENV} is set to [{configured}], which names no service. The legislation lane \
-                 reads the bron service and there is no publisher route left to fall back to; \
-                 unset it to use {DEFAULT}, or point it at another deployment."
+                 reads the bron service and nothing else; unset it to use {DEFAULT}, or point \
+                 it at another deployment."
             )));
         }
 
@@ -140,20 +140,20 @@ impl Service {
         let url = format!("{}/api/v1/regulations/{law}/articles", self.base);
 
         let mut query = vec![
-            ("as_of".to_string(), ask.as_of.to_string()),
+            ("as_of", ask.as_of.to_string()),
             // Always, because the answer is built from the leden and their
             // text is what `rendered` carries.
-            ("rendered".to_string(), "1".to_string()),
+            ("rendered", "1".to_string()),
         ];
 
         if let Some(date) = ask.as_known_on {
-            query.push(("as_known_on".to_string(), date.to_string()));
+            query.push(("as_known_on", date.to_string()));
         }
         if let Some(number) = ask.number {
-            query.push(("number".to_string(), number.to_string()));
+            query.push(("number", number.to_string()));
         }
         if ask.raw {
-            query.push(("raw".to_string(), "1".to_string()));
+            query.push(("raw", "1".to_string()));
         }
 
         self.read(client, client.get(&url).query(&query))
