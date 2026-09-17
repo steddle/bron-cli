@@ -1,9 +1,8 @@
 //! Small helpers over roxmltree.
 //!
-//! The overheid.nl feeds mix namespaced SRU envelopes with un-namespaced
-//! document bodies, and several elements carry a text node next to a
-//! `<meta-data>` block. These helpers make that distinction explicit at the
-//! call site, because picking the wrong one silently yields metadata soup.
+//! Every element bron reads is namespaced, so a lookup names the namespace
+//! beside the local name and a same-named element from another vocabulary
+//! cannot answer it.
 //!
 //! Names and namespaces are `&'static str`: every one is a constant, and saying
 //! so keeps a single lifetime on the returned iterators.
@@ -28,57 +27,21 @@ pub fn find_all<'a>(
         .filter(move |n| n.tag_name().name() == name && n.tag_name().namespace() == Some(namespace))
 }
 
-pub fn find_all_local<'a>(
-    node: Elem<'a>,
-    name: &'static str,
-) -> impl Iterator<Item = Elem<'a>> + 'a {
-    node.descendants()
-        .filter(move |n| n.tag_name().name() == name)
-}
-
-/// True when the node sits anywhere inside a `<meta-data>` block.
-///
-/// BWB documents repeat `<al>` inside the provenance metadata attached to every
-/// article and every lid. Collecting text without this check splices citation
-/// bookkeeping into statutory text: Boek 6 carries 1.476 such blocks against
-/// 340 articles.
-pub fn in_metadata(node: Elem) -> bool {
-    node.ancestors().any(|a| a.tag_name().name() == "meta-data")
-}
-
-/// Descendants with this local name that are not buried in a `<meta-data>`
-/// block.
-pub fn find_all_content<'a>(
-    node: Elem<'a>,
-    name: &'static str,
-) -> impl Iterator<Item = Elem<'a>> + 'a {
-    find_all_local(node, name).filter(|n| !in_metadata(*n))
-}
-
 /// Text of every descendant text node, joined. The equivalent of itertext.
 pub fn inner_text(node: Elem) -> Option<String> {
-    collect(node.descendants().filter(|n| n.is_text()))
+    let text: String = node
+        .descendants()
+        .filter(|n| n.is_text())
+        .filter_map(|n| n.text())
+        .collect();
+
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 /// Namespaced descendant's full inner text, the common SRU read.
 pub fn text_of(node: Elem, namespace: &'static str, name: &'static str) -> Option<String> {
     find(node, namespace, name).and_then(inner_text)
-}
-
-fn collect<'a>(nodes: impl Iterator<Item = Elem<'a>>) -> Option<String> {
-    let mut text = String::new();
-    for node in nodes {
-        text.push_str(node.text().unwrap_or_default());
-    }
-
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        None
-    } else if trimmed.len() == text.len() {
-        Some(text)
-    } else {
-        Some(trimmed.to_string())
-    }
 }
 
 /// Collapses the runs of whitespace that XML indentation leaves in extracted
@@ -129,21 +92,6 @@ mod tests {
             inner_text(doc.root_element()).as_deref(),
             Some("Verbintenissen kunnen ontstaan.")
         );
-    }
-
-    #[test]
-    fn descendants_are_found_at_every_depth() {
-        let doc = parse("<artikel><lid><lid>nested</lid></lid></artikel>");
-        assert_eq!(find_all_local(doc.root_element(), "lid").count(), 2);
-    }
-
-    #[test]
-    fn metadata_subtrees_are_excluded_from_content() {
-        let doc = parse("<artikel><al>text</al><meta-data><al>noise</al></meta-data></artikel>");
-        let found: Vec<_> = find_all_content(doc.root_element(), "al")
-            .filter_map(inner_text)
-            .collect();
-        assert_eq!(found, vec!["text"]);
     }
 
     #[test]

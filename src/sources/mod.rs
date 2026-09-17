@@ -94,11 +94,7 @@ pub struct FetchedPublication {
     pub id: PublicationId,
     pub title: Option<String>,
     pub dossier: Option<String>,
-    pub document_type: Option<String>,
-    pub vergaderjaar: Option<String>,
     pub published_on: Option<NaiveDate>,
-    pub url: Option<String>,
-    pub full_text: Option<String>,
     /// Absent when the record links no XML body.
     pub provenance: Option<Provenance>,
 }

@@ -9,7 +9,7 @@ use chrono::NaiveDate;
 use roxmltree::Document;
 
 use super::xml::{self, Elem};
-use super::{Client, FetchedPublication};
+use super::{Client, FetchedPublication, Source};
 use crate::ids::PublicationId;
 use crate::model::PublicationHit;
 
@@ -51,10 +51,9 @@ impl Collection {
     }
 }
 
-/// Everything the index knows about a document, including where its body is.
+/// What the index says about a document, and where its body is.
 struct Record {
     hit: PublicationHit,
-    document_type: Option<String>,
     url: Option<String>,
 }
 
@@ -66,9 +65,6 @@ pub struct Query<'a> {
 }
 
 pub fn search(client: &Client, query: &Query) -> Result<Vec<PublicationHit>> {
-    // CQL string literals have no escape syntax; a quote would end the term.
-    // Stripped the same way bwb does it, by replacement rather than removal, so
-    // a stray quote cannot weld two terms into a third nobody asked for.
     let mut cql: Vec<String> = query
         .terms
         .split_whitespace()
@@ -89,7 +85,8 @@ pub fn search(client: &Client, query: &Query) -> Result<Vec<PublicationHit>> {
         .collect())
 }
 
-/// Fetches a document by id, e.g. `kst-33669-6`, body included when published.
+/// Fetches a document by id, e.g. `kst-33669-6`, and hashes its body where the
+/// register links one.
 pub fn fetch(client: &Client, id: &PublicationId) -> Result<FetchedPublication> {
     let cql = format!("dt.identifier=\"{id}\"");
     let record = fetch_records(client, &cql, 1)?
@@ -97,7 +94,7 @@ pub fn fetch(client: &Client, id: &PublicationId) -> Result<FetchedPublication> 
         .next()
         .ok_or_else(|| anyhow!("no publication with id {id}"))?;
 
-    // Not every record links an XML body; metadata alone is still worth storing.
+    // Not every record links an XML body, and the answer says which it is.
     let body = match record.url.as_deref() {
         Some(url) if url.ends_with(".xml") => Some(
             client
@@ -107,21 +104,12 @@ pub fn fetch(client: &Client, id: &PublicationId) -> Result<FetchedPublication> 
         _ => None,
     };
 
-    let full_text = match &body {
-        Some(fetched) => parse_body(id, &fetched.text)?,
-        None => None,
-    };
-
     Ok(FetchedPublication {
         id: record.hit.id,
         title: record.hit.title,
         dossier: record.hit.dossier,
-        document_type: record.document_type,
-        vergaderjaar: record.hit.vergaderjaar,
         published_on: record.hit.published_on,
-        url: record.url,
-        full_text,
-        provenance: body.as_ref().map(|f| super::Source::from(f).into()),
+        provenance: body.as_ref().map(|f| Source::from(f).into()),
     })
 }
 
@@ -165,7 +153,6 @@ fn parse_records(body: &str) -> Result<Vec<Record>> {
                 id,
                 title: xml::text_of(kern, NS_DCTERMS, "title"),
                 dossier: field(tpmeta, NS_WETGEVING, "dossiernummer"),
-                vergaderjaar: field(tpmeta, NS_WETGEVING, "vergaderjaar"),
                 // The publication date is on the mantel. dcterms:modified in
                 // the kern is when the record was last touched, often years
                 // later; sorting a corpus by it silently reorders history.
@@ -174,8 +161,6 @@ fn parse_records(body: &str) -> Result<Vec<Record>> {
                     .as_deref()
                     .and_then(iso_date),
             },
-            document_type: field(tpmeta, NS_WETGEVING, "publicatienaam")
-                .or_else(|| xml::text_of(kern, NS_DCTERMS, "type")),
             url: xml::text_of(record, NS_GZD, "url"),
         });
     }
@@ -185,17 +170,6 @@ fn parse_records(body: &str) -> Result<Vec<Record>> {
 
 fn field(node: Option<Elem>, namespace: &'static str, name: &'static str) -> Option<String> {
     node.and_then(|n| xml::text_of(n, namespace, name))
-}
-
-fn parse_body(id: &PublicationId, body: &str) -> Result<Option<String>> {
-    let doc = Document::parse(body).with_context(|| format!("{id} has a malformed body"))?;
-
-    let text = xml::find_all_content(doc.root_element(), "al")
-        .filter_map(xml::inner_text)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Ok(Some(xml::tidy(&text)).filter(|s| !s.is_empty()))
 }
 
 fn iso_date(text: &str) -> Option<NaiveDate> {
@@ -240,8 +214,6 @@ mod tests {
         assert_eq!(record.hit.id.as_str(), "kst-33669-6");
         assert_eq!(record.hit.id.collection(), "kst");
         assert_eq!(record.hit.dossier.as_deref(), Some("33669"));
-        assert_eq!(record.hit.vergaderjaar.as_deref(), Some("2013-2014"));
-        assert_eq!(record.document_type.as_deref(), Some("Kamerstuk"));
         assert_eq!(
             record.url.as_deref(),
             Some("https://example.invalid/kst-33669-6.xml")
@@ -254,16 +226,6 @@ mod tests {
         assert_eq!(
             records[0].hit.published_on,
             Some("2013-10-01".parse().unwrap())
-        );
-    }
-
-    #[test]
-    fn extracts_body_paragraphs() {
-        let id: PublicationId = "kst-1-1".parse().unwrap();
-        let body = "<kamerstuk><al>Eerste   alinea.</al><al>Tweede alinea.</al></kamerstuk>";
-        assert_eq!(
-            parse_body(&id, body).unwrap().as_deref(),
-            Some("Eerste alinea.\nTweede alinea.")
         );
     }
 

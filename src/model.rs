@@ -74,6 +74,5 @@ pub struct PublicationHit {
     pub id: PublicationId,
     pub title: Option<String>,
     pub dossier: Option<String>,
-    pub vergaderjaar: Option<String>,
     pub published_on: Option<NaiveDate>,
 }
