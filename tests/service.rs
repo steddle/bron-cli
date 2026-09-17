@@ -57,6 +57,7 @@ fn asking() -> Ask<'static> {
         as_known_on: None,
         number: Some("1"),
         raw: false,
+        not_commenced: false,
     }
 }
 

@@ -188,4 +188,6 @@ pub struct Ask<'a> {
     /// Ask for the publisher's own bytes at every span. Off by default, so no
     /// markup travels for an answer nobody will read it in.
     pub raw: bool,
+    /// Narrow to what this rendition publishes and does not yet apply.
+    pub not_commenced: bool,
 }

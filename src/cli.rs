@@ -99,6 +99,14 @@ pub enum Law {
         #[arg(long)]
         article: Option<String>,
 
+        /// Only what this law publishes and does not yet apply.
+        ///
+        /// The one future the register holds. It consolidates a text on the day
+        /// it takes effect, so no version is published ahead, but an article
+        /// inside the current one can be waiting with the words it will have.
+        #[arg(long)]
+        not_commenced: bool,
+
         /// One lid of that article, as the register numbers it.
         ///
         /// Needs --article: a lid number alone is not an address, since every

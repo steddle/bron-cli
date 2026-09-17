@@ -359,3 +359,28 @@ async fn law_feed_says_in_words_that_a_cursor_belongs_to_another_corpus() {
     assert!(stdout(&output).contains("Start again from the head"), "{output:?}");
     assert!(!stdout(&output).contains("no sentence for"), "{output:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_asks_for_what_is_published_and_not_in_force() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0020368/articles"))
+        .and(query_param("not_commenced", "1"))
+        .and(query_param("rendered", "1"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","message":"no provision published and not in force","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["law", "show", "BWBR0020368", "--not-commenced"],
+    )
+    .await;
+
+    // The mock answers only when the flag reached the service, and a law with
+    // nothing coming is a not-found rather than an empty answer.
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+}

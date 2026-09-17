@@ -210,6 +210,10 @@ impl Service {
             query.push(("raw", "1".to_string()));
         }
 
+        if ask.not_commenced {
+            query.push(("not_commenced", "1".to_string()));
+        }
+
         self.read(client, client.get(&url).query(&query))
     }
 

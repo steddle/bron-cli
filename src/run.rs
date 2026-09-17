@@ -406,6 +406,10 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 as_known_on: None,
                 number: None,
                 raw: *raw,
+                // A diff is between two whole renditions: narrowing one side
+                // to what has not commenced would report every other article
+                // as removed.
+                not_commenced: false,
             };
 
             let earlier = service.articles(&client, &law, &ask(*from))?;
@@ -508,6 +512,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             item,
             moment,
             raw,
+            not_commenced,
         } => {
             let law: BwbId = parse_id(id)?;
             let (as_of, as_known_on) = moment.coordinates(today);
@@ -520,6 +525,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                     as_known_on,
                     number: wanted.as_deref(),
                     raw: *raw,
+                    not_commenced: *not_commenced,
                 },
             )?;
 
@@ -534,9 +540,10 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 .collect();
 
             if articles.is_empty() {
-                let what = match wanted {
-                    Some(number) => format!("article {number} of {law}"),
-                    None => format!("articles of {law}"),
+                let what = match (wanted, not_commenced) {
+                    (Some(number), _) => format!("article {number} of {law}"),
+                    (None, true) => format!("provisions of {law} published and not in force"),
+                    (None, false) => format!("articles of {law}"),
                 };
                 return Err(Fault::not_found("stored", what));
             }
