@@ -83,21 +83,18 @@ $ bron case appeal ECLI:NL:HR:2019:1278
 no published successor known, as of 2026-08-20
 ```
 
-`--as-of` asks what was in force. `--as-known-on` asks what the register showed, which becomes a different question the moment something is published with retroactive effect. One flag can't choose between them, so there are two.
+`--as-of` asks what was in force. `--as-known-on` asks what the register showed, which becomes a different question the moment something is published with retroactive effect. A moment is a point in both windows, so the two combine: `--as-of 2019-06-01 --as-known-on 2020-01-01` is the text for conduct in June 2019 as the register had it on New Year's Day. `--as-known-on` alone names that day for both.
 
 ## Machine use
 
-Every command takes `--json` and answers in a versioned envelope:
+Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search` and `law versions` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state.
 
 ```
 $ bron --json find 6:162 BW
-{"bron":1,"grade":"authority","as_of":"2026-08-24","view":"in_force","data":{"kind":"lookup","citation":"6:162",
- "resolved":[{"reading":"book","source":"wetgeving","law_id":"BWBR0005289","version":"2026-07-16_0",
- "number":"162","held":"text","label":"Artikel 162","path":"/Boek6/Titeldeel3/Afdeling1/Artikel162",
- "content_hash":"f8125445cab2e8d849dacd4a7d5e01fdb8c4b7dad0de796c4f64afafe1626130"}]}}
+{"bron":1,"grade":"authority","as_of":"2026-09-17","as_known_on":"2026-09-17","data":{"kind":"lookup","citation":"6:162","resolved":[{"reading":"book","source":"wetgeving","regulation_id":"BWBR0005289","expression":"2026-07-16_0","held":true,"number":"162","label":"Artikel 162","path":"/Boek6/Titeldeel3/Afdeling1/Artikel162","content_hash":"f8125445cab2e8d849dacd4a7d5e01fdb8c4b7dad0de796c4f64afafe1626130","caveats":[]}]}}
 ```
 
-Human and JSON output share one code path, so they can't drift apart. On failure the JSON still goes to stdout and the human sentence to stderr, so a caller never has to read stderr to tell one failure from another:
+Human output is rendered from the same answer the JSON came out of, so the two can't describe different things. On failure the JSON still goes to stdout and the human sentence to stderr, so a caller never has to read stderr to tell one failure from another:
 
 ```
 0  ok
