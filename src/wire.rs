@@ -354,6 +354,9 @@ impl Caveat {
             Truncated {
                 window: u32,
             },
+            SkippedArticles {
+                count: u32,
+            },
             TableFlattened {
                 articles: Vec<String>,
                 cell_separator: String,
@@ -415,6 +418,7 @@ impl Caveat {
             Ok(Stated::Unverified) => Self::UpstreamDigestAbsent,
             Ok(Stated::HashDisagrees) => Self::UpstreamDigestDiffers,
             Ok(Stated::Truncated { window }) => Self::Truncated { window },
+            Ok(Stated::SkippedArticles { count }) => Self::SkippedArticles { count },
             Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
             Ok(Stated::TableFlattened {
                 articles,
@@ -1124,6 +1128,16 @@ mod tests {
                 scope: "corpus".into(),
                 count: 64
             }
+        );
+    }
+
+    /// A rendition that lost articles says how many. Read as `unrecognised` it
+    /// would tell a reader on a current build to upgrade.
+    #[test]
+    fn articles_a_rendition_could_not_hold_are_counted() {
+        assert_eq!(
+            Caveat::stated(serde_json::json!({"kind": "skipped_articles", "count": 14})),
+            Caveat::SkippedArticles { count: 14 }
         );
     }
 
