@@ -20,7 +20,6 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "5"
-indicatif = "0.17"
 # flock(2) for the cross-process rate-limit bucket, which other languages
 # reach through the same call.
 libc = "0.2"
@@ -50,8 +49,6 @@ sha2 = "0.10"
 # both full texts so a consumer never has to trust our diff.
 similar = "3.1"
 thiserror = "2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3"
