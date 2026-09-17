@@ -110,7 +110,10 @@ pub struct SearchHit {
     pub label: Option<String>,
     pub path: Option<String>,
     pub content_hash: String,
-    pub distance: f64,
+    /// The cosine distance of the hit's own vector to the question. Absent on
+    /// a text that has no vector, which only full text can find.
+    #[serde(default)]
+    pub distance: Option<f64>,
     #[serde(default)]
     pub lid: Option<SearchLid>,
 }

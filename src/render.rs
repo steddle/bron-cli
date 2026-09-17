@@ -50,10 +50,14 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                             None => "article".to_string(),
                         };
 
+                        let distance = hit
+                            .distance
+                            .map_or_else(|| "    -".to_string(), |d| format!("{d:.3}"));
+
                         writeln!(
                             out,
-                            "{:.3}  {:<11} {:<8} {}  {}",
-                            hit.distance,
+                            "{}  {:<11} {:<8} {}  {}",
+                            distance,
                             hit.source,
                             unit,
                             hit.regulation_id,

@@ -416,7 +416,36 @@ async fn a_question_is_still_ranked() {
     };
 
     assert_eq!(searched, vec!["wetgeving".to_string()]);
-    assert_eq!(hits[0].distance, 0.21);
+    assert_eq!(hits[0].distance, Some(0.21));
+}
+
+/// The service orders a ranking by the vector and seats the texts only full
+/// text found from place eight. One of those may carry no vector, and so no
+/// distance; the hit is still an answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hit_only_the_words_found_may_carry_no_distance() {
+    const WORDS_ONLY: &str = r#"{"bron":1,"grade":"authority","data":{"kind":"ranking",
+        "searched":["wetgeving"],"hits":[{"source":"wetgeving","unit":"article",
+        "regulation_id":"BWBR0005290","expression":"2026-07-01_0","number":"18",
+        "label":"Artikel 18","content_hash":"b7c2","places":1,"found_by":["text"]}]}}"#;
+
+    let server = searching(WORDS_ONLY, 200).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .search(&client, &asking_for("updates"))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("a hit without a distance is still a hit");
+
+    let SearchData::Ranking { hits, .. } = answered.data else {
+        panic!("a question must not be read as a citation");
+    };
+
+    assert_eq!(hits[0].distance, None);
 }
 
 /// A citation that resolves to nothing is a not-found, never an empty ranking
@@ -487,12 +516,15 @@ async fn a_broken_ranking_is_reported_against_the_ranking() {
     assert!(renamed.contains("missing field `hits`"), "{renamed}");
 
     // So is one the service stopped sending.
-    let missing = refused(&format!(
-        r#"{{"bron":1,"grade":"authority","data":{{"kind":"ranking",
-           "searched":["wetgeving"],"hits":[{hit}}}]}}}}"#
-    ))
+    let missing = refused(
+        r#"{"bron":1,"grade":"authority","data":{"kind":"ranking",
+           "searched":["wetgeving"],"hits":[{"source":"wetgeving","unit":"article"}]}}"#,
+    )
     .await;
-    assert!(missing.contains("missing field `distance`"), "{missing}");
+    assert!(
+        missing.contains("missing field `regulation_id`"),
+        "{missing}"
+    );
 
     // A field that arrived as the wrong thing is named by what was expected and
     // where it stands, which is what serde has to say about a value rather than
