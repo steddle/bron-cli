@@ -140,12 +140,12 @@ async fn a_withdrawn_rendition_is_named_all_the_way_to_the_caller() {
         answered.caveats
     );
 
-    // A limit stated under a name this bron has never heard of is reported
-    // under that name rather than dropped: a reader one release behind must
-    // still be able to see that something was said.
+    // A limit stated under a name this bron has never heard of is carried
+    // whole rather than dropped: a reader one release behind must still be able
+    // to see what was said.
     assert!(
         answered.caveats.contains(&Caveat::Unrecognised {
-            stated: "something_this_bron_predates".into(),
+            stated: serde_json::json!({"kind": "something_this_bron_predates", "window": 4}),
         }),
         "{:?}",
         answered.caveats
@@ -203,7 +203,7 @@ fn asking_for(term: &str) -> SearchRequest {
     SearchRequest {
         q: term.to_string(),
         limit: 20,
-        as_of: None,
+        as_of: "2026-08-24".parse().unwrap(),
         as_known_on: None,
     }
 }
@@ -547,9 +547,10 @@ async fn a_shape_this_bron_does_not_know_is_refused() {
 }
 
 /// The service sends `held` and the three fields that belong with it as
-/// separate keys, so the two can disagree in either direction. Both are said
-/// out loud, and neither takes the citation's other readings down with it: one
-/// malformed row must not lose a sound one.
+/// separate keys, so the two can disagree in either direction. A reading whose
+/// two halves disagree arrives as the service sent it, and takes none of the
+/// citation's other readings down with it: one malformed row must not lose a
+/// sound one.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reading_the_service_contradicts_itself_about_still_arrives() {
     let body = r#"{"bron":1,"grade":"authority","data":{"kind":"lookup","citation":"8:4",

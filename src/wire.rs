@@ -1,8 +1,12 @@
-//! The JSON contract.
+//! The JSON bron builds itself.
+//!
+//! The service's JSON is the contract, and a command that is one call to the
+//! service prints the envelope it was sent. What is defined here is the rest:
+//! the answers bron assembles, and the failure envelope.
 //!
 //! Domain types in [`crate::model`] deliberately do not implement `Serialize`.
-//! Everything a consumer parses is defined here, so renaming a field in the
-//! corpus cannot silently break a parser on the other side of a pipe: it breaks
+//! Everything bron serialises is defined here, so renaming a field in the
+//! domain cannot silently break a parser on the other side of a pipe: it breaks
 //! the build instead.
 //!
 //! Two properties every answer carries, because a caller cannot infer either:
@@ -36,17 +40,6 @@ pub enum Grade {
     Authority,
 }
 
-/// Which of the two validity windows a date was resolved against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum View {
-    /// Geldigheid: what was in force. The question to ask about conduct.
-    InForce,
-    /// Zicht: what the register showed. The question to ask about what someone
-    /// could have known at the time.
-    AsKnown,
-}
-
 /// Every response, success or failure.
 #[derive(Debug, Serialize)]
 pub struct Envelope<T> {
@@ -54,11 +47,12 @@ pub struct Envelope<T> {
     /// parse rather than guess.
     pub bron: u32,
     pub grade: Grade,
-    /// The date this answer is bound to, when it was resolved against one.
+    /// The day the text is for, when the answer was resolved against one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub as_of: Option<NaiveDate>,
+    /// The day the register was read on, where the question named one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub view: Option<View>,
+    pub as_known_on: Option<NaiveDate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,16 +70,16 @@ impl<T: Serialize> Envelope<T> {
             bron: CONTRACT,
             grade: Grade::Authority,
             as_of: None,
-            view: None,
+            as_known_on: None,
             data: Some(data),
             error: None,
             caveats: Vec::new(),
         }
     }
 
-    pub fn bound_to(mut self, as_of: NaiveDate, view: View) -> Self {
+    pub fn bound_to(mut self, as_of: NaiveDate, as_known_on: Option<NaiveDate>) -> Self {
         self.as_of = Some(as_of);
-        self.view = Some(view);
+        self.as_known_on = as_known_on;
         self
     }
 
@@ -102,7 +96,7 @@ impl Envelope<()> {
             bron: CONTRACT,
             grade: Grade::Authority,
             as_of: None,
-            view: None,
+            as_known_on: None,
             data: None,
             error: Some(ErrorBody {
                 kind: fault.kind(),
@@ -185,17 +179,6 @@ pub enum Caveat {
     /// is Boek 3 artikel 305a and is also, in a law that prints the colon
     /// itself, artikel 3:305a, and which the reader meant is theirs to say.
     SeveralReadings { readings: Vec<String> },
-
-    /// The service said two things about one reading of a citation that cannot
-    /// both be true, so the reading is answered as though its text is not held.
-    ///
-    /// `held` and the three fields that belong to it travel separately on the
-    /// wire, so the two can disagree: a rendition said to be held with no hash
-    /// to resolve, or one said not to be held with a hash beside it. Answering
-    /// either as though nothing were wrong would put a reader one step from a
-    /// citation nobody can check, and dropping the whole answer would take the
-    /// other readings of the citation with it.
-    ReadingContradicted { reading: String, stated: String },
 
     /// A reading of a citation that came to nothing, and why.
     ///
@@ -318,17 +301,17 @@ pub enum Caveat {
         repeated: Vec<String>,
     },
 
-    /// The service stated a limit this bron has no name for.
+    /// The service stated a limit this bron has no sentence for.
     ///
-    /// Carried rather than dropped. A limit on what an answer supports that
-    /// goes unsaid because the reader is one release behind is the failure
-    /// every caveat here exists to prevent.
-    Unrecognised { stated: String },
+    /// Carried whole rather than dropped: its name and every field it came
+    /// with, so a reader sees what was said even where this build cannot put it
+    /// in words.
+    Unrecognised { stated: serde_json::Value },
 }
 
 impl Caveat {
     /// One limit the service stated, read into this crate's vocabulary.
-    pub fn stated(value: serde_json::Value) -> Self {
+    pub fn stated(value: &serde_json::Value) -> Self {
         #[derive(serde::Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case")]
         enum Stated {
@@ -389,15 +372,7 @@ impl Caveat {
             },
         }
 
-        // Read before the value is consumed, so an unrecognised limit can still
-        // be reported by the name the service gave it.
-        let kind = value
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("a limit with no kind")
-            .to_string();
-
-        match serde_json::from_value::<Stated>(value) {
+        match <Stated as serde::Deserialize>::deserialize(value) {
             Ok(Stated::Withdrawn { excluded }) => Self::WithdrawnRenditions { excluded },
             Ok(Stated::Ambiguous { chosen, discarded }) => {
                 Self::AmbiguousRendition { chosen, discarded }
@@ -447,7 +422,9 @@ impl Caveat {
                 held_regulations,
                 known_regulations,
             },
-            Err(_) => Self::Unrecognised { stated: kind },
+            Err(_) => Self::Unrecognised {
+                stated: value.clone(),
+            },
         }
     }
 }
@@ -565,22 +542,6 @@ impl From<crate::service::Window> for Window {
     }
 }
 
-/// One entry from a law's manifest: a version that exists, and whether the
-/// corpus holds its text.
-#[derive(Debug, Serialize)]
-pub struct VersionSummary {
-    pub version: String,
-    pub in_force: Window,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub as_known: Option<Window>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub byte_len: Option<u64>,
-    /// True when the service holds this version's text.
-    pub held: bool,
-}
-
 #[derive(Debug, Serialize)]
 pub struct Article {
     pub law_id: String,
@@ -639,132 +600,6 @@ pub struct Lid {
     /// The Juriconnect reference the register states for this lid.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jci: Option<String>,
-}
-
-/// One candidate for a question, named by identifier and never by text.
-///
-/// The service finds and the CLI proves, so a ranking answers with what a
-/// citation is made of and leaves quoting to `law show`, which resolves it to
-/// bytes with an offset. An approximate ordering is the one part of bron that
-/// may not be quoted.
-#[derive(Debug, Serialize)]
-pub struct Hit {
-    /// Which corpus this came from: `wetgeving` today, more later. Present from
-    /// the first day so a consumer written now keeps working when a second
-    /// corpus lands beside it.
-    pub source: String,
-    /// `article` or `lid`. Both are ranked, because a lid is the unit a
-    /// citation names and an article is the unit a reader wants, and neither
-    /// is derivable from the other.
-    pub unit: String,
-    pub law_id: String,
-    pub version: String,
-    pub number: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lid: Option<String>,
-    /// SHA-256 of the text that matched, which is what `law show` resolves.
-    pub content_hash: String,
-    /// Cosine distance, reported as stored rather than as a percentage. A
-    /// similarity rendered as 87% invites a threshold, and a threshold on an
-    /// approximate ordering is a relevance judgement dressed as a fact.
-    pub distance: f64,
-}
-
-/// A ranking, and which corpora it could actually have come from.
-#[derive(Debug, Serialize)]
-pub struct Ranking {
-    /// The corpora that held vectors. Anything bron is meant to cover and is
-    /// missing here was not searched, which is a different answer from finding
-    /// nothing in it.
-    pub searched: Vec<String>,
-    pub hits: Vec<Hit>,
-}
-
-/// Whether the rendition a reading resolved to has its text held, and what
-/// that makes available.
-///
-/// One type rather than a flag beside three optional fields. `held: true` with
-/// no `content_hash` is not a state that can exist, and saying so in prose left
-/// sixteen combinations spellable for two facts.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case", tag = "held")]
-pub enum Held {
-    /// It is, and it carries this article. `content_hash` is the SHA-256 of the
-    /// text, which is what `law show` resolves.
-    Text {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        label: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        path: Option<String>,
-        content_hash: String,
-    },
-    /// It is not. An answer and not a miss: the dates resolved and the
-    /// rendition is named, and whether it carries this article is a fact nobody
-    /// has yet.
-    None,
-}
-
-/// One reading of a citation, resolved to an article in a rendition.
-///
-/// No `distance`, and there will not be one. A ranking orders candidates by a
-/// number that only orders; a citation is looked up, and arrives or does not.
-/// Putting a distance here would say the answer came about a way it did not,
-/// and would invite a threshold on something that is not an ordering.
-#[derive(Debug, Serialize)]
-pub struct Cited {
-    /// How the citation was read. `book` takes the first segment as a book of
-    /// the Burgerlijk Wetboek, so `6:162` is Boek 6 artikel 162; `literal`
-    /// takes the whole number as one a regulation prints itself, which the Awb
-    /// and the Wft do. Which the reader meant is theirs to say.
-    pub reading: String,
-    /// Which corpus this came from: `wetgeving` today, more later.
-    pub source: String,
-    pub law_id: String,
-    pub version: String,
-    /// The number as that regulation prints it, which for a book reading is the
-    /// citation with its book taken off.
-    pub number: String,
-    #[serde(flatten)]
-    pub held: Held,
-    /// What limits this reading in particular, as against the answer as a
-    /// whole. The rendition it resolved to may be one the publisher does not
-    /// vouch for, or one of several covering the date.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub caveats: Vec<Caveat>,
-}
-
-/// A citation, and every reading of it that resolved.
-#[derive(Debug, Serialize)]
-pub struct Lookup {
-    /// The citation as the service read it, which is not always as it was
-    /// typed: `6:162 BW` pins the book and reads as `6:162`.
-    pub citation: String,
-    /// In the order the service read them. An answer with more than one is a
-    /// citation that reads more than one way, and picking one of them would be
-    /// bron deciding what it means.
-    pub resolved: Vec<Cited>,
-}
-
-/// What a term turned out to be.
-///
-/// Two shapes rather than one with an optional field, and a tag rather than a
-/// key a consumer has to test for. A ranking is an approximate ordering over
-/// vectors and a lookup is arithmetic over identifiers; the one part of bron
-/// that may not be quoted sits in the first and not in the second, and a
-/// consumer branches on `kind` to know which it is holding.
-///
-/// `kind` is the word [`Caveat`] and [`ErrorBody`] already use for the value a
-/// consumer switches on, and the word the service publishes for this one. One
-/// vocabulary at both ends of the pipe.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum Found {
-    Ranking(Ranking),
-    Lookup(Lookup),
 }
 
 /// What happened to one article between two versions of a law.
@@ -918,15 +753,6 @@ impl From<model::AppealStatus> for AppealStatus {
 // -- search hits ---------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-pub struct LawHit {
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub law_type: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
 pub struct CaseHit {
     pub ecli: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1016,11 +842,16 @@ mod tests {
     }
 
     #[test]
-    fn an_as_of_answer_states_which_window_it_used() {
-        let date: NaiveDate = "2023-06-01".parse().unwrap();
-        let json = serde_json::to_string(&Envelope::ok(1).bound_to(date, View::InForce)).unwrap();
+    fn an_answer_states_the_coordinates_it_was_asked_for() {
+        let day: NaiveDate = "2023-06-01".parse().unwrap();
+        let read_on: NaiveDate = "2024-01-01".parse().unwrap();
+
+        let json = serde_json::to_string(&Envelope::ok(1).bound_to(day, Some(read_on))).unwrap();
         assert!(json.contains(r#""as_of":"2023-06-01""#), "{json}");
-        assert!(json.contains(r#""view":"in_force""#), "{json}");
+        assert!(json.contains(r#""as_known_on":"2024-01-01""#), "{json}");
+
+        let json = serde_json::to_string(&Envelope::ok(1).bound_to(day, None)).unwrap();
+        assert!(!json.contains("as_known_on"), "{json}");
     }
 
     #[test]
@@ -1070,19 +901,14 @@ mod tests {
         assert!(json.contains(r#""text":"<lid>"#), "{json}");
     }
 
-    /// A limit the service knows about and this crate does not is carried under
-    /// the name the service gave it. Dropping it would leave a reader one
-    /// release behind unable to see that anything was said.
+    /// A limit the service knows about and this crate does not is carried
+    /// whole. Dropping it, or keeping only its name, would leave a reader one
+    /// release behind unable to see what was said.
     #[test]
-    fn a_limit_with_no_name_here_is_still_reported() {
+    fn a_limit_with_no_name_here_is_carried_with_its_fields() {
         let stated = serde_json::json!({"kind": "something_later", "detail": 3});
 
-        assert_eq!(
-            Caveat::stated(stated),
-            Caveat::Unrecognised {
-                stated: "something_later".into()
-            }
-        );
+        assert_eq!(Caveat::stated(&stated), Caveat::Unrecognised { stated });
     }
 
     /// The count of texts no ranking reaches is read under its own name, and
@@ -1091,7 +917,7 @@ mod tests {
     #[test]
     fn texts_no_ranking_reaches_are_read_with_their_scope() {
         assert_eq!(
-            Caveat::stated(serde_json::json!({
+            Caveat::stated(&serde_json::json!({
                 "kind": "unrankable_texts",
                 "scope": "corpus",
                 "count": 64
@@ -1108,7 +934,7 @@ mod tests {
     #[test]
     fn articles_a_rendition_could_not_hold_are_counted() {
         assert_eq!(
-            Caveat::stated(serde_json::json!({"kind": "skipped_articles", "count": 14})),
+            Caveat::stated(&serde_json::json!({"kind": "skipped_articles", "count": 14})),
             Caveat::SkippedArticles { count: 14 }
         );
     }
@@ -1118,11 +944,11 @@ mod tests {
     #[test]
     fn the_two_hash_limits_stay_apart() {
         assert_eq!(
-            Caveat::stated(serde_json::json!({"kind": "unverified"})),
+            Caveat::stated(&serde_json::json!({"kind": "unverified"})),
             Caveat::UpstreamDigestAbsent
         );
         assert_eq!(
-            Caveat::stated(serde_json::json!({"kind": "hash_disagrees"})),
+            Caveat::stated(&serde_json::json!({"kind": "hash_disagrees"})),
             Caveat::UpstreamDigestDiffers
         );
     }
@@ -1130,7 +956,7 @@ mod tests {
     #[test]
     fn a_withdrawn_rendition_is_named_rather_than_only_counted() {
         assert_eq!(
-            Caveat::stated(serde_json::json!({
+            Caveat::stated(&serde_json::json!({
                 "kind": "withdrawn",
                 "excluded": ["2017-07-01_0"],
             })),
@@ -1138,37 +964,6 @@ mod tests {
                 excluded: vec!["2017-07-01_0".into()]
             }
         );
-    }
-
-    /// A held rendition and an unheld one are two states, and one type says
-    /// which. A flag beside three optional fields left sixteen combinations
-    /// spellable, fourteen of which cannot happen.
-    #[test]
-    fn a_reading_says_what_the_service_holds_for_it() {
-        let cited = |held| Cited {
-            reading: "book".into(),
-            source: "wetgeving".into(),
-            law_id: "BWBR0005291".into(),
-            version: "2025-07-01_0".into(),
-            number: "305a".into(),
-            held,
-            caveats: Vec::new(),
-        };
-
-        let json = serde_json::to_string(&cited(Held::Text {
-            label: Some("Artikel 305a".into()),
-            path: None,
-            content_hash: "8fc1e1eb".into(),
-        }))
-        .unwrap();
-
-        assert!(json.contains(r#""held":"text""#), "{json}");
-        assert!(json.contains(r#""content_hash":"8fc1e1eb""#), "{json}");
-
-        let json = serde_json::to_string(&cited(Held::None)).unwrap();
-
-        assert!(json.contains(r#""held":"none""#), "{json}");
-        assert!(!json.contains("content_hash"), "{json}");
     }
 
     /// A record the register publishes without a body says so, rather than
@@ -1208,47 +1003,6 @@ mod tests {
 
         assert!(json.contains(r#""body":"absent""#), "{json}");
         assert!(!json.contains("provenance"), "{json}");
-    }
-
-    /// A consumer tells the two shapes apart by reading one key, never by
-    /// testing whether another is present. A ranking that happened to resolve
-    /// to one hit and a citation that resolved to one article are different
-    /// answers, and only one of them may be ordered.
-    #[test]
-    fn a_ranking_and_a_lookup_say_which_they_are() {
-        let ranking = Found::Ranking(Ranking {
-            searched: vec!["wetgeving".into()],
-            hits: Vec::new(),
-        });
-        let json = serde_json::to_string(&ranking).unwrap();
-
-        assert!(json.starts_with(r#"{"kind":"ranking""#), "{json}");
-        assert!(json.contains(r#""searched":["wetgeving"]"#), "{json}");
-
-        let lookup = Found::Lookup(Lookup {
-            citation: "3:305a".into(),
-            resolved: vec![Cited {
-                reading: "book".into(),
-                source: "wetgeving".into(),
-                law_id: "BWBR0005291".into(),
-                version: "2025-07-01_0".into(),
-                number: "305a".into(),
-                held: Held::Text {
-                    label: Some("Artikel 305a".into()),
-                    path: None,
-                    content_hash: "8fc1e1eb".into(),
-                },
-                caveats: Vec::new(),
-            }],
-        });
-        let json = serde_json::to_string(&lookup).unwrap();
-
-        assert!(json.starts_with(r#"{"kind":"lookup""#), "{json}");
-
-        // The one field a lookup may never carry. A citation that resolves is
-        // not an 87% match, and a number here invites a threshold on something
-        // that is not an ordering.
-        assert!(!json.contains("distance"), "{json}");
     }
 
     /// Provenance names who froze the bytes. A slice cut from a document bron

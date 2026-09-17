@@ -1,8 +1,7 @@
 //! What each command actually does.
 //!
-//! Every arm returns an [`Answer`], which carries a wire envelope. Nothing here
-//! prints: that happens once, at the edge, so the two output formats cannot
-//! describe different things.
+//! Every arm returns an [`Answer`]. Nothing here prints: that happens once, at
+//! the edge, so the two output formats cannot describe different things.
 
 use std::io::{self, Write};
 
@@ -14,18 +13,22 @@ use bron::diff;
 use bron::error::{Fault, Outcome, from_source};
 use bron::ids::{BwbId, Ecli, PublicationId};
 use bron::model::{AppealStatus, Direction, Relation};
-use bron::service::{self, Service};
+use bron::service::{self, Answered, Service};
 use bron::sources::{Client, FetchedCase, publications, rechtspraak};
-use bron::wire::{self, Caveat, Envelope, View};
+use bron::wire::{self, Caveat, Envelope};
 
 use crate::cli::{Case, Cli, Command, Law, Moment, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
+///
+/// A command that is exactly one call to the service holds what the service
+/// answered. Its JSON is the service's envelope as sent, and only the human
+/// rendering reads anything out of it.
 pub enum Answer {
-    LawHits(Envelope<Vec<wire::LawHit>>),
-    Found(Envelope<wire::Found>),
-    Versions(Envelope<Vec<wire::VersionSummary>>),
+    LawHits(Answered<Vec<service::Regulation>>),
+    Found(Answered<service::SearchData>),
+    Versions(Answered<Vec<service::Expression>>),
     Changes(Envelope<Box<wire::Changes>>),
     Articles(Envelope<Vec<wire::Article>>),
     CaseHits(Envelope<Vec<wire::CaseHit>>),
@@ -41,10 +44,16 @@ impl Answer {
             serde_json::to_writer(out, value).map_err(io::Error::other)
         }
 
+        /// The caller ends every answer with one newline, so one the service
+        /// already sent is left for it to write.
+        fn sent(out: &mut impl Write, envelope: &str) -> io::Result<()> {
+            out.write_all(envelope.strip_suffix('\n').unwrap_or(envelope).as_bytes())
+        }
+
         match self {
-            Self::LawHits(e) => write(out, e),
-            Self::Found(e) => write(out, e),
-            Self::Versions(e) => write(out, e),
+            Self::LawHits(a) => sent(out, &a.envelope),
+            Self::Found(a) => sent(out, &a.envelope),
+            Self::Versions(a) => sent(out, &a.envelope),
             Self::Changes(e) => write(out, e),
             Self::Articles(e) => write(out, e),
             Self::CaseHits(e) => write(out, e),
@@ -158,12 +167,6 @@ fn narrow(
 
 /// Answers which article, from a question or from a citation, by identifier.
 ///
-/// Two shapes come back and they stay apart. A question is ranked by a vector
-/// and every hit carries the distance that ordered it; a citation is looked up
-/// and carries none, because it arrived or it did not. Flattening them would
-/// put a number beside a resolved citation that says the answer came about a
-/// way it did not.
-///
 /// The one command with no publisher behind it. Every other route through the
 /// service is an accelerant in front of a source of last resort; the shared
 /// corpus has none, because it is the source. So no service is a refusal rather
@@ -184,127 +187,19 @@ fn run_find(
         return Err(Fault::usage("say what to search for"));
     }
 
-    let (date, view) = moment.resolve(today);
-    let (as_of, as_known_on) = match view {
-        View::InForce => (Some(date.to_string()), None),
-        View::AsKnown => (None, Some(date.to_string())),
-    };
+    let (as_of, as_known_on) = moment.coordinates(today);
 
-    let client = client(quiet)?;
-    let answered = service.search(
-        &client,
-        &service::SearchRequest {
-            q: query.to_string(),
-            limit,
-            as_of,
-            as_known_on,
-        },
-    )?;
-
-    let mut caveats = answered.caveats;
-
-    let found = match answered.data {
-        service::SearchData::Ranking { searched, hits } => wire::Found::Ranking(wire::Ranking {
-            searched,
-            hits: hits
-                .into_iter()
-                .map(|hit| wire::Hit {
-                    source: hit.source,
-                    unit: hit.unit,
-                    law_id: hit.regulation_id,
-                    version: hit.expression,
-                    number: hit.number,
-                    label: hit.label,
-                    path: hit.path,
-                    lid: hit.lid.and_then(|l| l.number),
-                    content_hash: hit.content_hash,
-                    distance: hit.distance,
-                })
-                .collect(),
-        }),
-        service::SearchData::Lookup { citation, resolved } => {
-            // In the order they arrived. Every reading is answered, because
-            // choosing between them is interpretation and bron does not do any.
-            let (readings, contradictions): (Vec<_>, Vec<_>) =
-                resolved.into_iter().map(cited).unzip();
-
-            caveats.extend(contradictions.into_iter().flatten());
-
-            wire::Found::Lookup(wire::Lookup {
-                citation,
-                resolved: readings,
-            })
-        }
-    };
-
-    // Which lanes hold no vectors, and which readings came to nothing, are the
-    // service's claims and travel as such. Working either out again here would
-    // be a second place for the same fact to be stated.
-    Ok(Answer::Found(
-        Envelope::ok(found)
-            .bound_to(date, view)
-            .with_caveats(caveats),
-    ))
-}
-
-/// One reading of a citation, in the shape a consumer parses, and the caveat it
-/// earns where the service contradicted itself about it.
-///
-/// The service sends a flag and three fields that only belong with it set, so
-/// the two can disagree in either direction. Both directions are said out loud
-/// and neither is answered as though nothing were wrong. Both are answered as
-/// not held, which is the half of the contradiction that claims least: a
-/// missing hash cannot be invented, and one sent under `held: false` is not
-/// something the service is willing to stand behind.
-///
-/// The caveat names the reading rather than the answer being dropped. A
-/// citation reads more than one way and the other readings are still good; `8:4`
-/// losing its Boek 8 answer because the Awb reading came back malformed would
-/// be one broken row taking a sound one with it.
-fn cited(entry: service::Cited) -> (wire::Cited, Option<Caveat>) {
-    let (held, contradiction) = match (entry.held, entry.content_hash) {
-        (true, Some(content_hash)) => (
-            wire::Held::Text {
-                label: entry.label,
-                path: entry.path,
-                content_hash,
+    service
+        .search(
+            &client(quiet)?,
+            &service::SearchRequest {
+                q: query.to_string(),
+                limit,
+                as_of,
+                as_known_on,
             },
-            None,
-        ),
-        (false, None) => (wire::Held::None, None),
-        (true, None) => (
-            wire::Held::None,
-            Some(format!(
-                "it holds {} rendition {} and did not say what artikel {} hashes to",
-                entry.regulation_id, entry.expression, entry.number,
-            )),
-        ),
-        (false, Some(_)) => (
-            wire::Held::None,
-            Some(format!(
-                "it does not hold {} rendition {} and sent a hash for artikel {} anyway",
-                entry.regulation_id, entry.expression, entry.number,
-            )),
-        ),
-    };
-
-    let caveat = contradiction.map(|stated| Caveat::ReadingContradicted {
-        reading: entry.reading.clone(),
-        stated,
-    });
-
-    (
-        wire::Cited {
-            reading: entry.reading,
-            source: entry.source,
-            law_id: entry.regulation_id,
-            version: entry.expression,
-            number: entry.number,
-            held,
-            caveats: entry.caveats.into_iter().map(Caveat::stated).collect(),
-        },
-        caveat,
-    )
+        )
+        .map(Answer::Found)
 }
 
 /// Where the document a rendition's spans point into came from.
@@ -430,47 +325,13 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
     let client = client(quiet)?;
 
     match law_cmd {
-        Law::Search { query, limit } => {
-            let answered = service.regulations(&client, &query.join(" "), *limit)?;
+        Law::Search { query, limit } => service
+            .regulations(&client, &query.join(" "), *limit)
+            .map(Answer::LawHits),
 
-            Ok(Answer::LawHits(
-                Envelope::ok(
-                    answered
-                        .data
-                        .into_iter()
-                        .map(|hit| wire::LawHit {
-                            id: hit.id,
-                            title: hit.title,
-                            law_type: hit.regulation_type,
-                        })
-                        .collect(),
-                )
-                .with_caveats(answered.caveats),
-            ))
-        }
-
-        Law::Versions { id } => {
-            let law: BwbId = parse_id(id)?;
-            let answered = service.expressions(&client, &law)?;
-
-            Ok(Answer::Versions(
-                Envelope::ok(
-                    answered
-                        .data
-                        .into_iter()
-                        .map(|rendition| wire::VersionSummary {
-                            version: rendition.label,
-                            in_force: rendition.in_force.into(),
-                            as_known: rendition.as_known.map(Into::into),
-                            upstream_hash: rendition.upstream_hash,
-                            byte_len: rendition.size,
-                            held: rendition.held,
-                        })
-                        .collect(),
-                )
-                .with_caveats(answered.caveats),
-            ))
-        }
+        Law::Versions { id } => service
+            .expressions(&client, &parse_id(id)?)
+            .map(Answer::Versions),
 
         Law::Changes {
             id,
@@ -595,18 +456,14 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             raw,
         } => {
             let law: BwbId = parse_id(id)?;
-            let (date, view) = moment.resolve(today);
+            let (as_of, as_known_on) = moment.coordinates(today);
 
             let answered = service.articles(
                 &client,
                 &law,
                 &service::Ask {
-                    as_of: date,
-                    // One date names both coordinates of a zicht question: the
-                    // text for a day, as the register had it that day. Sending
-                    // only the second resolves against a rendition in force
-                    // now, which for anything amended since is none at all.
-                    as_known_on: (view == View::AsKnown).then_some(date),
+                    as_of,
+                    as_known_on,
                     number: wanted.as_deref(),
                     raw: *raw,
                 },
@@ -658,7 +515,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
 
             Ok(Answer::Articles(
                 Envelope::ok(articles)
-                    .bound_to(date, view)
+                    .bound_to(as_of, as_known_on)
                     .with_caveats(caveats),
             ))
         }
@@ -1144,63 +1001,5 @@ mod appeal_tests {
             appeal(&[], read_at()),
             AppealStatus::NoPublishedSuccessor { as_of: read_at() }
         );
-    }
-}
-
-#[cfg(test)]
-mod citation_tests {
-    use super::cited;
-    use bron::service;
-    use bron::wire::{Caveat, Held};
-
-    fn entry(held: bool, content_hash: Option<&str>) -> service::Cited {
-        service::Cited {
-            reading: "literal".into(),
-            source: "wetgeving".into(),
-            regulation_id: "BWBR0005537".into(),
-            expression: "2026-08-15_0".into(),
-            held,
-            number: "8:4".into(),
-            label: Some("Artikel 8:4".into()),
-            path: None,
-            content_hash: content_hash.map(str::to_string),
-            caveats: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn a_reading_the_service_holds_carries_what_resolves_it() {
-        let (read, caveat) = cited(entry(true, Some("4ba2172e")));
-
-        assert!(caveat.is_none());
-        assert!(matches!(
-            read.held,
-            Held::Text { ref content_hash, .. } if content_hash == "4ba2172e"
-        ));
-    }
-
-    #[test]
-    fn a_reading_the_service_does_not_hold_carries_nothing_to_resolve() {
-        let (read, caveat) = cited(entry(false, None));
-
-        assert!(caveat.is_none());
-        assert!(matches!(read.held, Held::None));
-    }
-
-    /// Both directions of the same disagreement, and both are said. Answering
-    /// either as though nothing were wrong puts a reader one step from a
-    /// citation nobody can check.
-    #[test]
-    fn either_half_of_a_contradiction_is_reported_and_claims_the_less() {
-        for broken in [entry(true, None), entry(false, Some("4ba2172e"))] {
-            let held = broken.held;
-            let (read, caveat) = cited(broken);
-
-            assert!(matches!(read.held, Held::None), "held was {held}");
-            assert!(
-                matches!(caveat, Some(Caveat::ReadingContradicted { ref reading, .. }) if reading == "literal"),
-                "held was {held}, got {caveat:?}"
-            );
-        }
     }
 }

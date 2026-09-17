@@ -1,12 +1,15 @@
 //! The binary.
 //!
-//! Every command produces one value. Rendering is a match at the very edge, so
-//! `--json` and human output cannot drift apart: there is one code path and two
-//! ways of writing its result down.
+//! Every command produces one value, and both outputs are written from it at
+//! the very edge, so `--json` and human output cannot describe different
+//! things. Where that value is the service's own answer, `--json` prints the
+//! envelope as sent.
 //!
 //! On failure with `--json`, the error still goes to stdout as JSON and the
 //! human sentence goes to stderr. A caller that has to grep stderr to tell a
-//! missing article from a dead network will get it wrong eventually.
+//! missing article from a dead network will get it wrong eventually. The
+//! failure envelope is bron's own, because `network` and `local` are kinds no
+//! service can state.
 
 mod cli;
 mod render;

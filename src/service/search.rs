@@ -15,6 +15,7 @@
 //! log the request passes, which is also why the answer to one is never written
 //! to disk here; see [`crate::sources`] and `Reading::Envelope`.
 
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Outcome;
@@ -28,10 +29,9 @@ use super::client::Answered;
 pub struct SearchRequest {
     pub q: String,
     pub limit: u32,
+    pub as_of: NaiveDate,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub as_of: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub as_known_on: Option<String>,
+    pub as_known_on: Option<NaiveDate>,
 }
 
 /// What the term turned out to be.

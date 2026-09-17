@@ -5,6 +5,7 @@
 //! into a [`Fault`]. A second path around it is how `bron find` came to report
 //! that nothing matched a question the service had never been asked.
 
+use chrono::NaiveDate;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -17,10 +18,18 @@ use super::Service;
 /// What a fault from this address is attributed to.
 pub(super) const SERVICE: &str = "bron";
 
-/// An answer and the limits the service stated on it.
+/// An answer, the limits the service stated on it, and the envelope it came in.
 pub struct Answered<T> {
     pub data: T,
     pub caveats: Vec<wire::Caveat>,
+    /// The moment the service bound the answer to, where it bound one. Read as
+    /// dates, so an envelope stating anything else there is unreadable.
+    pub as_of: Option<NaiveDate>,
+    pub as_known_on: Option<NaiveDate>,
+    /// The envelope exactly as the service sent it. The service's JSON is the
+    /// contract, so `--json` prints this and nothing read out of it: a field
+    /// this build has no name for still reaches the consumer.
+    pub envelope: String,
 }
 
 /// Every answer the service gives, success or failure.
@@ -33,11 +42,13 @@ pub struct Answered<T> {
 /// untagged one answers a real deserialisation failure with "matched no
 /// variant", stripped of the field and position — on exactly the failure this
 /// module exists to diagnose. The wire shape stays loose;
-/// [`Answer::try_from`] collapses it exactly once.
+/// [`Answer::settle`] collapses it exactly once.
 #[derive(Debug, Deserialize)]
 struct Envelope<T> {
     data: Option<T>,
     error: Option<Stated>,
+    as_of: Option<NaiveDate>,
+    as_known_on: Option<NaiveDate>,
     #[serde(default)]
     caveats: Vec<serde_json::Value>,
 }
@@ -54,10 +65,9 @@ enum Answer<T> {
 /// pair differently. An error wins over any data beside it, and an envelope
 /// stating neither is the service breaking its own contract, which is an
 /// upstream fault.
-impl<T> TryFrom<Envelope<T>> for Answer<T> {
-    type Error = Fault;
-
-    fn try_from(envelope: Envelope<T>) -> Result<Self, Fault> {
+impl<T> Answer<T> {
+    /// `sent` is the text `envelope` was read out of.
+    fn settle(envelope: Envelope<T>, sent: String) -> Result<Self, Fault> {
         if let Some(stated) = envelope.error {
             return Ok(Self::Failed(stated));
         }
@@ -71,11 +81,10 @@ impl<T> TryFrom<Envelope<T>> for Answer<T> {
 
         Ok(Self::Data(Answered {
             data,
-            caveats: envelope
-                .caveats
-                .into_iter()
-                .map(wire::Caveat::stated)
-                .collect(),
+            caveats: envelope.caveats.iter().map(wire::Caveat::stated).collect(),
+            as_of: envelope.as_of,
+            as_known_on: envelope.as_known_on,
+            envelope: sent,
         }))
     }
 }
@@ -156,7 +165,7 @@ impl Service {
 
         let envelope: Envelope<T> = serde_json::from_str(&fetched.text).map_err(unreadable)?;
 
-        match Answer::try_from(envelope)? {
+        match Answer::settle(envelope, fetched.text)? {
             Answer::Data(answered) => Ok(answered),
             Answer::Failed(stated) => Err(stated.into_fault()),
         }
@@ -176,7 +185,7 @@ mod tests {
         )
         .unwrap();
 
-        match Answer::try_from(envelope) {
+        match Answer::settle(envelope, String::new()) {
             Ok(Answer::Failed(stated)) => assert_eq!(stated.kind, "usage"),
             Ok(Answer::Data(answered)) => panic!("read {} as success", answered.data),
             Err(fault) => panic!("read a stated failure as {fault}"),
@@ -189,7 +198,7 @@ mod tests {
     fn an_envelope_stating_neither_is_an_upstream_fault() {
         let envelope: Envelope<u32> = serde_json::from_str(r#"{"bron":1}"#).unwrap();
 
-        match Answer::try_from(envelope) {
+        match Answer::settle(envelope, String::new()) {
             Err(fault) => assert_eq!(fault.kind(), "upstream"),
             Ok(Answer::Data(answered)) => panic!("read {} out of thin air", answered.data),
             Ok(Answer::Failed(stated)) => panic!("invented a failure: {}", stated.message),

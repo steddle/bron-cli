@@ -6,7 +6,10 @@
 
 use std::io::{self, Write};
 
-use bron::wire::{AppealStatus, Body, Caveat, Envelope, Found, Held, View, Window};
+use chrono::NaiveDate;
+
+use bron::service::SearchData;
+use bron::wire::{AppealStatus, Body, Caveat, Envelope};
 
 use crate::run::Answer;
 
@@ -21,29 +24,27 @@ const NOT_HELD: &str = "not held";
 
 pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
     match answer {
-        Answer::LawHits(e) => {
-            for hit in data(e) {
+        Answer::LawHits(a) => {
+            for hit in &a.data {
                 writeln!(out, "{}  {}", hit.id, hit.title.as_deref().unwrap_or(""))?;
             }
-            caveats(&e.caveats, out)
+            caveats(&a.caveats, out)
         }
 
-        Answer::Found(e) => {
-            bound(e, out)?;
+        Answer::Found(a) => {
+            bound(a.as_of, a.as_known_on, out)?;
 
-            match &e.data {
-                None => return Ok(()),
-
-                Some(Found::Ranking(ranking)) => {
-                    if ranking.hits.is_empty() {
+            match &a.data {
+                SearchData::Ranking { hits, .. } => {
+                    if hits.is_empty() {
                         // Said in words. A blank screen reads as a failure, and
                         // this is an answer: nothing in what was searched came
                         // close.
                         writeln!(out, "nothing in the corpus came close to that")?;
                     }
 
-                    for hit in &ranking.hits {
-                        let unit = match &hit.lid {
+                    for hit in hits {
+                        let unit = match hit.lid.as_ref().and_then(|lid| lid.number.as_ref()) {
                             Some(number) => format!("lid {number}"),
                             None if hit.unit == "lid" => "lid".to_string(),
                             None => "article".to_string(),
@@ -55,7 +56,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                             hit.distance,
                             hit.source,
                             unit,
-                            hit.law_id,
+                            hit.regulation_id,
                             hit.label.as_deref().unwrap_or(&hit.number),
                         )?;
                     }
@@ -65,27 +66,23 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 // empty: a lookup is arithmetic and prints what it resolved.
                 // The reading leads every line, because with more than one it
                 // is the answer to which of them the reader meant.
-                Some(Found::Lookup(lookup)) => {
-                    writeln!(out, "{}\n", lookup.citation)?;
+                SearchData::Lookup { citation, resolved } => {
+                    writeln!(out, "{citation}\n")?;
 
-                    for entry in &lookup.resolved {
+                    for entry in resolved {
                         // Holding is its own column, so the name after it
                         // starts in the same place on every line rather than
                         // being pushed along by however long the one above was.
-                        let (holding, name) = match &entry.held {
-                            Held::Text { label, .. } => {
-                                ("", label.as_deref().unwrap_or(&entry.number))
-                            }
-                            Held::None => (NOT_HELD, entry.number.as_str()),
-                        };
+                        let holding = if entry.held { "" } else { NOT_HELD };
+                        let name = entry.label.as_deref().unwrap_or(&entry.number);
 
                         writeln!(
                             out,
                             "{:<reading$} {:<source$} {}  {}  {holding:<width$} {name}",
                             entry.reading,
                             entry.source,
-                            entry.law_id,
-                            entry.version,
+                            entry.regulation_id,
+                            entry.expression,
                             reading = READING,
                             source = SOURCE,
                             width = NOT_HELD.len(),
@@ -99,7 +96,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                                 out,
                                 "{:indent$}{}",
                                 "",
-                                caveat_line(caveat),
+                                caveat_line(&Caveat::stated(caveat)),
                                 indent = READING + 1,
                             )?;
                         }
@@ -107,25 +104,25 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 }
             }
 
-            caveats(&e.caveats, out)
+            caveats(&a.caveats, out)
         }
 
-        Answer::Versions(e) => {
-            for version in data(e) {
+        Answer::Versions(a) => {
+            for version in &a.data {
                 let held = if version.held { "*" } else { " " };
                 writeln!(
                     out,
                     "{held} {}  {}",
-                    version.version,
-                    window(&version.in_force)
+                    version.label,
+                    window(version.in_force.from, version.in_force.until)
                 )?;
             }
             writeln!(out, "\n* = the service holds this text")?;
-            caveats(&e.caveats, out)
+            caveats(&a.caveats, out)
         }
 
         Answer::Articles(e) => {
-            bound(e, out)?;
+            bound(e.as_of, e.as_known_on, out)?;
             for article in data(e) {
                 let label = article.label.as_deref().unwrap_or(&article.number);
                 write!(out, "{label}")?;
@@ -178,9 +175,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 out,
                 "{} ({}) -> {} ({})\n",
                 changes.from.version,
-                window(&changes.from.in_force),
+                window(changes.from.in_force.from, changes.from.in_force.until),
                 changes.to.version,
-                window(&changes.to.in_force)
+                window(changes.to.in_force.from, changes.to.in_force.until)
             )?;
 
             let s = &changes.summary;
@@ -389,21 +386,27 @@ fn data<T>(envelope: &Envelope<Vec<T>>) -> &[T] {
     envelope.data.as_deref().unwrap_or_default()
 }
 
-fn bound<T>(envelope: &Envelope<T>, out: &mut impl Write) -> io::Result<()> {
-    let (Some(date), Some(view)) = (envelope.as_of, envelope.view) else {
-        return Ok(());
-    };
-    let window = match view {
-        View::InForce => "as in force on",
-        View::AsKnown => "as the register showed on",
-    };
-    writeln!(out, "{window} {date}\n")
+/// The moment an answer is bound to, where it is bound to one.
+fn bound(
+    as_of: Option<NaiveDate>,
+    as_known_on: Option<NaiveDate>,
+    out: &mut impl Write,
+) -> io::Result<()> {
+    match (as_of, as_known_on) {
+        (Some(day), Some(read_on)) => writeln!(
+            out,
+            "as in force on {day}, as the register showed on {read_on}\n"
+        ),
+        (Some(day), None) => writeln!(out, "as in force on {day}\n"),
+        (None, Some(read_on)) => writeln!(out, "as the register showed on {read_on}\n"),
+        (None, None) => Ok(()),
+    }
 }
 
-fn window(w: &Window) -> String {
-    match w.until {
-        Some(until) => format!("{} to {until}", w.from),
-        None => format!("{} onwards", w.from),
+fn window(from: NaiveDate, until: Option<NaiveDate>) -> String {
+    match until {
+        Some(until) => format!("{from} to {until}"),
+        None => format!("{from} onwards"),
     }
 }
 
@@ -480,11 +483,6 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: this citation reads more than one way and every reading is answered: {}. \
                  Which was meant is yours to say.",
             readings.join(", "),
-        ),
-        Caveat::ReadingContradicted { reading, stated } => format!(
-            "note: the service said two things about the {reading} reading that cannot both be \
-                 true: {stated}. It is answered as though the text is not held, which is the \
-                 half that claims least."
         ),
         Caveat::ReadingUnresolved {
             reading,
@@ -599,10 +597,9 @@ fn caveat_line(caveat: &Caveat) -> String {
             line.push_str(" They are outside the counts above.");
             line
         }
-        Caveat::Unrecognised { stated } => format!(
-            "note: the service stated a limit this bron has no name for: {stated}. \
-                 Upgrade to read what it says."
-        ),
+        Caveat::Unrecognised { stated } => {
+            format!("note: the service stated a limit this bron has no sentence for: {stated}")
+        }
         Caveat::NoZichtWindow => {
             "note: the manifest carries no zicht dates, so this question cannot be \
                  answered against that window"
@@ -614,35 +611,41 @@ fn caveat_line(caveat: &Caveat) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bron::wire::{Cited, Envelope, Found, Lookup};
+    use bron::service::{Answered, Cited};
 
     use crate::run::Answer;
 
-    fn cited(reading: &str, held: bool, label: Option<&str>, caveats: Vec<Caveat>) -> Cited {
+    fn cited(
+        reading: &str,
+        held: bool,
+        label: Option<&str>,
+        caveats: Vec<serde_json::Value>,
+    ) -> Cited {
         Cited {
             reading: reading.into(),
             source: "wetgeving".into(),
-            law_id: "BWBR0005291".into(),
-            version: "2025-07-01_0".into(),
+            regulation_id: "BWBR0005291".into(),
+            expression: "2025-07-01_0".into(),
+            held,
             number: "305a".into(),
-            held: if held {
-                Held::Text {
-                    label: label.map(str::to_string),
-                    path: None,
-                    content_hash: "8fc1e1eb".into(),
-                }
-            } else {
-                Held::None
-            },
+            label: label.map(str::to_string),
+            path: None,
+            content_hash: held.then(|| "8fc1e1eb".into()),
             caveats,
         }
     }
 
     fn rendered(resolved: Vec<Cited>) -> String {
-        let answer = Answer::Found(Envelope::ok(Found::Lookup(Lookup {
-            citation: "3:305a".into(),
-            resolved,
-        })));
+        let answer = Answer::Found(Answered {
+            data: SearchData::Lookup {
+                citation: "3:305a".into(),
+                resolved,
+            },
+            caveats: Vec::new(),
+            as_of: None,
+            as_known_on: None,
+            envelope: String::new(),
+        });
 
         let mut out = Vec::new();
         answer.render(&mut out).unwrap();
@@ -658,7 +661,7 @@ mod tests {
             "book",
             true,
             Some("Artikel 305a"),
-            vec![Caveat::UpstreamDigestAbsent],
+            vec![serde_json::json!({"kind": "unverified"})],
         )]);
 
         let entry = text.lines().find(|l| l.starts_with("book")).unwrap();

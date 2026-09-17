@@ -12,7 +12,6 @@ use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use bron::sources::publications::Collection;
-use bron::wire::View;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -231,13 +230,12 @@ impl From<CollectionArg> for Collection {
 
 /// Which moment a question about legislation means.
 ///
-/// Two windows, two questions, and one flag cannot choose between them.
-/// Geldigheid says what applied, which is what you want to know about conduct
-/// in 2023. Zicht says what the register showed, which is what you want to know
-/// about what someone could have known then. They diverge the moment something
-/// is published with retroactive effect.
+/// Two windows, and a moment is a point in both. Geldigheid says what applied,
+/// which is what you want to know about conduct in 2023. Zicht says what the
+/// register showed, which is what you want to know about what someone could
+/// have known then. They diverge the moment something is published with
+/// retroactive effect, so a question may name a day in each.
 #[derive(Debug, Args)]
-#[group(multiple = false)]
 pub struct Moment {
     /// The text as it applied on this date (geldigheid).
     #[arg(long, value_name = "YYYY-MM-DD")]
@@ -249,15 +247,20 @@ pub struct Moment {
 }
 
 impl Moment {
-    /// Resolves once, at startup, so a run cannot straddle midnight by reading
-    /// the clock twice.
-    pub fn resolve(&self, today: NaiveDate) -> (NaiveDate, View) {
-        match (self.as_of, self.as_known_on) {
-            (_, Some(date)) => (date, View::AsKnown),
-            (Some(date), _) => (date, View::InForce),
-            // Unstated means now, and now means what is in force.
-            (None, None) => (today, View::InForce),
-        }
+    /// The two coordinates as the service is asked for them: the day the text
+    /// is for, and the day the register is read on where one was named.
+    ///
+    /// A zicht date alone names both: the text for a day, as the register had
+    /// it that day. Sent without the first, the service reads that coordinate
+    /// as today and resolves a rendition in force now, which for anything
+    /// amended since is none at all.
+    ///
+    /// `today` is read once, at startup, so a run cannot straddle midnight by
+    /// reading the clock twice.
+    pub fn coordinates(&self, today: NaiveDate) -> (NaiveDate, Option<NaiveDate>) {
+        let as_of = self.as_of.or(self.as_known_on).unwrap_or(today);
+
+        (as_of, self.as_known_on)
     }
 }
 
@@ -275,41 +278,41 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    fn moment(as_of: Option<&str>, as_known_on: Option<&str>) -> Moment {
+        Moment {
+            as_of: as_of.map(date),
+            as_known_on: as_known_on.map(date),
+        }
+    }
+
     #[test]
     fn an_unstated_moment_means_what_is_in_force_today() {
-        let moment = Moment {
-            as_of: None,
-            as_known_on: None,
-        };
         assert_eq!(
-            moment.resolve(date("2026-08-06")),
-            (date("2026-08-06"), View::InForce)
+            moment(None, None).coordinates(date("2026-08-06")),
+            (date("2026-08-06"), None)
         );
     }
 
     #[test]
-    fn as_of_and_as_known_on_select_different_windows() {
-        let in_force = Moment {
-            as_of: Some(date("2023-06-01")),
-            as_known_on: None,
-        };
-        assert_eq!(
-            in_force.resolve(date("2026-08-06")),
-            (date("2023-06-01"), View::InForce)
-        );
+    fn a_moment_is_a_point_in_both_windows() {
+        let today = date("2026-08-06");
 
-        let as_known = Moment {
-            as_of: None,
-            as_known_on: Some(date("2023-06-01")),
-        };
         assert_eq!(
-            as_known.resolve(date("2026-08-06")),
-            (date("2023-06-01"), View::AsKnown)
+            moment(Some("2023-06-01"), None).coordinates(today),
+            (date("2023-06-01"), None)
+        );
+        assert_eq!(
+            moment(None, Some("2023-06-01")).coordinates(today),
+            (date("2023-06-01"), Some(date("2023-06-01")))
+        );
+        assert_eq!(
+            moment(Some("2023-06-01"), Some("2024-01-01")).coordinates(today),
+            (date("2023-06-01"), Some(date("2024-01-01")))
         );
     }
 
     #[test]
-    fn the_two_moment_flags_cannot_be_combined() {
+    fn the_two_moment_flags_combine() {
         let result = Cli::try_parse_from([
             "bron",
             "law",
@@ -318,9 +321,9 @@ mod tests {
             "--as-of",
             "2023-06-01",
             "--as-known-on",
-            "2023-06-01",
+            "2024-01-01",
         ]);
-        assert!(result.is_err(), "one date cannot mean two windows at once");
+        assert!(result.is_ok(), "a moment is a point in both windows");
     }
 
     #[test]
