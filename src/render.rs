@@ -111,6 +111,51 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
             caveats(&a.caveats, out)
         }
 
+        Answer::Published(a) => {
+            if a.data.is_empty() {
+                writeln!(out, "The register published nothing in that window.")?;
+                return caveats(&a.caveats, out);
+            }
+
+            for rendition in &a.data {
+                let held = if rendition.held { "*" } else { " " };
+                writeln!(
+                    out,
+                    "{held} {}  {}  {}",
+                    rendition.regulation_id.as_deref().unwrap_or(""),
+                    rendition.label,
+                    window(rendition.in_force.from, rendition.in_force.until)
+                )?;
+            }
+
+            writeln!(out, "\n* = the service holds this text")?;
+            caveats(&a.caveats, out)
+        }
+
+        Answer::Feed(a) => {
+            for event in &a.data.events {
+                writeln!(
+                    out,
+                    "{:>8}  {:<12}{}  {}",
+                    event.seq,
+                    event.event,
+                    event.regulation_id,
+                    event.label.as_deref().unwrap_or("")
+                )?;
+            }
+
+            if a.data.events.is_empty() {
+                writeln!(out, "The register has done nothing since {}.", a.data.next)?;
+            }
+
+            // The cursor and the corpus it belongs to go to stderr, so a shell
+            // script reads events on stdout and takes its next cursor from
+            // --json, where both are fields rather than a sentence.
+            eprintln!("next {}  head {}  origin {}", a.data.next, a.data.head, a.data.origin);
+
+            caveats(&a.caveats, out)
+        }
+
         Answer::Versions(a) => {
             for version in &a.data {
                 let held = if version.held { "*" } else { " " };

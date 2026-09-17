@@ -29,7 +29,8 @@ use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, BlobProvenance, Expression, Paragraph, Regulation, Span, Window,
+    Article, Articles, Ask, BlobProvenance, Expression, Feed, Paragraph, Published, RegisterEvent,
+    Regulation, Span, Window,
 };
 pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -127,6 +128,60 @@ impl Service {
         let url = format!("{}/api/v1/regulations/{law}/expressions", self.base);
 
         self.read(client, client.get(&url))
+    }
+
+    /// Which renditions the register published inside a window, across laws.
+    ///
+    /// A window is required and both axes may be named at once. The service
+    /// defaults nothing to today, so a window that has not happened answers
+    /// empty rather than silently becoming a question about now.
+    pub fn published(&self, client: &Client, ask: &Published<'_>) -> Outcome<Answered<Vec<Expression>>> {
+        let url = format!("{}/api/v1/expressions", self.base);
+
+        let mut query = vec![("limit", ask.limit.to_string())];
+
+        for (name, day) in [
+            ("in_force_from", ask.from),
+            ("in_force_to", ask.to),
+            ("visible_from", ask.known_from),
+            ("visible_to", ask.known_to),
+        ] {
+            if let Some(day) = day {
+                query.push((name, day.to_string()));
+            }
+        }
+
+        if let Some(kind) = ask.kind {
+            query.push(("type", kind.to_string()));
+        }
+
+        if let Some(law) = ask.regulation {
+            query.push(("regulation", law.to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// What the register has done since a cursor.
+    pub fn feed(
+        &self,
+        client: &Client,
+        since: u64,
+        limit: u32,
+        regulation: Option<&BwbId>,
+    ) -> Outcome<Answered<Feed>> {
+        let url = format!("{}/api/v1/feed", self.base);
+
+        let mut query = vec![
+            ("since", since.to_string()),
+            ("limit", limit.to_string()),
+        ];
+
+        if let Some(law) = regulation {
+            query.push(("regulation", law.to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
     }
 
     /// The rendition a point in both windows resolves to, and its articles.

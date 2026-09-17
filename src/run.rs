@@ -29,6 +29,8 @@ pub enum Answer {
     LawHits(Answered<Vec<service::Regulation>>),
     Found(Answered<service::SearchData>),
     Versions(Answered<Vec<service::Expression>>),
+    Published(Answered<Vec<service::Expression>>),
+    Feed(Answered<service::Feed>),
     Changes(Envelope<Box<wire::Changes>>),
     Articles(Envelope<Vec<wire::Article>>),
     CaseHits(Envelope<Vec<wire::CaseHit>>),
@@ -54,6 +56,8 @@ impl Answer {
             Self::LawHits(a) => sent(out, &a.envelope),
             Self::Found(a) => sent(out, &a.envelope),
             Self::Versions(a) => sent(out, &a.envelope),
+            Self::Published(a) => sent(out, &a.envelope),
+            Self::Feed(a) => sent(out, &a.envelope),
             Self::Changes(e) => write(out, e),
             Self::Articles(e) => write(out, e),
             Self::CaseHits(e) => write(out, e),
@@ -332,6 +336,56 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
         Law::Versions { id } => service
             .expressions(&client, &parse_id(id)?)
             .map(Answer::Versions),
+
+        Law::Published {
+            from,
+            to,
+            known_from,
+            known_to,
+            kind,
+            regulation,
+            limit,
+        } => {
+            // Checked here rather than by clap, which can require a flag but
+            // cannot say that one of four is enough.
+            if from.is_none() && to.is_none() && known_from.is_none() && known_to.is_none() {
+                return Err(Fault::usage(
+                    "name a window: --from, --to, --known-from or --known-to".to_string(),
+                ));
+            }
+
+            ordered(*from, *to, "--from", "--to")?;
+            ordered(*known_from, *known_to, "--known-from", "--known-to")?;
+
+            let law = regulation.as_deref().map(parse_id).transpose()?;
+
+            service
+                .published(
+                    &client,
+                    &service::Published {
+                        from: *from,
+                        to: *to,
+                        known_from: *known_from,
+                        known_to: *known_to,
+                        kind: kind.as_deref(),
+                        regulation: law.as_ref(),
+                        limit: *limit,
+                    },
+                )
+                .map(Answer::Published)
+        }
+
+        Law::Feed {
+            since,
+            regulation,
+            limit,
+        } => {
+            let law = regulation.as_deref().map(parse_id).transpose()?;
+
+            service
+                .feed(&client, *since, *limit, law.as_ref())
+                .map(Answer::Feed)
+        }
 
         Law::Changes {
             id,
@@ -696,6 +750,21 @@ fn compared(expression: &service::Expression, blob: BlobId) -> wire::ComparedVer
         version: expression.label.clone(),
         in_force: expression.in_force.into(),
         blob,
+    }
+}
+
+/// A window that runs backwards is a request nobody meant to make.
+fn ordered(
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    from_flag: &str,
+    to_flag: &str,
+) -> Outcome<()> {
+    match (from, to) {
+        (Some(from), Some(to)) if from > to => Err(Fault::usage(format!(
+            "{from_flag} {from} is after {to_flag} {to}"
+        ))),
+        _ => Ok(()),
     }
 }
 

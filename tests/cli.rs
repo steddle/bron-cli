@@ -223,3 +223,124 @@ async fn a_person_reads_both_coordinates_the_service_bound_the_answer_to() {
     assert!(text.contains("2020-01-01"), "{text}");
     assert!(text.contains("Artikel 162"), "{text}");
 }
+
+/// A field and a caveat this build has no name for, on both new routes, so the
+/// pass-through is proved by what survives rather than by what is read.
+const PUBLISHED: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true,"later_field":9}],
+ "caveats":[{"kind":"something_later","window":50}]}"#;
+
+const FEED: &str = r#"{"bron":1,"grade":"authority",
+ "data":{"origin":"8539df1d82a7060824be7ba17f500781","head":41,"next":40,"events":[
+  {"seq":40,"event":"published","regulation_id":"BWBR0024282","label":"2026-07-01_0","in_force":{"from":"2026-07-01"},"withdrawn":false,"later_field":true}]},
+ "caveats":[{"kind":"truncated","window":1}]}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_prints_the_envelope_the_service_sent() {
+    let server = answering("GET", "/api/v1/expressions", PUBLISHED).await;
+
+    let output = bron(
+        &server,
+        &["--json", "law", "published", "--from", "2026-09-01"],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{PUBLISHED}\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_sends_both_windows_and_the_narrowing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/expressions"))
+        .and(query_param("in_force_from", "2026-01-01"))
+        .and(query_param("in_force_to", "2026-09-17"))
+        .and(query_param("visible_from", "2026-02-01"))
+        .and(query_param("visible_to", "2026-09-17"))
+        .and(query_param("type", "wet"))
+        .and(query_param("regulation", "BWBR0020368"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(PUBLISHED, "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "published",
+            "--from",
+            "2026-01-01",
+            "--to",
+            "2026-09-17",
+            "--known-from",
+            "2026-02-01",
+            "--known-to",
+            "2026-09-17",
+            "--type",
+            "wet",
+            "--regulation",
+            "BWBR0020368",
+        ],
+    )
+    .await;
+
+    // The mock answers only when every parameter arrived, so a success here is
+    // the assertion.
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout(&output).contains("BWBR0020368  2026-09-01_0"), "{output:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_refuses_a_window_that_names_nothing_or_runs_backwards() {
+    let server = answering("GET", "/api/v1/expressions", PUBLISHED).await;
+
+    let none = bron(&server, &["law", "published", "--type", "wet"]).await;
+    assert_eq!(none.status.code(), Some(1), "{none:?}");
+
+    let backwards = bron(
+        &server,
+        &["law", "published", "--from", "2026-09-01", "--to", "2026-01-01"],
+    )
+    .await;
+    assert_eq!(backwards.status.code(), Some(1), "{backwards:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_feed_prints_the_envelope_the_service_sent() {
+    let server = answering("GET", "/api/v1/feed", FEED).await;
+
+    let output = bron(&server, &["--json", "law", "feed", "--since", "0"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{FEED}\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_feed_puts_the_events_on_stdout_and_the_cursor_on_stderr() {
+    let server = answering("GET", "/api/v1/feed", FEED).await;
+
+    let output = bron(&server, &["law", "feed", "--since", "0"]).await;
+    let err = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout(&output).contains("published"), "{output:?}");
+    // A shell script reads rows on stdout; the cursor it stores is a field in
+    // --json and a sentence here, never mixed into the rows.
+    assert!(!stdout(&output).contains("origin"), "{output:?}");
+    assert!(err.contains("next 40"), "{err}");
+    assert!(err.contains("origin 8539df1d82a7060824be7ba17f500781"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_feed_walks_an_empty_answer_without_calling_it_a_failure() {
+    const QUIET: &str = r#"{"bron":1,"grade":"authority","data":{"origin":"a","head":7,"next":7,"events":[]}}"#;
+
+    let server = answering("GET", "/api/v1/feed", QUIET).await;
+
+    let output = bron(&server, &["law", "feed", "--since", "7"]).await;
+
+    // Nothing happened is an answer, not a not-found.
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout(&output).contains("has done nothing since 7"), "{output:?}");
+}

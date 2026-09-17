@@ -130,6 +130,64 @@ pub enum Law {
     /// Every published version of a law, with its validity windows.
     Versions { id: String },
 
+    /// Which renditions the register published in a window, across every law.
+    ///
+    /// A question about a period that has passed, and reproducible: the same
+    /// window answers the same renditions next year. It is the wrong command to
+    /// poll with. The publisher publishes retroactively, so a rendition that
+    /// arrives tomorrow can carry a date inside a window already read, and a
+    /// poller that walks windows never sees it. `law feed` misses nothing.
+    Published {
+        /// The first day of the window on geldigheid: what took effect on or after it.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        from: Option<NaiveDate>,
+
+        /// The last day of that window.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        to: Option<NaiveDate>,
+
+        /// The first day of the window on zicht: what the register began showing on or after it.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        known_from: Option<NaiveDate>,
+
+        /// The last day of that window.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        known_to: Option<NaiveDate>,
+
+        /// Only laws of this type, as the register spells it: wet, AMvB, zbo.
+        #[arg(long = "type", value_name = "TYPE")]
+        kind: Option<String>,
+
+        /// Only this law, by its BWB identifier.
+        #[arg(long)]
+        regulation: Option<String>,
+
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+
+    /// What the register has done since a cursor, in the order bron saw it.
+    ///
+    /// Not a window and not re-readable as one: the order is the order bron saw
+    /// things, which is not the order they took effect. It is the reading that
+    /// misses nothing, which is what a poller needs.
+    ///
+    /// The answer states `next`, the cursor to come back to, and `origin`, the
+    /// corpus that cursor belongs to. Keep both: an origin you do not recognise
+    /// means the corpus was rebuilt and the number means something else now.
+    Feed {
+        /// The cursor to walk from. 0 for the whole log.
+        #[arg(long)]
+        since: u64,
+
+        /// Only this law, by its BWB identifier.
+        #[arg(long)]
+        regulation: Option<String>,
+
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+    },
+
     /// What changed in a law between two dates.
     ///
     /// Articles are matched on upstream's own identity, so a renumbered article

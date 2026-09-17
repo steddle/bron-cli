@@ -7,6 +7,8 @@
 use chrono::NaiveDate;
 use serde::Deserialize;
 
+use crate::ids::BwbId;
+
 /// A validity window, either of the two.
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Window {
@@ -27,6 +29,10 @@ pub struct Regulation {
 /// One rendition, as the manifest describes it and the corpus holds it.
 #[derive(Debug, Deserialize)]
 pub struct Expression {
+    /// Stated on every rendition, so a row lifted out of a corpus-wide answer
+    /// keeps saying which regulation it belongs to.
+    #[serde(default)]
+    pub regulation_id: Option<String>,
     pub label: String,
     pub in_force: Window,
     /// Absent where the manifest carried no zicht dates, and never filled in
@@ -39,6 +45,37 @@ pub struct Expression {
     /// True where the service holds this rendition's text.
     pub held: bool,
     pub blob: Option<String>,
+}
+
+/// One thing the register did, in the order the corpus saw it.
+///
+/// `seq` is the cursor. There is no time here and there is not meant to be: the
+/// order says which came first, and a date would say when the service looked.
+#[derive(Debug, Deserialize)]
+pub struct RegisterEvent {
+    pub seq: u64,
+    pub event: String,
+    pub regulation_id: String,
+    /// Absent on an event about a regulation rather than one of its renditions.
+    pub label: Option<String>,
+    pub in_force: Option<Window>,
+    pub as_known: Option<Window>,
+    pub withdrawn: bool,
+}
+
+/// A page of the walk, with the cursor to come back to.
+#[derive(Debug, Deserialize)]
+pub struct Feed {
+    /// This corpus's own name for itself. Keep it beside the cursor: one you do
+    /// not recognise means the corpus was rebuilt and the number means something
+    /// else now.
+    pub origin: String,
+    /// The highest cursor the corpus holds.
+    pub head: u64,
+    /// Where to resume. The last row served where the page was cut, and the head
+    /// where it was not, so a walk never skips what a cut left behind.
+    pub next: u64,
+    pub events: Vec<RegisterEvent>,
 }
 
 /// What a rendition's articles resolved to.
@@ -114,6 +151,23 @@ pub struct Span {
 #[derive(Debug, Deserialize)]
 pub struct BlobProvenance {
     pub size: usize,
+}
+
+/// Which window of the register to ask about, and how to narrow it.
+///
+/// A window on either axis, or both. Geldigheid is what applied to conduct and
+/// zicht is what the register showed, so a rendition published with retroactive
+/// effect falls in one and not the other, and asking one is not asking both.
+#[derive(Debug)]
+pub struct Published<'a> {
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+    pub known_from: Option<NaiveDate>,
+    pub known_to: Option<NaiveDate>,
+    /// The register's own word for a kind of regulation: wet, AMvB, zbo.
+    pub kind: Option<&'a str>,
+    pub regulation: Option<&'a BwbId>,
+    pub limit: u32,
 }
 
 /// Which rendition a question is about, and how much of its text to send.
