@@ -12,7 +12,7 @@ description = "Dutch primary legal sources, quotable to the byte: wetgeving, rec
 repository = "https://github.com/steddle/bron-cli"
 readme = "README.md"
 keywords = ["law", "netherlands", "legal", "citation", "rechtspraak"]
-categories = ["command-line-utilities", "parser-implementations", "database"]
+categories = ["command-line-utilities", "parser-implementations"]
 license = "MIT"
 
 [dependencies]

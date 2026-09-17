@@ -5,9 +5,10 @@
 //! decisions and publications are hashed as they are read, so the digest
 //! travels with the answer and nothing is kept; wetgeving is read through
 //! [`service`], which resolves a date against every manifest the register
-//! publishes and names the blob its answer came out of. The point is not search. The point is that a claim made from bron
-//! can name the document and the characters it rests on, and that the same
-//! question asked twice gives the same answer.
+//! publishes and names the blob its answer came out of. The point is not
+//! search. The point is that a claim made from bron can name the document and
+//! the characters it rests on, and that the same question asked twice gives the
+//! same answer.
 //!
 //! Three rules run through the whole crate:
 //!

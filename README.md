@@ -147,7 +147,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## Credits
 
 - [Mischa Sigtermans](https://github.com/mischasigtermans)
-- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen), [de Rechtspraak](https://www.rechtspraak.nl) and the [Internet Archive](https://archive.org). bron fetches on your behalf and keeps none of it. The only material shipped here is the frozen responses under `tests/fixtures/` that the test suite parses; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
+- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen) and [de Rechtspraak](https://www.rechtspraak.nl). bron fetches on your behalf and keeps none of it. The only material shipped here is the frozen responses under `tests/fixtures/` that the test suite parses; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
 
 ## License
 

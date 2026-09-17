@@ -25,9 +25,9 @@ one budget, and the file is where they meet.
 ~/.bron/buckets/{key}.bucket
 ```
 
-Fixed, and deliberately not the platform data directory the corpus and the blob
-store use. Another language on this machine has to be able to find it without
-implementing per-platform directory rules.
+Fixed, and deliberately not the platform data directory, which moves between
+macOS and Linux. Another language on this machine has to be able to find it
+without implementing per-platform directory rules.
 
 `BRON_HOME` overrides the parent, which is how tests get their own budget.
 

@@ -260,7 +260,7 @@ async fn a_ranking_carries_the_limits_the_service_stated() {
 
 /// The service shares no rate-limit budget, so nothing writes a deadline for
 /// it. That leaves the delay it named as the only thing a caller can be told,
-/// and this lane has no publisher to fall back to while it waits.
+/// and the service is the only route this lane has while it waits.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refusal_from_the_service_says_how_long_it_asked_for() {
     let server = MockServer::start().await;

@@ -4,10 +4,10 @@
 //!
 //! **Which rendition a date resolves to is the service's answer.** It holds
 //! every manifest the register publishes, it knows which renditions the
-//! register has withdrawn, and it does that arithmetic once for everybody.
-//! bron used to do it a second time from a corpus of its own, and a second
-//! implementation of one rule is one that falls behind: the CLI went on
-//! choosing a withdrawn rendition for months after the service stopped.
+//! register has withdrawn, and it does that arithmetic once for everybody. A
+//! second implementation of one rule is the one that falls behind: a withdrawn
+//! rendition keeps its dates in the manifest, so a resolver that does not know
+//! it was withdrawn goes on choosing it.
 //!
 //! **Nothing has to be taken on trust.** Every answer names the blob it was
 //! read from, addressed by the hash of its own content, and the offsets of the
@@ -55,20 +55,19 @@ pub struct Service {
 impl Service {
     /// The service this invocation reads through.
     ///
-    /// Always one. An empty setting used to mean "turn this off", and there is
-    /// nothing left to turn it off in favour of: every lane either reads the
-    /// service or reads a publisher directly, and no lane does both. A setting
-    /// that names no service is refused rather than silently ignored, because
-    /// whoever wrote it meant something by it and is owed the news that it
-    /// cannot be done.
+    /// Always one. Every lane either reads the service or reads a publisher
+    /// directly, and no lane does both, so there is nothing an empty setting
+    /// could turn the service off in favour of. A setting that names no service
+    /// is refused rather than silently ignored, because whoever wrote it meant
+    /// something by it and is owed the news that it cannot be done.
     ///
     /// The refusal quotes what was set, and asks whether the value names a
     /// service rather than whether it survived normalising. `""`, `"/"` and
     /// `"/api/v1"` all normalise away to nothing, but `"example.com"` and
-    /// `"/some/path"` do not, and those two used to reach the first request and
-    /// fail there as `upstream`: a value the caller typed wrong, charged to the
-    /// service. One rule, an address with a scheme and a host, refuses all five
-    /// on the same sentence and at the caller's own exit code.
+    /// `"/some/path"` do not: carried to the first request they fail there as
+    /// `upstream`, a value the caller typed wrong charged to the service. One
+    /// rule, an address with a scheme and a host, refuses all five on the same
+    /// sentence and at the caller's own exit code.
     pub fn resolve() -> Outcome<Self> {
         let Ok(configured) = std::env::var(ENV) else {
             return Ok(Self::at(DEFAULT));
@@ -319,9 +318,9 @@ mod tests {
         );
     }
 
-    /// An empty setting used to turn the service off. There is nothing left to
-    /// turn it off in favour of, so it is refused rather than quietly read as
-    /// silence: whoever wrote it meant something by it.
+    /// An empty setting has nothing to turn the service off in favour of, so it
+    /// is refused rather than quietly read as silence: whoever wrote it meant
+    /// something by it.
     ///
     /// `/api/v1` and `/` are not empty and normalise away to nothing all the
     /// same, so the refusal quotes what was set rather than calling it empty.

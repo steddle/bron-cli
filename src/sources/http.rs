@@ -85,11 +85,10 @@ enum Reading {
     /// Neither of those, and none of the budget.
     ///
     /// An answer from the bron service is not evidence: no offset points into
-    /// it, no ledger row names it, and what it does point at is a blob already
-    /// addressed by the hash of itself. Freezing one would put a copy of every
-    /// answer ever read in a store that is deliberately never evicted, and a
-    /// question put to `bron find` travels in a POST body precisely so it does
-    /// not end up written down.
+    /// it, and what it does point at is a blob already addressed by the hash of
+    /// itself. Its digest would name nothing a reader could fetch again, and a
+    /// question put to `bron find` travels in a POST body precisely so that
+    /// nothing about it is written down.
     ///
     /// A failure arrives inside that answer rather than beside it, carrying the
     /// kind to branch on and the detail that says why, so refusing it on a
@@ -104,7 +103,7 @@ enum Reading {
     /// queueing behind a one-second bucket spends two seconds on a
     /// three-kilobyte article. The hold-off is the worse half: a deadline
     /// written for one unreachable host is shared by every process on the
-    /// machine, and this lane has no publisher left to fall back to.
+    /// machine, and the service is the only route this lane has.
     Envelope,
 }
 
@@ -214,8 +213,8 @@ impl Client {
             // Reported either way, and the delay the host named is reported
             // either way. Only a host that shares the budget has a deadline
             // written for it; the service refusing is this caller's problem and
-            // not every other process's, and this lane has no publisher to fall
-            // back to, so the one thing it can be told is how long to wait.
+            // not every other process's, and the service is the only route its
+            // lane has, so the one thing it can be told is how long to wait.
             match &bucket {
                 Some(bucket) => anyhow::bail!(
                     "{host} refused the request; holding off for {}s",

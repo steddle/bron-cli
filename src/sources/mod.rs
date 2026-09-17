@@ -19,13 +19,13 @@ use crate::blob::BlobId;
 use crate::ids::{Ecli, PublicationId};
 use crate::model::Relation;
 
-/// A document to parse, paired with everything needed to record where it came
+/// A document to parse, paired with everything needed to say where it came
 /// from.
 ///
-/// All four fields travel together because the provenance ledger needs the url
-/// and the length, and a parse boundary that drops them leaves no path able to
-/// write that ledger. Splitting the digest from the text is separately how
-/// offsets end up pointing at nothing.
+/// All four fields travel together because an answer's provenance states the
+/// digest, the url and the length, and a parse boundary that drops one leaves
+/// nothing able to state it. Splitting the digest from the text is separately
+/// how offsets end up pointing at nothing.
 #[derive(Debug, Clone, Copy)]
 pub struct Source<'a> {
     pub blob: BlobId,

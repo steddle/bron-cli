@@ -125,7 +125,7 @@ pub struct ErrorBody {
 
 /// A stated limit on what an answer supports.
 ///
-/// Most of these now arrive from the service, which is where the corpus and the
+/// Most of these arrive from the service, which is where the corpus and the
 /// arithmetic over it live. [`Caveat::stated`] is the one place that translates
 /// them, so a limit the service knows about and this crate does not is carried
 /// under its own name rather than dropped.
@@ -292,12 +292,10 @@ pub enum Caveat {
 
     /// The bytes beside each span are the service's word for what stands there.
     ///
-    /// bron used to cut them out of a document whose digest it had checked, and
-    /// refused outright a span that did not fit that document. It no longer
-    /// holds the document: checking this text means fetching the blob it came
-    /// out of, and not having to is the whole reason it travels. Being handed a
-    /// slice and having cut one are different facts, and only one of them is a
-    /// proof.
+    /// bron does not hold the document they were cut from: checking this text
+    /// means fetching the blob it came out of, and not having to is the whole
+    /// reason it travels. Being handed a slice and having cut one are different
+    /// facts, and only one of them is a proof.
     UnverifiedSlice,
 
     /// Articles a comparison could not place, and why.
@@ -528,12 +526,8 @@ impl Provenance {
 /// prove a quotation fetches those bytes and slices them at `start..end`.
 ///
 /// `text` is that slice, sent only when `--raw` asks for it, and it is the
-/// service's word for what stands there rather than a cut bron made. bron used
-/// to take the slice itself out of a document whose digest it had checked, and
-/// refused a span that did not fit. It no longer holds that document: checking
-/// this string means fetching the blob it came out of, and not having to is
-/// exactly why it travels. [`Caveat::UnverifiedSlice`] says so on any answer
-/// that carries one.
+/// service's word for what stands there rather than a cut bron made.
+/// [`Caveat::UnverifiedSlice`] says so on any answer that carries one.
 #[derive(Debug, Clone, Serialize)]
 pub struct Excerpt {
     pub start: u32,
@@ -583,7 +577,7 @@ pub struct VersionSummary {
     pub upstream_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub byte_len: Option<u64>,
-    /// True when this version's text is already stored locally.
+    /// True when the service holds this version's text.
     pub held: bool,
 }
 
@@ -602,8 +596,9 @@ pub struct Article {
     pub content: String,
     pub excerpt: Excerpt,
     pub leden: Vec<Lid>,
-    /// The publication that produced this text, e.g. `stb-2023-41`. Fetch it
-    /// with `bron publication show` to read the transitional provisions.
+    /// The publication that produced this text, e.g. `stb-2023-41`, which is
+    /// where the transitional provisions are. `bron publication show` names its
+    /// document and where those bytes are served.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amended_by: Option<String>,
     /// What that publication did, in upstream's own words.
@@ -1006,8 +1001,6 @@ impl From<model::PublicationHit> for PublicationHit {
         }
     }
 }
-
-// -- housekeeping --------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

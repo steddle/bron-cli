@@ -138,11 +138,9 @@ fn narrow(
             lid.content = line.to_string();
         }
 
-        // The answer is now about a lid, so everything that says what it points
-        // at has to be the lid's. Dutch practice cites 'art. 6:162 lid 2 BW',
-        // and an answer to that which reports the article's byte range is one
-        // level coarser than the claim it is supporting. The offsets were
-        // measured and stored per lid; only the reporting threw them away.
+        // The answer is about a lid, so everything that says what it points at
+        // has to be the lid's: 'art. 6:162 lid 2 BW' is not supported by the
+        // article's byte range.
         article.content = lid.content.clone();
         article.excerpt = lid.excerpt.clone();
         article.jci = lid.jci.clone();
