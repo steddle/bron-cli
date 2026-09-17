@@ -243,6 +243,13 @@ pub enum Caveat {
     /// about the difference: 'nobody vouched for this' is not 'the voucher and
     /// the bytes do not match'.
     UpstreamDigestAbsent,
+    /// The cursor a walk asked from is past everything the service holds.
+    ///
+    /// A walk that finds nothing and a cursor that belongs to another corpus
+    /// answer alike without this: both are an empty list. Only one of them
+    /// means the caller should throw its cursor away and start again from the
+    /// head, which is why `origin` travels beside it.
+    CursorAhead { asked: u64, head: u64 },
     /// The manifest carried no zicht dates, so no as-known-on query can be
     /// answered for this version.
     NoZichtWindow,
@@ -332,6 +339,10 @@ impl Caveat {
             },
             Unverified,
             HashDisagrees,
+            CursorAhead {
+                asked: u64,
+                head: u64,
+            },
             Truncated {
                 window: u32,
             },
@@ -388,6 +399,7 @@ impl Caveat {
             Ok(Stated::SupersededKnowledge { visible_until }) => {
                 Self::SupersededKnowledge { visible_until }
             }
+            Ok(Stated::CursorAhead { asked, head }) => Self::CursorAhead { asked, head },
             Ok(Stated::Unverified) => Self::UpstreamDigestAbsent,
             Ok(Stated::HashDisagrees) => Self::UpstreamDigestDiffers,
             Ok(Stated::Truncated { window }) => Self::Truncated { window },

@@ -83,11 +83,38 @@ $ bron case appeal ECLI:NL:HR:2019:1278
 no published successor known, as of 2026-08-20
 ```
 
+Those two read one law. Two more read the register as a whole, and the
+difference between them is why there are two:
+
+```
+$ bron law published --from 2026-09-01 --type wet
+* BWBR0020368  2026-09-01_0  2026-09-01 onwards
+* BWBR0006622  2026-09-01_0  2026-09-01 onwards
+  BWBR0032573  2026-09-01_0  2026-09-01 onwards
+
+* = the service holds this text
+
+$ bron law feed --since 40122
+   40123  published   BWBR0024282  2026-07-01_0
+   40124  rewritten   BWBR0005289  2002-04-12_0
+next 40124  head 40124  origin 8539df1d82a7060824be7ba17f500781
+```
+
+`law published` names a window and answers what the register brought into force
+inside it. Reproducible, and the wrong command to poll with: the publisher
+publishes retroactively, so a rendition arriving tomorrow can carry a date
+inside a window you already read. `law feed` walks a cursor in the order the
+service recorded things and misses nothing. Keep `next` and `origin` together:
+an origin you do not recognise means the corpus was rebuilt and the number
+means something else now. Both go to stderr, so a script reads rows on stdout
+and takes its cursor from `--json`. An empty walk exits 0, because nothing
+happened is an answer.
+
 `--as-of` asks what was in force. `--as-known-on` asks what the register showed, which becomes a different question the moment something is published with retroactive effect. A moment is a point in both windows, so the two combine: `--as-of 2019-06-01 --as-known-on 2020-01-01` is the text for conduct in June 2019 as the register had it on New Year's Day. `--as-known-on` alone names that day for both.
 
 ## Machine use
 
-Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search` and `law versions` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state.
+Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law published` and `law feed` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state.
 
 ```
 $ bron --json find 6:162 BW

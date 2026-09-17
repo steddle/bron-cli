@@ -516,6 +516,11 @@ fn caveat_line(caveat: &Caveat) -> String {
             articles.join(", "),
             cell_separator.trim(),
         ),
+        Caveat::CursorAhead { asked, head } => format!(
+            "note: cursor {asked} is past everything the service holds, which ends at {head}. \
+                 That is not a quiet register: the cursor belongs to another deployment, or to \
+                 this one before it was rebuilt. Start again from the head."
+        ),
         Caveat::UpstreamDigestDiffers => {
             "note: the bytes behind this answer do not match the digest the publisher's \
                  manifest states for them. The register is inconsistent about what it hashes, \

@@ -344,3 +344,18 @@ async fn law_feed_walks_an_empty_answer_without_calling_it_a_failure() {
     assert!(output.status.success(), "{output:?}");
     assert!(stdout(&output).contains("has done nothing since 7"), "{output:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_feed_says_in_words_that_a_cursor_belongs_to_another_corpus() {
+    const AHEAD: &str = r#"{"bron":1,"grade":"authority","data":{"origin":"a","head":7,"next":900,"events":[]},
+ "caveats":[{"kind":"cursor_ahead","asked":900,"head":7}]}"#;
+
+    let server = answering("GET", "/api/v1/feed", AHEAD).await;
+
+    let output = bron(&server, &["law", "feed", "--since", "900"]).await;
+
+    // The one caveat a poller most needs in plain words: throw the cursor away.
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout(&output).contains("Start again from the head"), "{output:?}");
+    assert!(!stdout(&output).contains("no sentence for"), "{output:?}");
+}
