@@ -701,7 +701,10 @@ pub struct Changes {
     pub from: ComparedVersion,
     pub to: ComparedVersion,
     pub articles: Vec<ArticleChange>,
-    /// Counts per outcome, so a caller can size the answer before reading it.
+    /// Counts per outcome over the articles asked about, so a caller can size
+    /// the answer before reading it: every article compared, or with
+    /// `--article` those bearing that number. Unchanged articles are counted
+    /// whether or not `--all` lists them.
     pub summary: ChangeSummary,
 }
 

@@ -420,6 +420,23 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
 
             let before = earlier.data;
             let after = later.data;
+
+            // Read off both renditions rather than off the comparison, which
+            // leaves out articles it cannot place and would call one of those
+            // absent.
+            if let Some(number) = wanted.as_deref()
+                && !before
+                    .articles
+                    .iter()
+                    .chain(&after.articles)
+                    .any(|article| article.number == number)
+            {
+                return Err(Fault::not_found(
+                    "article",
+                    format!("{number} in either rendition of {law}"),
+                ));
+            }
+
             let before_provenance = provenance(&client, service, &law, &before.expression)?;
             let after_provenance = provenance(&client, service, &law, &after.expression)?;
 
@@ -441,6 +458,15 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             let mut articles = Vec::new();
 
             for change in comparison.changes {
+                // Before the count, so the summary is of the articles asked
+                // about and not of the whole regulation.
+                if wanted
+                    .as_deref()
+                    .is_some_and(|number| change.number != number)
+                {
+                    continue;
+                }
+
                 match change.change {
                     diff::Change::Unchanged => summary.unchanged += 1,
                     diff::Change::Amended => summary.amended += 1,
@@ -450,12 +476,6 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 }
 
                 if !*all && !change.change.is_change() {
-                    continue;
-                }
-                if wanted
-                    .as_deref()
-                    .is_some_and(|number| change.number != number)
-                {
                     continue;
                 }
 

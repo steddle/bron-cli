@@ -822,3 +822,181 @@ async fn help_asked_for_under_json_is_still_help() {
     assert!(stdout(&output).contains("--since"), "{output:?}");
 }
 
+/// Two articles per rendition: 1 amended between them, 2 left alone.
+fn two_articles_of(as_of: &str, label: &str, blob: &str, first: &str) -> String {
+    let article = |number: &str, stam: &str, text: &str| {
+        serde_json::json!({
+            "number": number,
+            "label": format!("Artikel {number}"),
+            "stam_id": stam,
+            "span": {"start": 10, "end": 90},
+            "paragraphs": [{"number": "1", "rendered": text, "span": {"start": 20, "end": 80}}],
+        })
+    };
+
+    serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": as_of,
+        "data": {
+            "regulation_id": "BWBR0008691",
+            "expression": {
+                "label": label,
+                "in_force": {"from": &label[..10]},
+                "held": true,
+                "blob": blob,
+            },
+            "articles": [
+                article("1", "2760033", first),
+                article("2", "2760034", "Ongewijzigd."),
+            ],
+        },
+    })
+    .to_string()
+}
+
+async fn holding_two_articles(
+    server: &MockServer,
+    as_of: &str,
+    label: &str,
+    blob: &str,
+    first: &str,
+) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0008691/articles"))
+        .and(query_param("as_of", as_of))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            two_articles_of(as_of, label, blob, first),
+            "application/json",
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{blob}/provenance")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
+            "application/json",
+        ))
+        .mount(server)
+        .await;
+}
+
+/// The summary counts what was asked about. With `--article` that is the
+/// articles bearing that number, so an unchanged article elsewhere in the law
+/// is not counted into an answer about article 1.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_counts_only_the_article_asked_for() {
+    let server = MockServer::start().await;
+    holding_two_articles(
+        &server,
+        "2018-01-01",
+        "2016-07-01_0",
+        EARLIER_BLOB,
+        "Eerste lid.",
+    )
+    .await;
+    holding_two_articles(
+        &server,
+        "2019-01-01",
+        "2019-01-01_0",
+        LATER_BLOB,
+        "Eerste lid, gewijzigd.",
+    )
+    .await;
+
+    let changes = |article: &'static str| {
+        let server = &server;
+        async move {
+            let mut args = vec![
+                "--json",
+                "law",
+                "changes",
+                "BWBR0008691",
+                "--from",
+                "2018-01-01",
+                "--to",
+                "2019-01-01",
+            ];
+            args.extend(["--article", article]);
+            let output = bron(server, &args).await;
+            assert!(output.status.success(), "{output:?}");
+            serde_json::from_str::<serde_json::Value>(&stdout(&output)).unwrap()["data"]["summary"]
+                .clone()
+        }
+    };
+
+    assert_eq!(
+        changes("1").await,
+        serde_json::json!({"unchanged": 0, "amended": 1, "added": 0, "repealed": 0, "withdrawn": 0})
+    );
+    assert_eq!(
+        changes("2").await,
+        serde_json::json!({"unchanged": 1, "amended": 0, "added": 0, "repealed": 0, "withdrawn": 0})
+    );
+
+    let human = bron(
+        &server,
+        &[
+            "law",
+            "changes",
+            "BWBR0008691",
+            "--from",
+            "2018-01-01",
+            "--to",
+            "2019-01-01",
+            "--article",
+            "1",
+        ],
+    )
+    .await;
+    assert!(
+        stdout(&human).contains("1 amended, 0 added, 0 repealed, 0 withdrawn, 0 unchanged"),
+        "{human:?}"
+    );
+}
+
+/// A number that names no article on either side is no such thing, as a lid
+/// that is not there is: an all-zero summary would read as 'nothing changed'.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_for_an_article_in_neither_rendition_is_not_found() {
+    let server = MockServer::start().await;
+    holding_two_articles(
+        &server,
+        "2018-01-01",
+        "2016-07-01_0",
+        EARLIER_BLOB,
+        "Eerste lid.",
+    )
+    .await;
+    holding_two_articles(
+        &server,
+        "2019-01-01",
+        "2019-01-01_0",
+        LATER_BLOB,
+        "Eerste lid, gewijzigd.",
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "changes",
+            "BWBR0008691",
+            "--from",
+            "2018-01-01",
+            "--to",
+            "2019-01-01",
+            "--article",
+            "9",
+        ],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "not_found");
+    assert!(envelope["error"].get("code").is_none(), "{envelope}");
+}
+
