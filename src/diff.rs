@@ -6,9 +6,9 @@
 //! identity rather than a guess.
 //!
 //! [`Article`] is this module's own shape rather than the one the service
-//! sends. The rule that decides what changed must not move when the wire does,
-//! and `content` is what bron prints rather than a field that happens to sit on
-//! a transport type.
+//! sends. The rule that decides what changed must not move when the wire does.
+//! It is the service's rule for `/changes`, `ArticleText::differs`: the title,
+//! and the leden that carry text as number and words in order.
 //!
 //! Nothing that cannot be matched is quietly dropped. An article with no
 //! identity, and a stam-id the register used twice inside one rendition, are
@@ -30,8 +30,10 @@ pub struct Article {
     pub number: String,
     pub label: Option<String>,
     pub path: Option<String>,
-    /// What bron prints for this article.
-    pub content: String,
+    pub title: Option<String>,
+    /// The leden that carry text, in order. An empty lid says nothing, and a
+    /// repealed article is one.
+    pub leden: Vec<Lid>,
     /// Upstream's vocabulary, unmapped: `nieuwe-regeling`, `wijziging`,
     /// `nieuw`, `vervallen`.
     pub effect: Option<String>,
@@ -40,11 +42,23 @@ pub struct Article {
     pub status: Option<String>,
 }
 
+/// One lid, as a comparison reads it.
+///
+/// Compared one by one rather than joined into one string: a lid holding its
+/// own newline would join to the same text as two leden, and a renumbered lid
+/// with the same words would not move a string that carries no numbers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lid {
+    pub number: Option<String>,
+    pub text: String,
+}
+
 /// What happened to one article between two renditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Change {
     Unchanged,
-    /// The text differs.
+    /// The title differs, or the leden that carry text differ in number or
+    /// words.
     Amended,
     /// The words stay and the status goes from `nogniet` to `goed`: the
     /// provision started to apply. Changed words are [`Change::Amended`]
@@ -178,7 +192,11 @@ pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
                 Change::Repealed
             }
 
-            Some(previous) if previous.content != article.content => Change::Amended,
+            Some(previous)
+                if previous.title != article.title || previous.leden != article.leden =>
+            {
+                Change::Amended
+            }
             Some(previous)
                 if previous.status.as_deref() == Some("nogniet")
                     && article.status.as_deref() == Some("goed") =>
@@ -267,10 +285,61 @@ mod tests {
             number: number.into(),
             label: Some(format!("Artikel {number}")),
             path: Some(format!("/Boek6/Artikel{number}")),
-            content: text.into(),
+            title: None,
+            leden: if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![Lid {
+                    number: None,
+                    text: text.into(),
+                }]
+            },
             effect: Some(effect.into()),
             status: None,
         }
+    }
+
+    fn lid(number: Option<&str>, text: &str) -> Lid {
+        Lid {
+            number: number.map(str::to_string),
+            text: text.into(),
+        }
+    }
+
+    /// The service reads a changed title as an amendment, and one comparison
+    /// rule on both sides of the wire is what keeps the two counts equal.
+    #[test]
+    fn a_changed_title_is_an_amendment() {
+        let mut before = article("2", "2", "Dezelfde woorden.", "wijziging");
+        let mut after = before.clone();
+        before.title = Some("Oude opschrift".into());
+        after.title = Some("Nieuw opschrift".into());
+
+        assert_eq!(changed(&compare(&[before], &[after]), "2"), Change::Amended);
+    }
+
+    /// The same words under another lid number say something else about which
+    /// rule is which.
+    #[test]
+    fn a_renumbered_lid_is_an_amendment() {
+        let mut before = article("2", "2", "", "wijziging");
+        let mut after = before.clone();
+        before.leden = vec![lid(Some("1"), "Dezelfde woorden.")];
+        after.leden = vec![lid(Some("2"), "Dezelfde woorden.")];
+
+        assert_eq!(changed(&compare(&[before], &[after]), "2"), Change::Amended);
+    }
+
+    /// Leden are compared one by one. Joined into one string, a lid holding
+    /// its own newline reads the same as two leden, and 11% of leden hold one.
+    #[test]
+    fn one_lid_is_not_two_leden_that_join_to_the_same_text() {
+        let mut before = article("2", "2", "", "wijziging");
+        let mut after = before.clone();
+        before.leden = vec![lid(None, "Eerste.\n2. Tweede.")];
+        after.leden = vec![lid(None, "Eerste."), lid(Some("2"), "Tweede.")];
+
+        assert_eq!(changed(&compare(&[before], &[after]), "2"), Change::Amended);
     }
 
     fn changed(comparison: &Comparison, number: &str) -> Change {
@@ -383,8 +452,14 @@ mod tests {
         let comparison = compare(&before, &after);
         let amended = &comparison.changes[0];
 
-        assert_eq!(before[amended.before.unwrap()].content, "De oude tekst.");
-        assert_eq!(after[amended.after.unwrap()].content, "De nieuwe tekst.");
+        assert_eq!(
+            before[amended.before.unwrap()].leden[0].text,
+            "De oude tekst."
+        );
+        assert_eq!(
+            after[amended.after.unwrap()].leden[0].text,
+            "De nieuwe tekst."
+        );
     }
 
     #[test]

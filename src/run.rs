@@ -277,7 +277,13 @@ fn compared_article(article: &service::Article) -> diff::Article {
         number: article.number.clone(),
         label: article.label.clone(),
         path: article.path.clone(),
-        content: content(article),
+        title: article.title.clone(),
+        leden: leden(article)
+            .map(|paragraph| diff::Lid {
+                number: paragraph.number.clone(),
+                text: paragraph.text().to_string(),
+            })
+            .collect(),
         effect: article.effect.clone(),
         status: article.status.clone(),
     }
@@ -803,7 +809,7 @@ fn client(quiet: bool) -> Outcome<Client> {
 
 #[cfg(test)]
 mod reading_tests {
-    use super::{compared_article, content, leden};
+    use super::{compared_article, content, diff, leden};
     use bron::service::{Article, Paragraph, Span};
 
     fn paragraph(number: Option<&str>, text: &str) -> Paragraph {
@@ -866,17 +872,26 @@ mod reading_tests {
         assert_eq!(content(&repealed), "");
     }
 
-    /// A comparison is made over what bron prints, and what bron prints opens
-    /// each lid with its number. Two renditions that renumber a lid say
-    /// different things about which rule is which, and comparing the service's
-    /// unnumbered text alone would call that unchanged.
+    /// A comparison reads what the service's reads: the title, and each lid
+    /// that carries text as its number and its words, in order. An empty lid
+    /// says nothing and is left out.
     #[test]
-    fn a_comparison_reads_the_text_bron_prints() {
-        let numbered = |number: &str| article(vec![paragraph(Some(number), "Dezelfde woorden.")]);
+    fn a_comparison_reads_the_title_and_every_lid_that_carries_text() {
+        let mut titled = article(vec![
+            paragraph(Some("1"), "Eerste lid."),
+            paragraph(Some("2"), ""),
+        ]);
+        titled.title = Some("Opschrift".into());
 
-        assert_ne!(
-            compared_article(&numbered("1")).content,
-            compared_article(&numbered("2")).content
+        let compared = compared_article(&titled);
+
+        assert_eq!(compared.title.as_deref(), Some("Opschrift"));
+        assert_eq!(
+            compared.leden,
+            vec![diff::Lid {
+                number: Some("1".into()),
+                text: "Eerste lid.".into(),
+            }]
         );
     }
 }
