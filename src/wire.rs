@@ -214,9 +214,10 @@ pub enum Caveat {
     },
     /// An article in this answer has not commenced.
     ///
-    /// The register publishes the text such a provision will have, with
-    /// `status` `nogniet`, and bron answers with that text: read without this
-    /// it is a rule that does not yet apply, quoted as though it did.
+    /// Such a provision carries `status` `nogniet`, and its text is what the
+    /// rendition prints for it: the register's stub, as BW Boek 6 artikel 119b
+    /// has, or the settled text, as the Wft's 38 have. Settled text read
+    /// without this is a rule that does not yet apply, quoted as though it did.
     NotCommenced { articles: Vec<String> },
     /// An article in this answer prints an image, and bron holds no images.
     ///

@@ -1105,7 +1105,9 @@ async fn a_provision_not_yet_applied_is_not_said_to_be_in_force() {
     assert!(output.status.success(), "{output:?}");
     assert!(!text.contains("in force on"), "{text}");
     assert!(!text.contains("in force through"), "{text}");
-    assert!(!text.to_lowercase().contains("stub"), "{text}");
+    // The rendition prints a stub or the settled text, and the answer claims
+    // neither.
+    assert!(!text.contains("will have"), "{text}");
     assert!(text.contains("not yet applied"), "{text}");
     assert!(text.contains("applies from 2027-01-01"), "{text}");
     assert!(text.contains("stb-2026-219"), "{text}");

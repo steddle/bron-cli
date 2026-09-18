@@ -637,8 +637,9 @@ fn caveat_line(caveat: &Caveat) -> String {
              identifier.",
         ),
         Caveat::NotCommenced { articles } => format!(
-            "note: article(s) {} have not commenced. The register publishes the text they \
-                 will have, and it does not apply yet.",
+            "note: article(s) {} have not commenced and do not apply yet. Each is shown as \
+                 the rendition prints it, the stub or the settled text, with the day it applies \
+                 where the register states one.",
             articles.join(", "),
         ),
         Caveat::IllustrationOmitted { articles } => format!(
@@ -864,6 +865,21 @@ mod tests {
         assert!(note.contains("3:305a"), "{note}");
         assert!(note.contains("name_not_stated"), "{note}");
         assert!(note.contains("not the article"), "{note}");
+    }
+
+    /// A rendition prints a provision not yet applied as a stub or as its
+    /// settled text, and the note claims neither: it says the text is the
+    /// rendition's, whichever it printed.
+    #[test]
+    fn the_note_on_a_provision_not_yet_applied_claims_no_one_kind_of_text() {
+        let note = caveat_line(&Caveat::NotCommenced {
+            articles: vec!["119b".into()],
+        });
+
+        assert!(note.contains("119b"), "{note}");
+        assert!(note.contains("do not apply yet"), "{note}");
+        assert!(note.contains("as the rendition prints"), "{note}");
+        assert!(!note.contains("will have"), "{note}");
     }
 
     #[test]
