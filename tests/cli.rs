@@ -649,3 +649,35 @@ async fn a_number_naming_two_articles_is_said_once() {
     assert_eq!(envelope["data"].as_array().map(Vec::len), Some(2));
     assert_eq!(envelope["caveats"], serde_json::json!([stated]));
 }
+
+/// Two renditions as the service lists them, newest first.
+const NEWEST_FIRST: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true},
+         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true}]}"#;
+
+/// The order of a list of renditions is the service's, and every channel shows
+/// the one it sends. bron prints rows as they arrive and sorts nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn renditions_are_printed_in_the_order_the_service_sent_them() {
+    for (route, args) in [
+        (
+            "/api/v1/regulations/BWBR0008691/expressions",
+            &["law", "versions", "BWBR0008691"][..],
+        ),
+        (
+            "/api/v1/expressions",
+            &["law", "published", "--from", "2016-01-01"][..],
+        ),
+    ] {
+        let server = answering("GET", route, NEWEST_FIRST).await;
+
+        let output = bron(&server, args).await;
+        assert!(output.status.success(), "{args:?}: {output:?}");
+
+        let text = stdout(&output);
+        let newer = text.find("2019-01-01_0");
+        let older = text.find("2016-07-01_0");
+        assert!(newer.is_some() && older.is_some(), "{args:?}: {output:?}");
+        assert!(newer < older, "{args:?}: {output:?}");
+    }
+}
