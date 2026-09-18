@@ -288,7 +288,10 @@ async fn law_published_sends_both_windows_and_the_narrowing() {
     // The mock answers only when every parameter arrived, so a success here is
     // the assertion.
     assert!(output.status.success(), "{output:?}");
-    assert!(stdout(&output).contains("BWBR0020368  2026-09-01_0"), "{output:?}");
+    assert!(
+        stdout(&output).contains("BWBR0020368  2026-09-01_0"),
+        "{output:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -300,7 +303,14 @@ async fn law_published_refuses_a_window_that_names_nothing_or_runs_backwards() {
 
     let backwards = bron(
         &server,
-        &["law", "published", "--from", "2026-09-01", "--to", "2026-01-01"],
+        &[
+            "law",
+            "published",
+            "--from",
+            "2026-09-01",
+            "--to",
+            "2026-01-01",
+        ],
     )
     .await;
     assert_eq!(backwards.status.code(), Some(1), "{backwards:?}");
@@ -329,12 +339,16 @@ async fn law_feed_puts_the_events_on_stdout_and_the_cursor_on_stderr() {
     // --json and a sentence here, never mixed into the rows.
     assert!(!stdout(&output).contains("origin"), "{output:?}");
     assert!(err.contains("next 40"), "{err}");
-    assert!(err.contains("origin 8539df1d82a7060824be7ba17f500781"), "{err}");
+    assert!(
+        err.contains("origin 8539df1d82a7060824be7ba17f500781"),
+        "{err}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn law_feed_walks_an_empty_answer_without_calling_it_a_failure() {
-    const QUIET: &str = r#"{"bron":1,"grade":"authority","data":{"origin":"a","head":7,"next":7,"events":[]}}"#;
+    const QUIET: &str =
+        r#"{"bron":1,"grade":"authority","data":{"origin":"a","head":7,"next":7,"events":[]}}"#;
 
     let server = answering("GET", "/api/v1/feed", QUIET).await;
 
@@ -342,7 +356,10 @@ async fn law_feed_walks_an_empty_answer_without_calling_it_a_failure() {
 
     // Nothing happened is an answer, not a not-found.
     assert!(output.status.success(), "{output:?}");
-    assert!(stdout(&output).contains("has done nothing since 7"), "{output:?}");
+    assert!(
+        stdout(&output).contains("has done nothing since 7"),
+        "{output:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -356,7 +373,10 @@ async fn law_feed_says_in_words_that_a_cursor_belongs_to_another_corpus() {
 
     // The one caveat a poller most needs in plain words: throw the cursor away.
     assert!(output.status.success(), "{output:?}");
-    assert!(stdout(&output).contains("Start again from the head"), "{output:?}");
+    assert!(
+        stdout(&output).contains("Start again from the head"),
+        "{output:?}"
+    );
     assert!(!stdout(&output).contains("no sentence for"), "{output:?}");
 }
 
@@ -374,11 +394,7 @@ async fn law_show_asks_for_what_is_published_and_not_in_force() {
         .mount(&server)
         .await;
 
-    let output = bron(
-        &server,
-        &["law", "show", "BWBR0020368", "--not-commenced"],
-    )
-    .await;
+    let output = bron(&server, &["law", "show", "BWBR0020368", "--not-commenced"]).await;
 
     // The mock answers only when the flag reached the service, and a law with
     // nothing coming is a not-found rather than an empty answer.

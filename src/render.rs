@@ -154,7 +154,10 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
             // The cursor and the corpus it belongs to go to stderr, so a shell
             // script reads events on stdout and takes its next cursor from
             // --json, where both are fields rather than a sentence.
-            eprintln!("next {}  head {}  origin {}", a.data.next, a.data.head, a.data.origin);
+            eprintln!(
+                "next {}  head {}  origin {}",
+                a.data.next, a.data.head, a.data.origin
+            );
 
             caveats(&a.caveats, out)
         }
