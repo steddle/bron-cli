@@ -1000,3 +1000,37 @@ async fn law_changes_for_an_article_in_neither_rendition_is_not_found() {
     assert!(envelope["error"].get("code").is_none(), "{envelope}");
 }
 
+/// A 503 is read off the status: `upstream`, with the delay the service named.
+/// The body is not read, so its `code` stays the service's, as the contract
+/// states for every 429 and 503.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_service_unable_to_fetch_is_upstream_with_its_delay() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0008691/articles"))
+        .respond_with(
+            ResponseTemplate::new(503)
+                .insert_header("Retry-After", "60")
+                .set_body_raw(
+                    r#"{"bron":1,"grade":"authority","error":{"kind":"source","code":"source_unavailable","message":"the register did not serve 2016-07-01_0","detail":[]}}"#,
+                    "application/json",
+                ),
+        )
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "law", "show", "BWBR0008691"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "upstream");
+    assert!(envelope["error"].get("code").is_none(), "{envelope}");
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("60s"),
+        "{envelope}"
+    );
+}
+
