@@ -120,9 +120,9 @@ pub struct ErrorBody {
 /// A stated limit on what an answer supports.
 ///
 /// Most of these arrive from the service, which is where the corpus and the
-/// arithmetic over it live. [`Caveat::stated`] is the one place that translates
-/// them, so a limit the service knows about and this crate does not is carried
-/// under its own name rather than dropped.
+/// arithmetic over it live. Both halves state one vocabulary, so a limit keeps
+/// its name through [`Caveat::stated`], and one the service knows about and
+/// this crate does not is carried whole rather than dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Caveat {
@@ -221,8 +221,9 @@ pub enum Caveat {
     /// never says what to do with them. Silence there reads as a complete
     /// provision.
     IllustrationOmitted { articles: Vec<String> },
-    /// The bytes this answer quotes are not the bytes the publisher's manifest
-    /// describes.
+    /// The held bytes do not hash to the SHA-512 the publisher's manifest
+    /// states, and the manifest states the same hash it stated when they were
+    /// fetched.
     ///
     /// Deliberately not fatal. The register disagrees with itself in the wild:
     /// for a large share of renditions the manifest's hash and size describe a
@@ -232,17 +233,26 @@ pub enum Caveat {
     /// over. So the text is answered and the disagreement is stated, which
     /// leaves the reader to decide what it is worth.
     ///
-    /// Neither digest travels. The comparison is the service's, made against
-    /// bytes it holds, and printing two hashes here would read as bron having
-    /// hashed something.
-    UpstreamDigestDiffers,
+    /// The publisher's hash does not travel. The comparison is the service's,
+    /// made against bytes it holds, and the `blob` digest describes those bytes
+    /// all the same.
+    UpstreamHashDiffers,
+    /// The publisher rewrote this rendition after the service read it: the
+    /// manifest's hash has moved since the fetch.
+    ///
+    /// The answer is the earlier publication, and stays so until the service
+    /// takes the rendition again. [`Caveat::UpstreamHashDiffers`] is the other
+    /// case: the hash stood still and the bytes never hashed to it. Only the
+    /// publisher can settle that one; this one settles itself at the next
+    /// fetch.
+    UpstreamHashRewritten,
     /// The manifest published no hash for this rendition, so these bytes rest
     /// on our own capture alone.
     ///
     /// A different fact from a hash that disagrees, and a consumer may care
     /// about the difference: 'nobody vouched for this' is not 'the voucher and
     /// the bytes do not match'.
-    UpstreamDigestAbsent,
+    UpstreamHashAbsent,
     /// The cursor a walk asked from is past everything the service holds.
     ///
     /// A walk that finds nothing and a cursor that belongs to another corpus
@@ -317,15 +327,15 @@ pub enum Caveat {
 }
 
 impl Caveat {
-    /// One limit the service stated, read into this crate's vocabulary.
+    /// One limit the service stated, under the name the service gave it.
     pub fn stated(value: &serde_json::Value) -> Self {
         #[derive(serde::Deserialize)]
         #[serde(tag = "kind", rename_all = "snake_case")]
         enum Stated {
-            Withdrawn {
+            WithdrawnRenditions {
                 excluded: Vec<String>,
             },
-            Ambiguous {
+            AmbiguousRendition {
                 chosen: String,
                 discarded: Vec<String>,
             },
@@ -337,8 +347,9 @@ impl Caveat {
             SupersededKnowledge {
                 visible_until: NaiveDate,
             },
-            Unverified,
-            HashDisagrees,
+            UpstreamHashAbsent,
+            UpstreamHashDiffers,
+            UpstreamHashRewritten,
             CursorAhead {
                 asked: u64,
                 head: u64,
@@ -384,8 +395,8 @@ impl Caveat {
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
-            Ok(Stated::Withdrawn { excluded }) => Self::WithdrawnRenditions { excluded },
-            Ok(Stated::Ambiguous { chosen, discarded }) => {
+            Ok(Stated::WithdrawnRenditions { excluded }) => Self::WithdrawnRenditions { excluded },
+            Ok(Stated::AmbiguousRendition { chosen, discarded }) => {
                 Self::AmbiguousRendition { chosen, discarded }
             }
             Ok(Stated::NoZichtWindow) => Self::NoZichtWindow,
@@ -400,8 +411,9 @@ impl Caveat {
                 Self::SupersededKnowledge { visible_until }
             }
             Ok(Stated::CursorAhead { asked, head }) => Self::CursorAhead { asked, head },
-            Ok(Stated::Unverified) => Self::UpstreamDigestAbsent,
-            Ok(Stated::HashDisagrees) => Self::UpstreamDigestDiffers,
+            Ok(Stated::UpstreamHashAbsent) => Self::UpstreamHashAbsent,
+            Ok(Stated::UpstreamHashDiffers) => Self::UpstreamHashDiffers,
+            Ok(Stated::UpstreamHashRewritten) => Self::UpstreamHashRewritten,
             Ok(Stated::Truncated { window }) => Self::Truncated { window },
             Ok(Stated::SkippedArticles { count }) => Self::SkippedArticles { count },
             Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
@@ -951,17 +963,21 @@ mod tests {
         );
     }
 
-    /// The service's two hash caveats answer different questions, and a
-    /// consumer may care about one and not the other.
+    /// The three hash caveats answer different questions, and a consumer may
+    /// care about one and not the others.
     #[test]
-    fn the_two_hash_limits_stay_apart() {
+    fn the_three_hash_limits_stay_apart() {
         assert_eq!(
-            Caveat::stated(&serde_json::json!({"kind": "unverified"})),
-            Caveat::UpstreamDigestAbsent
+            Caveat::stated(&serde_json::json!({"kind": "upstream_hash_absent"})),
+            Caveat::UpstreamHashAbsent
         );
         assert_eq!(
-            Caveat::stated(&serde_json::json!({"kind": "hash_disagrees"})),
-            Caveat::UpstreamDigestDiffers
+            Caveat::stated(&serde_json::json!({"kind": "upstream_hash_differs"})),
+            Caveat::UpstreamHashDiffers
+        );
+        assert_eq!(
+            Caveat::stated(&serde_json::json!({"kind": "upstream_hash_rewritten"})),
+            Caveat::UpstreamHashRewritten
         );
     }
 
@@ -969,13 +985,68 @@ mod tests {
     fn a_withdrawn_rendition_is_named_rather_than_only_counted() {
         assert_eq!(
             Caveat::stated(&serde_json::json!({
-                "kind": "withdrawn",
+                "kind": "withdrawn_renditions",
                 "excluded": ["2017-07-01_0"],
             })),
             Caveat::WithdrawnRenditions {
                 excluded: vec!["2017-07-01_0".into()]
             }
         );
+    }
+
+    /// One vocabulary for both halves: a limit leaves under the name it
+    /// arrived under, so a consumer matches one word whichever half built the
+    /// envelope.
+    #[test]
+    fn a_limit_the_service_states_is_answered_under_the_same_name() {
+        for stated in [
+            serde_json::json!({"kind": "withdrawn_renditions", "excluded": ["2017-07-01_0"]}),
+            serde_json::json!({
+                "kind": "ambiguous_rendition",
+                "chosen": "2020-01-01_1",
+                "discarded": ["2020-01-01_0"],
+            }),
+            serde_json::json!({"kind": "no_zicht_window"}),
+            serde_json::json!({
+                "kind": "retroactive",
+                "in_force_from": "2019-01-01",
+                "first_visible": "2019-03-01",
+            }),
+            serde_json::json!({"kind": "superseded_knowledge", "visible_until": "2020-01-01"}),
+            serde_json::json!({"kind": "upstream_hash_absent"}),
+            serde_json::json!({"kind": "upstream_hash_differs"}),
+            serde_json::json!({"kind": "upstream_hash_rewritten"}),
+            serde_json::json!({"kind": "cursor_ahead", "asked": 90, "head": 40}),
+            serde_json::json!({"kind": "truncated", "window": 20}),
+            serde_json::json!({"kind": "skipped_articles", "count": 14}),
+            serde_json::json!({
+                "kind": "table_flattened",
+                "articles": ["2.10"],
+                "cell_separator": " | ",
+            }),
+            serde_json::json!({"kind": "not_commenced", "articles": ["7"]}),
+            serde_json::json!({"kind": "illustration_omitted", "articles": ["3.2"]}),
+            serde_json::json!({"kind": "lanes_unsearched", "lanes": ["rechtspraak"]}),
+            serde_json::json!({"kind": "unrankable_texts", "scope": "corpus", "count": 64}),
+            serde_json::json!({"kind": "several_readings", "readings": ["book", "literal"]}),
+            serde_json::json!({
+                "kind": "reading_unresolved",
+                "reading": "literal",
+                "because": "withdrawn",
+                "regulation_id": "BWBR0005537",
+                "renditions": ["2017-07-01_0"],
+            }),
+            serde_json::json!({
+                "kind": "held_text_only",
+                "held_regulations": 4,
+                "known_regulations": 25462,
+            }),
+        ] {
+            assert_eq!(
+                serde_json::to_value(Caveat::stated(&stated)).unwrap(),
+                stated
+            );
+        }
     }
 
     /// A record the register publishes without a body says so, rather than

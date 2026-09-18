@@ -48,7 +48,7 @@ const REGULATIONS: &str = r#"{"bron":1,"grade":"authority",
  "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","later_field":true}]}"#;
 
 const EXPRESSIONS: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"size":49606,"withdrawn":false,"held":true,"verified":true,"blob":"35e2"}]}"#;
+ "data":[{"label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"size":49606,"withdrawn":false,"held":true,"upstream_hash_check":"matches","blob":"35e2"}]}"#;
 
 async fn answering(verb: &str, route: &str, body: &str) -> MockServer {
     let server = MockServer::start().await;

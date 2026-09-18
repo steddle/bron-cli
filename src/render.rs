@@ -524,14 +524,19 @@ fn caveat_line(caveat: &Caveat) -> String {
                  That is not a quiet register: the cursor belongs to another deployment, or to \
                  this one before it was rebuilt. Start again from the head."
         ),
-        Caveat::UpstreamDigestDiffers => {
-            "note: the bytes behind this answer do not match the digest the publisher's \
+        Caveat::UpstreamHashDiffers => {
+            "note: the bytes behind this answer do not hash to the SHA-512 the publisher's \
                  manifest states for them. The register is inconsistent about what it hashes, \
                  so this is upstream disagreeing with itself rather than the text being wrong, \
                  and it cannot be settled from here."
                 .to_string()
         }
-        Caveat::UpstreamDigestAbsent => {
+        Caveat::UpstreamHashRewritten => {
+            "note: the register rewrote this rendition after bron read it, and this is the \
+                 earlier text. It stays the answer until bron reads the rendition again."
+                .to_string()
+        }
+        Caveat::UpstreamHashAbsent => {
             "note: the manifest published no hash for this rendition, so these bytes rest \
                  on bron's own capture alone"
                 .to_string()
@@ -718,7 +723,7 @@ mod tests {
             "book",
             true,
             Some("Artikel 305a"),
-            vec![serde_json::json!({"kind": "unverified"})],
+            vec![serde_json::json!({"kind": "upstream_hash_absent"})],
         )]);
 
         let entry = text.lines().find(|l| l.starts_with("book")).unwrap();
@@ -731,6 +736,21 @@ mod tests {
         let second = entry.find("wetgeving").unwrap();
 
         assert_eq!(indent, second, "{text}");
+    }
+
+    /// Three facts about the publisher's hash, and a reader told one must not
+    /// take it for another: a rewritten rendition is the earlier text and says
+    /// so, where the other two say nothing about which publication this is.
+    #[test]
+    fn each_hash_limit_prints_a_sentence_of_its_own() {
+        let absent = caveat_line(&Caveat::UpstreamHashAbsent);
+        let differs = caveat_line(&Caveat::UpstreamHashDiffers);
+        let rewritten = caveat_line(&Caveat::UpstreamHashRewritten);
+
+        assert!(absent.contains("published no hash"), "{absent}");
+        assert!(differs.contains("do not hash to"), "{differs}");
+        assert!(rewritten.contains("rewrote this rendition"), "{rewritten}");
+        assert!(rewritten.contains("earlier text"), "{rewritten}");
     }
 
     /// What a rendition holds is true of the rendition, so it has a column of

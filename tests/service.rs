@@ -77,7 +77,7 @@ const ANSWER: &str = r#"{
       "size": 49606,
       "withdrawn": false,
       "held": true,
-      "verified": true,
+      "upstream_hash_check": "matches",
       "blob": "35e29887c98339a23c835cd45fa22c0569f2db6e7d05fbca6c8de0d4fb15a0fb"
     },
     "articles": [{
@@ -96,8 +96,8 @@ const ANSWER: &str = r#"{
     }]
   },
   "caveats": [
-    {"kind": "withdrawn", "excluded": ["2017-07-01_0"]},
-    {"kind": "hash_disagrees"},
+    {"kind": "withdrawn_renditions", "excluded": ["2017-07-01_0"]},
+    {"kind": "upstream_hash_differs"},
     {"kind": "something_this_bron_predates", "window": 4}
   ]
 }"#;
@@ -300,7 +300,7 @@ const LOOKUP: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-08-24","as_k
      "expression":"2026-08-15_0","held":true,"number":"8:4","label":"Artikel 8:4",
      "path":"/Hoofdstuk8/Titeldeel8.1/Afdeling8.1.1/Artikel8:4",
      "content_hash":"4ba2172e7f7630289a08992d33c6a8b181dd6167300989f143f3a506357c6364",
-     "caveats":[{"kind":"hash_disagrees"}]}]},
+     "caveats":[{"kind":"upstream_hash_differs"}]}]},
   "caveats":[{"kind":"several_readings","readings":["book","literal"]}]}"#;
 
 /// A reading that resolved to a rendition whose text the corpus does not hold.
