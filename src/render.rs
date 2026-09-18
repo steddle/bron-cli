@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::SearchData;
-use bron::wire::{AppealStatus, Body, Caveat, Envelope};
+use bron::wire::{AppealStatus, Article, Body, Caveat, Envelope};
 
 use crate::run::Answer;
 
@@ -177,8 +177,24 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
         }
 
         Answer::Articles(e) => {
-            bound(e.as_of, e.as_known_on, out)?;
-            for article in data(e) {
+            let articles = data(e);
+
+            // An answer holding only provisions not yet applied is bound to
+            // the rendition that publishes them, and 'as in force on' would
+            // say they apply.
+            if !articles.is_empty() && articles.iter().all(not_commenced) {
+                match e.as_of {
+                    Some(day) => writeln!(
+                        out,
+                        "published in the rendition current on {day}, and not yet applied\n"
+                    )?,
+                    None => writeln!(out, "published and not yet applied\n")?,
+                }
+            } else {
+                bound(e.as_of, e.as_known_on, out)?;
+            }
+
+            for article in articles {
                 let label = article.label.as_deref().unwrap_or(&article.number);
                 write!(out, "{label}")?;
                 if let Some(title) = &article.title {
@@ -211,9 +227,19 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 if let Some(jci) = &article.jci {
                     writeln!(out, "{jci}")?;
                 }
+                if not_commenced(article) {
+                    match article.in_force_from {
+                        Some(day) => writeln!(out, "not yet applied, applies from {day}")?,
+                        None => writeln!(out, "not yet applied")?,
+                    }
+                }
                 if let Some(act) = &article.amended_by {
                     let effect = article.effect.as_deref().unwrap_or("wijziging");
-                    writeln!(out, "in force through {act} ({effect})")?;
+                    if not_commenced(article) {
+                        writeln!(out, "published by {act} ({effect})")?;
+                    } else {
+                        writeln!(out, "in force through {act} ({effect})")?;
+                    }
                 }
                 writeln!(out)?;
             }
@@ -435,6 +461,11 @@ fn first_line(text: &str) -> String {
     } else {
         line.to_string()
     }
+}
+
+/// Whether the register publishes this provision and does not yet apply it.
+fn not_commenced(article: &Article) -> bool {
+    article.status.as_deref() == Some("nogniet")
 }
 
 fn data<T>(envelope: &Envelope<Vec<T>>) -> &[T] {

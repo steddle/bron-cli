@@ -212,12 +212,9 @@ pub enum Caveat {
     },
     /// An article in this answer has not commenced.
     ///
-    /// The register publishes such a provision twice: once as the stub 'Dit
-    /// onderdeel is nog niet inwerking getreden' and once as the text it will
-    /// have, both under one `versie-id` and told apart only by `status`. bron
-    /// holds both and answers with the text, which is the more useful of the
-    /// two and the more dangerous: read without this it is a rule that does not
-    /// yet apply, quoted as though it did.
+    /// The register publishes the text such a provision will have, with
+    /// `status` `nogniet`, and bron answers with that text: read without this
+    /// it is a rule that does not yet apply, quoted as though it did.
     NotCommenced { articles: Vec<String> },
     /// An article in this answer prints an image, and bron holds no images.
     ///
@@ -602,12 +599,12 @@ pub struct Article {
     /// What that publication did, in upstream's own words.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effect: Option<String>,
-    /// `nogniet` where the register published this provision as a stub because
-    /// it has not commenced. Absent where the provision is ordinary.
+    /// `nogniet` where the register publishes this provision and it has not
+    /// commenced. Absent where the provision is ordinary.
     ///
-    /// Carried because 'this provision does not exist' and 'this provision has
-    /// not started' are different answers, and the stub text reads the same as
-    /// a real one to anyone not looking for it.
+    /// Carried because 'this provision applies' and 'this provision has not
+    /// started' are different answers, and the text reads the same either way
+    /// to anyone not looking for it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     /// The day this article took the form it has here.

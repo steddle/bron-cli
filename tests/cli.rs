@@ -1000,6 +1000,72 @@ async fn law_changes_for_an_article_in_neither_rendition_is_not_found() {
     assert!(envelope["error"].get("code").is_none(), "{envelope}");
 }
 
+/// A provision the rendition publishes and does not yet apply is never said to
+/// be in force, and the day it applies is said where the register states one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provision_not_yet_applied_is_not_said_to_be_in_force() {
+    let article = |number: &str, in_force_from: Option<&str>| {
+        let mut article = serde_json::json!({
+            "number": number,
+            "label": format!("Artikel {number}"),
+            "stam_id": number,
+            "amended_by": "stb-2026-219",
+            "effect": "nieuw",
+            "status": "nogniet",
+            "span": {"start": 10, "end": 90},
+            "paragraphs": [{"rendered": "Tekst.", "span": {"start": 20, "end": 80}}],
+        });
+        if let Some(day) = in_force_from {
+            article["in_force_from"] = day.into();
+        }
+        article
+    };
+    let answer = serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": "2026-09-18",
+        "data": {
+            "regulation_id": "BWBR0020368",
+            "expression": {
+                "label": "2026-09-01_0",
+                "in_force": {"from": "2026-09-01"},
+                "held": true,
+                "blob": EARLIER_BLOB,
+            },
+            "articles": [article("1:54d", None), article("1:76e", Some("2027-01-01"))],
+        },
+        "caveats": [{"kind": "not_commenced", "articles": ["1:54d", "1:76e"]}],
+    });
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0020368/articles"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(answer.to_string(), "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{EARLIER_BLOB}/provenance")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["law", "show", "BWBR0020368", "--not-commenced"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(!text.contains("in force on"), "{text}");
+    assert!(!text.contains("in force through"), "{text}");
+    assert!(!text.to_lowercase().contains("stub"), "{text}");
+    assert!(text.contains("not yet applied"), "{text}");
+    assert!(text.contains("applies from 2027-01-01"), "{text}");
+    assert!(text.contains("stb-2026-219"), "{text}");
+}
+
 /// A 503 is read off the status: `upstream`, with the delay the service named.
 /// The body is not read, so its `code` stays the service's, as the contract
 /// states for every 429 and 503.
