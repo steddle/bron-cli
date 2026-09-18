@@ -134,14 +134,17 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
 
         Answer::Feed(a) => {
             for event in &a.data.events {
-                writeln!(
-                    out,
-                    "{:>8}  {:<12}{}  {}",
-                    event.seq,
-                    event.event,
-                    event.regulation_id,
-                    event.label.as_deref().unwrap_or("")
-                )?;
+                // A regulation-level event names no rendition, so the line ends
+                // at the identifier rather than on the padding of an empty one.
+                let line = format!(
+                    "{:>8}  {:<12}{}",
+                    event.seq, event.event, event.regulation_id
+                );
+
+                match &event.label {
+                    Some(label) => writeln!(out, "{line}  {label}")?,
+                    None => writeln!(out, "{line}")?,
+                }
             }
 
             if a.data.events.is_empty() {
