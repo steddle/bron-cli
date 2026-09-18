@@ -384,3 +384,44 @@ async fn law_show_asks_for_what_is_published_and_not_in_force() {
     // nothing coming is a not-found rather than an empty answer.
     assert_eq!(output.status.code(), Some(2), "{output:?}");
 }
+
+/// The service states a `code` beside the kind, and a consumer reading
+/// `--json` gets it as sent. A person does not: the sentence already says what
+/// went wrong, and the exit code is what a script branches on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_the_service_stated_carries_its_code_to_the_consumer() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0000001/articles"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"regulation_not_found","message":"no regulation [BWBR0000001]","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "law", "show", "BWBR0000001"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "not_found");
+    assert_eq!(envelope["error"]["code"], "regulation_not_found");
+
+    let said = String::from_utf8(output.stderr).unwrap();
+    assert!(said.contains("no regulation [BWBR0000001]"), "{said}");
+    assert!(!said.contains("regulation_not_found"), "{said}");
+}
+
+/// A refusal bron makes itself never reached the service, so no code is its to
+/// carry: presence says who stated the failure.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_bron_states_itself_carries_no_code() {
+    let server = MockServer::start().await;
+
+    let output = bron(&server, &["--json", "law", "published"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "usage");
+    assert!(envelope["error"].get("code").is_none(), "{envelope}");
+}

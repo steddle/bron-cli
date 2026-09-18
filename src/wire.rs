@@ -100,6 +100,7 @@ impl Envelope<()> {
             data: None,
             error: Some(ErrorBody {
                 kind: fault.kind(),
+                code: fault.stated_code().map(str::to_string),
                 message: fault.to_string(),
                 detail: fault.chain(),
             }),
@@ -112,6 +113,10 @@ impl Envelope<()> {
 pub struct ErrorBody {
     /// Stable tag matching the exit code. Branch on this, not on the message.
     pub kind: &'static str,
+    /// Which failure this is, in the service's word and as the service sent
+    /// it. Present only where the service stated the failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     pub message: String,
     /// The cause chain, outermost first.
     pub detail: Vec<String>,
@@ -887,6 +892,33 @@ mod tests {
             !json.contains(r#""data""#),
             "no data key on a failure: {json}"
         );
+    }
+
+    /// Presence is the signal. A code is the service's word for a failure the
+    /// service stated, so a failure bron states itself carries none.
+    #[test]
+    fn a_failure_carries_a_code_only_where_the_service_stated_one() {
+        let stated = Fault::not_found("law", "BWBR0000001").stated_as("regulation_not_found");
+        let json = serde_json::to_value(Envelope::failed(&stated)).unwrap();
+        assert_eq!(json["error"]["kind"], "not_found");
+        assert_eq!(json["error"]["code"], "regulation_not_found");
+
+        for ours in [
+            Fault::usage("name a window"),
+            Fault::not_found("lid", "9"),
+            Fault::Network {
+                service: "bron",
+                source: anyhow::anyhow!("connection refused"),
+            },
+            Fault::Upstream {
+                service: "bron",
+                source: anyhow::anyhow!("not the bron envelope"),
+            },
+            Fault::Local(anyhow::anyhow!("no bucket directory")),
+        ] {
+            let json = serde_json::to_value(Envelope::failed(&ours)).unwrap();
+            assert!(json["error"].get("code").is_none(), "{json}");
+        }
     }
 
     #[test]

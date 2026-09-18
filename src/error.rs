@@ -64,6 +64,16 @@ pub enum Fault {
     /// the same machine, which is what tells it apart from the two above.
     #[error("{0}")]
     Local(#[source] anyhow::Error),
+
+    /// A failure the service stated, with the `code` it stated beside the kind.
+    ///
+    /// `fault` is the same failure in the kinds bron exits on, so the exit
+    /// code, the tag and the sentence are its. The code is the service's word,
+    /// kept as sent and never read here: one this build has never heard of
+    /// crosses like any other. Only a stated failure is built this way, which
+    /// is what keeps a code off `network` and `local`.
+    #[error("{fault}")]
+    Stated { fault: Box<Fault>, code: String },
 }
 
 impl Fault {
@@ -74,6 +84,7 @@ impl Fault {
             Self::Network { .. } => exit::NETWORK,
             Self::Upstream { .. } => exit::UPSTREAM,
             Self::Local(_) => exit::LOCAL,
+            Self::Stated { fault, .. } => fault.code(),
         }
     }
 
@@ -86,6 +97,24 @@ impl Fault {
             Self::Network { .. } => "network",
             Self::Upstream { .. } => "upstream",
             Self::Local(_) => "local",
+            Self::Stated { fault, .. } => fault.kind(),
+        }
+    }
+
+    /// The `code` the service stated for this failure, as sent. Absent on a
+    /// failure bron states itself, so presence says who stated it.
+    pub fn stated_code(&self) -> Option<&str> {
+        match self {
+            Self::Stated { code, .. } => Some(code),
+            _ => None,
+        }
+    }
+
+    /// This failure, as one the service stated under `code`.
+    pub fn stated_as(self, code: impl Into<String>) -> Self {
+        Self::Stated {
+            fault: Box::new(self),
+            code: code.into(),
         }
     }
 
@@ -107,6 +136,10 @@ impl Fault {
     /// url, path or identifier involved; flattening it here keeps that detail
     /// rather than reporting only the outermost sentence.
     pub fn chain(&self) -> Vec<String> {
+        if let Self::Stated { fault, .. } = self {
+            return fault.chain();
+        }
+
         let mut chain = vec![self.to_string()];
         let mut source = std::error::Error::source(self);
         while let Some(error) = source {

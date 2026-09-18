@@ -114,7 +114,7 @@ happened is an answer.
 
 ## Machine use
 
-Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law published` and `law feed` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state.
+Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law published` and `law feed` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code. A failure bron states itself carries none, so presence says who stated it.
 
 ```
 $ bron --json find 6:162 BW

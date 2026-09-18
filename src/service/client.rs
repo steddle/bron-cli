@@ -93,6 +93,9 @@ impl<T> Answer<T> {
 #[derive(Debug, Deserialize)]
 struct Stated {
     kind: String,
+    /// Which failure this is, finer than `kind`. Read as a string and never
+    /// as an enum, so a code the service adds later crosses untouched.
+    code: Option<String>,
     message: String,
     #[serde(default)]
     detail: Vec<String>,
@@ -117,7 +120,7 @@ impl Stated {
             format!("{}: {}", self.message, self.detail.join(", "))
         };
 
-        match self.kind.as_str() {
+        let fault = match self.kind.as_str() {
             "usage" => Fault::Usage(message),
             "not_found" => Fault::NotFound(message),
             // Throttled and corpus are both the service failing to answer a
@@ -126,6 +129,11 @@ impl Stated {
                 service: SERVICE,
                 source: anyhow::anyhow!("{message}"),
             },
+        };
+
+        match self.code {
+            Some(code) => fault.stated_as(code),
+            None => fault,
         }
     }
 }
@@ -211,6 +219,7 @@ mod tests {
     fn a_stated_failure_keeps_its_kind() {
         let stated = |kind: &str| Stated {
             kind: kind.into(),
+            code: None,
             message: "something".into(),
             detail: Vec::new(),
         };
@@ -228,6 +237,7 @@ mod tests {
     fn the_detail_of_a_failure_travels_with_its_message() {
         let stated = Stated {
             kind: "not_found".into(),
+            code: Some("rendition_withdrawn".into()),
             message: "no published rendition of BWBR0037132 in force on [2016-01-01]".into(),
             detail: vec!["2016-01-01_0".into(), "2016-06-16_0".into()],
         };
@@ -235,5 +245,68 @@ mod tests {
         let message = stated.into_fault().to_string();
         assert!(message.contains("2016-01-01_0"), "{message}");
         assert!(message.contains("2016-06-16_0"), "{message}");
+    }
+
+    /// The code is the service's word and crosses as sent. A code this build
+    /// has never heard of crosses too: the kind beside it already says what to
+    /// do, so nothing here has to know what the code means.
+    #[test]
+    fn the_code_of_a_stated_failure_crosses_as_sent() {
+        let stated = |kind: &str, code: Option<&str>| {
+            let body = match code {
+                Some(code) => format!(r#"{{"kind":"{kind}","code":"{code}","message":"m"}}"#),
+                None => format!(r#"{{"kind":"{kind}","message":"m"}}"#),
+            };
+            serde_json::from_str::<Stated>(&body).unwrap().into_fault()
+        };
+
+        let fault = stated("not_found", Some("regulation_not_found"));
+        assert_eq!(fault.stated_code(), Some("regulation_not_found"));
+        assert_eq!(fault.kind(), "not_found");
+        assert_eq!(fault.code(), 2);
+
+        let fault = stated("usage", Some("unknown_parameter"));
+        assert_eq!(fault.stated_code(), Some("unknown_parameter"));
+        assert_eq!(fault.code(), 1);
+
+        let fault = stated("source", Some("a_code_this_bron_predates"));
+        assert_eq!(fault.stated_code(), Some("a_code_this_bron_predates"));
+        assert_eq!(fault.kind(), "upstream");
+        assert_eq!(fault.code(), 4);
+
+        // A deployment that states no code is read as it states itself.
+        assert_eq!(stated("not_found", None).stated_code(), None);
+
+        let null: Stated =
+            serde_json::from_str(r#"{"kind":"not_found","code":null,"message":"m"}"#).unwrap();
+        assert_eq!(null.into_fault().stated_code(), None);
+    }
+
+    /// A code is a string on the wire, like the kind beside it. One that is
+    /// anything else fails the envelope it arrived in.
+    #[test]
+    fn a_code_that_is_not_a_string_is_not_the_bron_envelope() {
+        let read = serde_json::from_str::<Envelope<u32>>(
+            r#"{"bron":1,"error":{"kind":"not_found","code":7,"message":"m"}}"#,
+        );
+
+        assert!(read.is_err());
+    }
+
+    /// The code rides beside the failure and changes nothing a person reads:
+    /// the same lines reach stderr and `detail` with it as without.
+    #[test]
+    fn a_code_leaves_the_cause_chain_as_it_was() {
+        let stated = |code: Option<&str>| Stated {
+            kind: "source".into(),
+            code: code.map(str::to_string),
+            message: "the register did not serve 2016-07-01_0".into(),
+            detail: Vec::new(),
+        };
+
+        assert_eq!(
+            stated(Some("source_unavailable")).into_fault().chain(),
+            stated(None).into_fault().chain()
+        );
     }
 }
