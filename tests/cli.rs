@@ -583,25 +583,34 @@ async fn law_versions_asks_for_the_whole_history() {
     assert!(output.status.success(), "{output:?}");
 }
 
-/// A number that names two articles is the service's to say: it reads the
-/// rendition and states the caveat with both paths. bron carries that one
-/// statement and adds none of its own, so the reader is told once.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_number_naming_two_articles_is_said_once() {
-    let article = |path: &str| {
+/// What the service states where a number names two articles.
+fn two_articles_numbered_one() -> serde_json::Value {
+    serde_json::json!({
+        "kind": "ambiguous_article",
+        "number": "1",
+        "paths": ["/Bijlage2/Artikel1", "/Bijlage3/Artikel1"],
+    })
+}
+
+/// A service holding two articles numbered 1. The first has a second lid and
+/// the other does not, so `--paragraph 2` keeps one of them.
+async fn holding_two_articles_numbered_one() -> MockServer {
+    let article = |path: &str, leden: &[&str]| {
         serde_json::json!({
             "number": "1",
             "path": path,
             "stam_id": path,
             "span": {"start": 10, "end": 90},
-            "paragraphs": [{"rendered": "Tekst.", "span": {"start": 20, "end": 80}}],
+            "paragraphs": leden
+                .iter()
+                .map(|lid| serde_json::json!({
+                    "number": lid,
+                    "rendered": "Tekst.",
+                    "span": {"start": 20, "end": 80},
+                }))
+                .collect::<Vec<_>>(),
         })
     };
-    let stated = serde_json::json!({
-        "kind": "ambiguous_article",
-        "number": "1",
-        "paths": ["/Bijlage2/Artikel1", "/Bijlage3/Artikel1"],
-    });
     let answer = serde_json::json!({
         "bron": 1,
         "grade": "authority",
@@ -615,9 +624,12 @@ async fn a_number_naming_two_articles_is_said_once() {
                 "held": true,
                 "blob": EARLIER_BLOB,
             },
-            "articles": [article("/Bijlage2/Artikel1"), article("/Bijlage3/Artikel1")],
+            "articles": [
+                article("/Bijlage2/Artikel1", &["1", "2"]),
+                article("/Bijlage3/Artikel1", &["1"]),
+            ],
         },
-        "caveats": [stated],
+        "caveats": [two_articles_numbered_one()],
     });
 
     let server = MockServer::start().await;
@@ -637,6 +649,15 @@ async fn a_number_naming_two_articles_is_said_once() {
         ))
         .mount(&server)
         .await;
+    server
+}
+
+/// A number that names two articles is the service's to say: it reads the
+/// rendition and states the caveat with both paths. bron carries that one
+/// statement and adds none of its own, so the reader is told once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_number_naming_two_articles_is_said_once() {
+    let server = holding_two_articles_numbered_one().await;
 
     let output = bron(
         &server,
@@ -647,7 +668,53 @@ async fn a_number_naming_two_articles_is_said_once() {
 
     assert!(output.status.success(), "{output:?}");
     assert_eq!(envelope["data"].as_array().map(Vec::len), Some(2));
-    assert_eq!(envelope["caveats"], serde_json::json!([stated]));
+    assert_eq!(
+        envelope["caveats"],
+        serde_json::json!([two_articles_numbered_one()])
+    );
+}
+
+/// The note names every article the number names, and `--paragraph` shows only
+/// the ones that have that lid: a path in the note is not always an article in
+/// the answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_note_names_an_article_a_narrowed_answer_leaves_out() {
+    let server = holding_two_articles_numbered_one().await;
+
+    /// An article prints its path on a line of its own; the note indents.
+    fn shown(text: &str, path: &str) -> bool {
+        text.lines().any(|line| line == path)
+    }
+
+    let whole = bron(&server, &["law", "show", "BWBR0008691", "--article", "1"]).await;
+    let narrowed = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "BWBR0008691",
+            "--article",
+            "1",
+            "--paragraph",
+            "2",
+        ],
+    )
+    .await;
+
+    for (output, keeps_the_second) in [(&whole, true), (&narrowed, false)] {
+        let text = stdout(output);
+
+        assert!(output.status.success(), "{output:?}");
+        assert!(shown(&text, "/Bijlage2/Artikel1"), "{text}");
+        assert_eq!(
+            shown(&text, "/Bijlage3/Artikel1"),
+            keeps_the_second,
+            "{text}"
+        );
+
+        assert!(text.contains("      /Bijlage2/Artikel1"), "{text}");
+        assert!(text.contains("      /Bijlage3/Artikel1"), "{text}");
+    }
 }
 
 /// Two renditions as the service lists them, newest first.

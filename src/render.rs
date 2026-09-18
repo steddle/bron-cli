@@ -504,8 +504,8 @@ fn caveat_line(caveat: &Caveat) -> String {
             format!("note: {count} article(s) yielded no text and were skipped")
         }
         Caveat::AmbiguousArticle { number, paths } => format!(
-            "note: {} articles are numbered {number} in this law; all are shown, \
-                 and their paths are what tell them apart:\n      {}",
+            "note: {} articles in this law are numbered {number}; their paths tell them \
+                 apart:\n      {}",
             paths.len(),
             paths.join("\n      ")
         ),
@@ -736,6 +736,23 @@ mod tests {
         let second = entry.find("wetgeving").unwrap();
 
         assert_eq!(indent, second, "{text}");
+    }
+
+    /// The note is about the law and never about the answer. It is written
+    /// from the caveat alone, and `--paragraph` can leave out an article whose
+    /// path it names, so a word on what is shown would be false of that answer.
+    #[test]
+    fn the_note_on_a_repeated_number_claims_nothing_about_the_answer() {
+        let note = caveat_line(&Caveat::AmbiguousArticle {
+            number: "1".into(),
+            paths: vec!["/Bijlage2/Artikel1".into(), "/Bijlage3/Artikel1".into()],
+        });
+
+        assert_eq!(
+            note,
+            "note: 2 articles in this law are numbered 1; their paths tell them apart:\n      \
+             /Bijlage2/Artikel1\n      /Bijlage3/Artikel1"
+        );
     }
 
     /// Three facts about the publisher's hash, and a reader told one must not
