@@ -764,3 +764,61 @@ async fn renditions_are_printed_in_the_order_the_service_sent_them() {
         assert!(newer < older, "{args:?}: {output:?}");
     }
 }
+
+/// With `--json` a command line clap will not take is still the envelope on
+/// stdout, under the kind a script branches on. clap's own sentence goes to
+/// stderr, where every other failure's does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_line_clap_refuses_is_the_envelope_under_json() {
+    let server = MockServer::start().await;
+
+    for args in [
+        &["--json", "law", "show"][..],
+        &["--json", "law", "show", "BWBR0005289", "--paragraph", "2"][..],
+        &["--json", "law", "changes", "BWBR0005289"][..],
+        &["law", "feed", "--json"][..],
+    ] {
+        let output = bron(&server, args).await;
+        let envelope: serde_json::Value = serde_json::from_str(&stdout(&output))
+            .unwrap_or_else(|e| panic!("{args:?}: {e}: {output:?}"));
+
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        assert_eq!(envelope["bron"], 1, "{args:?}");
+        assert_eq!(envelope["error"]["kind"], "usage", "{args:?}");
+        assert!(envelope["error"].get("code").is_none(), "{args:?}");
+        assert!(
+            !envelope["error"]["message"].as_str().unwrap().is_empty(),
+            "{args:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Usage:"),
+            "{args:?}: {output:?}"
+        );
+    }
+}
+
+/// Without `--json` nothing on stdout, and clap's message as clap writes it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_line_clap_refuses_is_claps_message_without_json() {
+    let server = MockServer::start().await;
+
+    let output = bron(&server, &["law", "feed"]).await;
+    let said = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(said.contains("--since <SINCE>"), "{said}");
+    assert!(said.contains("Usage:"), "{said}");
+}
+
+/// Asking for help is not a failure, with `--json` or without.
+#[tokio::test(flavor = "multi_thread")]
+async fn help_asked_for_under_json_is_still_help() {
+    let server = MockServer::start().await;
+
+    let output = bron(&server, &["--json", "law", "feed", "--help"]).await;
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(stdout(&output).contains("--since"), "{output:?}");
+}
+

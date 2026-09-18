@@ -42,6 +42,22 @@ fn main() -> ExitCode {
                 error.kind(),
                 ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
             );
+
+            // clap refused before `--json` was read, so the flag is looked for
+            // on the command line itself, up to the `--` that ends the flags.
+            // clap's own message still goes to stderr, as every failure's
+            // sentence does.
+            if !asked_for
+                && std::env::args_os()
+                    .skip(1)
+                    .take_while(|arg| arg != "--")
+                    .any(|arg| arg == "--json")
+                && let Ok(text) =
+                    serde_json::to_string(&Envelope::failed(&Fault::usage(sentence(&error))))
+            {
+                println!("{text}");
+            }
+
             let _ = error.print();
 
             return if asked_for {
@@ -69,6 +85,19 @@ fn main() -> ExitCode {
             fault.exit_code()
         }
     }
+}
+
+/// What clap refused, as one line: its message without the `error:` it opens
+/// with, and without the usage and the hint that follow it.
+fn sentence(error: &clap::Error) -> String {
+    let rendered = error.to_string();
+    let message = rendered.split("\n\n").next().unwrap_or_default();
+
+    message
+        .trim_start_matches("error:")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn emit(answer: &Answer, json: bool) -> io::Result<()> {
