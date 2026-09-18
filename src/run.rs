@@ -279,6 +279,7 @@ fn compared_article(article: &service::Article) -> diff::Article {
         path: article.path.clone(),
         content: content(article),
         effect: article.effect.clone(),
+        status: article.status.clone(),
     }
 }
 
@@ -470,6 +471,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 match change.change {
                     diff::Change::Unchanged => summary.unchanged += 1,
                     diff::Change::Amended => summary.amended += 1,
+                    diff::Change::Commenced => summary.commenced += 1,
                     diff::Change::Added => summary.added += 1,
                     diff::Change::Repealed => summary.repealed += 1,
                     diff::Change::Withdrawn => summary.withdrawn += 1,
@@ -751,6 +753,8 @@ fn side(article: &service::Article, version: &str, provenance: &wire::Provenance
         content: content(article),
         amended_by: article.amended_by.clone(),
         effect: article.effect.clone(),
+        status: article.status.clone(),
+        in_force_from: article.in_force_from,
         provenance: provenance.clone(),
     }
 }

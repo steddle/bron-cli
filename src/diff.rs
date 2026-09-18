@@ -35,6 +35,9 @@ pub struct Article {
     /// Upstream's vocabulary, unmapped: `nieuwe-regeling`, `wijziging`,
     /// `nieuw`, `vervallen`.
     pub effect: Option<String>,
+    /// What this rendition prints about whether the article applies: `goed`,
+    /// `nogniet` or `vervallen`.
+    pub status: Option<String>,
 }
 
 /// What happened to one article between two renditions.
@@ -43,6 +46,10 @@ pub enum Change {
     Unchanged,
     /// The text differs.
     Amended,
+    /// The words stay and the status goes from `nogniet` to `goed`: the
+    /// provision started to apply. Changed words are [`Change::Amended`]
+    /// whatever the status did.
+    Commenced,
     /// Present in the later rendition only.
     Added,
     /// Marked `vervallen` in the later rendition and not in the earlier one.
@@ -63,6 +70,7 @@ impl Change {
         match self {
             Self::Unchanged => "unchanged",
             Self::Amended => "amended",
+            Self::Commenced => "commenced",
             Self::Added => "added",
             Self::Repealed => "repealed",
             Self::Withdrawn => "withdrawn",
@@ -171,6 +179,12 @@ pub fn compare(before: &[Article], after: &[Article]) -> Comparison {
             }
 
             Some(previous) if previous.content != article.content => Change::Amended,
+            Some(previous)
+                if previous.status.as_deref() == Some("nogniet")
+                    && article.status.as_deref() == Some("goed") =>
+            {
+                Change::Commenced
+            }
             Some(_) => Change::Unchanged,
         };
 
@@ -255,6 +269,7 @@ mod tests {
             path: Some(format!("/Boek6/Artikel{number}")),
             content: text.into(),
             effect: Some(effect.into()),
+            status: None,
         }
     }
 
@@ -311,6 +326,53 @@ mod tests {
         assert_eq!(changed(&comparison, "5"), Change::Added);
         assert_eq!(changed(&comparison, "3"), Change::Withdrawn);
         assert!(comparison.is_whole());
+    }
+
+    fn with_status(mut article: Article, status: &str) -> Article {
+        article.status = Some(status.into());
+        article
+    }
+
+    /// Words that stay and a status that goes from `nogniet` to `goed` are the
+    /// provision starting to apply, which 'unchanged' would hide.
+    #[test]
+    fn a_provision_that_starts_to_apply_has_commenced() {
+        let before = [with_status(
+            article("8", "119b", "Tekst.", "nieuw"),
+            "nogniet",
+        )];
+        let after = [with_status(article("8", "119b", "Tekst.", "nieuw"), "goed")];
+
+        assert_eq!(
+            changed(&compare(&before, &after), "119b"),
+            Change::Commenced
+        );
+    }
+
+    /// Changed words are an amendment whatever the status did.
+    #[test]
+    fn changed_words_are_an_amendment_even_as_it_commences() {
+        let before = [with_status(
+            article("8", "119b", "Stub.", "nieuw"),
+            "nogniet",
+        )];
+        let after = [with_status(article("8", "119b", "Tekst.", "nieuw"), "goed")];
+
+        assert_eq!(changed(&compare(&before, &after), "119b"), Change::Amended);
+    }
+
+    #[test]
+    fn a_provision_still_waiting_or_already_applying_is_unchanged() {
+        for status in ["nogniet", "goed"] {
+            let before = [with_status(article("8", "119b", "Tekst.", "nieuw"), status)];
+            let after = [with_status(article("8", "119b", "Tekst.", "nieuw"), status)];
+
+            assert_eq!(
+                changed(&compare(&before, &after), "119b"),
+                Change::Unchanged,
+                "{status}"
+            );
+        }
     }
 
     #[test]

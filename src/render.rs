@@ -283,8 +283,8 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             let s = &changes.summary;
             writeln!(
                 out,
-                "{} amended, {} added, {} repealed, {} withdrawn, {} unchanged\n",
-                s.amended, s.added, s.repealed, s.withdrawn, s.unchanged
+                "{} amended, {} commenced, {} added, {} repealed, {} withdrawn, {} unchanged\n",
+                s.amended, s.commenced, s.added, s.repealed, s.withdrawn, s.unchanged
             )?;
 
             for article in &changes.articles {
@@ -295,6 +295,12 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     && let Some(act) = &after.amended_by
                 {
                     writeln!(out, "           through {act}")?;
+                }
+
+                if article.change == "commenced"
+                    && let Some(day) = article.after.as_ref().and_then(|after| after.in_force_from)
+                {
+                    writeln!(out, "           commenced on {day}")?;
                 }
 
                 match (&article.before, &article.after) {

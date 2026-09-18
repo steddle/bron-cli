@@ -930,11 +930,11 @@ async fn law_changes_counts_only_the_article_asked_for() {
 
     assert_eq!(
         changes("1").await,
-        serde_json::json!({"unchanged": 0, "amended": 1, "added": 0, "repealed": 0, "withdrawn": 0})
+        serde_json::json!({"unchanged": 0, "amended": 1, "commenced": 0, "added": 0, "repealed": 0, "withdrawn": 0})
     );
     assert_eq!(
         changes("2").await,
-        serde_json::json!({"unchanged": 1, "amended": 0, "added": 0, "repealed": 0, "withdrawn": 0})
+        serde_json::json!({"unchanged": 1, "amended": 0, "commenced": 0, "added": 0, "repealed": 0, "withdrawn": 0})
     );
 
     let human = bron(
@@ -953,7 +953,8 @@ async fn law_changes_counts_only_the_article_asked_for() {
     )
     .await;
     assert!(
-        stdout(&human).contains("1 amended, 0 added, 0 repealed, 0 withdrawn, 0 unchanged"),
+        stdout(&human)
+            .contains("1 amended, 0 commenced, 0 added, 0 repealed, 0 withdrawn, 0 unchanged"),
         "{human:?}"
     );
 }
@@ -1169,4 +1170,104 @@ async fn law_versions_says_which_held_renditions_were_not_read() {
     let read = text.lines().find(|l| l.contains("2016-07-01_0")).unwrap();
     assert!(unread.contains("too_large"), "{text}");
     assert!(!read.contains("unread"), "{text}");
+}
+
+/// One rendition holding artikel 119b with the status and day it prints.
+fn waiting_or_applying(
+    label: &str,
+    blob: &str,
+    status: &str,
+    in_force_from: Option<&str>,
+) -> String {
+    let mut article = serde_json::json!({
+        "number": "119b",
+        "label": "Artikel 119b",
+        "stam_id": "2760119",
+        "status": status,
+        "span": {"start": 10, "end": 90},
+        "paragraphs": [{"number": "1", "rendered": "Tekst.", "span": {"start": 20, "end": 80}}],
+    });
+    if let Some(day) = in_force_from {
+        article["in_force_from"] = day.into();
+    }
+
+    serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "data": {
+            "regulation_id": "BWBR0005289",
+            "expression": {
+                "label": label,
+                "in_force": {"from": &label[..10]},
+                "held": true,
+                "blob": blob,
+            },
+            "articles": [article],
+        },
+    })
+    .to_string()
+}
+
+/// Words that stay and a status that goes from `nogniet` to `goed`: the
+/// provision started to apply, on the day the later rendition states. Each
+/// side's status is its own rendition's.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_says_a_provision_commenced_and_on_which_day() {
+    let server = MockServer::start().await;
+    for (as_of, label, blob, status, day) in [
+        ("2026-01-01", "2025-07-01_0", EARLIER_BLOB, "nogniet", None),
+        (
+            "2027-06-01",
+            "2027-01-01_0",
+            LATER_BLOB,
+            "goed",
+            Some("2027-01-01"),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/regulations/BWBR0005289/articles"))
+            .and(query_param("as_of", as_of))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                waiting_or_applying(label, blob, status, day),
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/blobs/{blob}/provenance")))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+    }
+
+    let args = [
+        "law",
+        "changes",
+        "BWBR0005289",
+        "--from",
+        "2026-01-01",
+        "--to",
+        "2027-06-01",
+    ];
+
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+    let change = &envelope["data"]["articles"][0];
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(change["change"], "commenced", "{envelope}");
+    assert_eq!(change["before"]["status"], "nogniet", "{envelope}");
+    assert_eq!(change["after"]["status"], "goed", "{envelope}");
+    assert_eq!(change["after"]["in_force_from"], "2027-01-01", "{envelope}");
+    assert_eq!(envelope["data"]["summary"]["commenced"], 1, "{envelope}");
+    assert_eq!(envelope["data"]["summary"]["unchanged"], 0, "{envelope}");
+
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+    assert!(human.status.success(), "{human:?}");
+    assert!(text.contains("commenced on 2027-01-01"), "{text}");
+    assert!(text.contains("1 commenced"), "{text}");
 }

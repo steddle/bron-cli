@@ -720,7 +720,11 @@ pub struct Lid {
 /// the bytes its span points at.
 #[derive(Debug, Serialize)]
 pub struct ArticleChange {
-    /// `unchanged`, `amended`, `added`, `repealed` or `withdrawn`.
+    /// `unchanged`, `amended`, `commenced`, `added`, `repealed` or `withdrawn`.
+    ///
+    /// `commenced` is the words staying while `status` goes from `nogniet` on
+    /// the earlier side to `goed` on the later, and the day is the later side's
+    /// `in_force_from` where the register states one.
     pub change: &'static str,
     pub number: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -744,6 +748,14 @@ pub struct Side {
     pub amended_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effect: Option<String>,
+    /// What this side's rendition prints about whether the article applies:
+    /// `goed`, `nogniet` or `vervallen`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// The day the article took the form it has on this side, where the
+    /// register states one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_force_from: Option<NaiveDate>,
     pub provenance: Provenance,
 }
 
@@ -792,6 +804,7 @@ pub struct ComparedVersion {
 pub struct ChangeSummary {
     pub unchanged: u32,
     pub amended: u32,
+    pub commenced: u32,
     pub added: u32,
     pub repealed: u32,
     pub withdrawn: u32,
