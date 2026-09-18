@@ -101,9 +101,10 @@ pub enum Law {
 
         /// Only what this law publishes and does not yet apply.
         ///
-        /// The one future the register holds. It consolidates a text on the day
-        /// it takes effect, so no version is published ahead, but an article
-        /// inside the current one can be waiting with the words it will have.
+        /// The one future the register holds. No version is waiting to take
+        /// effect, but an article inside the current one can be, and each one
+        /// names the day it applies. Not its words: the version prints a stub
+        /// and the text arrives in the version that commences it.
         #[arg(long)]
         not_commenced: bool,
 
