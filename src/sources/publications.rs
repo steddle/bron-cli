@@ -4,12 +4,13 @@
 //! papers), Staatsblad, Staatscourant and Tractatenblad. They differ only by
 //! `w.publicatienaam`, so they are one source here rather than four.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use roxmltree::Document;
 
 use super::xml::{self, Elem};
 use super::{Client, FetchedPublication, Source};
+use crate::error::NoRecord;
 use crate::ids::PublicationId;
 use crate::model::PublicationHit;
 
@@ -89,10 +90,7 @@ pub fn search(client: &Client, query: &Query) -> Result<Vec<PublicationHit>> {
 /// register links one.
 pub fn fetch(client: &Client, id: &PublicationId) -> Result<FetchedPublication> {
     let cql = format!("dt.identifier=\"{id}\"");
-    let record = fetch_records(client, &cql, 1)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow!("no publication with id {id}"))?;
+    let record = record_for(fetch_records(client, &cql, 1)?, id)?;
 
     // Not every record links an XML body, and the answer says which it is.
     let body = match record.url.as_deref() {
@@ -111,6 +109,14 @@ pub fn fetch(client: &Client, id: &PublicationId) -> Result<FetchedPublication> 
         published_on: record.hit.published_on,
         provenance: body.as_ref().map(|f| Source::from(f).into()),
     })
+}
+
+/// The record the register answered for `id`, where it answered one.
+fn record_for(records: Vec<Record>, id: &PublicationId) -> Result<Record> {
+    records
+        .into_iter()
+        .next()
+        .ok_or_else(|| NoRecord(format!("no publication {id}")).into())
 }
 
 fn fetch_records(client: &Client, cql: &str, limit: u32) -> Result<Vec<Record>> {
@@ -227,6 +233,20 @@ mod tests {
             records[0].hit.published_on,
             Some("2013-10-01".parse().unwrap())
         );
+    }
+
+    /// The register answering zero records for a well-formed id is the
+    /// register saying there is no such publication, not an unusable answer.
+    #[test]
+    fn no_record_under_a_well_formed_id_is_not_found() {
+        let id: PublicationId = "stb-1900-99999".parse().unwrap();
+        let fault = crate::error::from_source(
+            "officiële bekendmakingen",
+            record_for(Vec::new(), &id).err().unwrap(),
+        );
+
+        assert_eq!(fault.kind(), "not_found");
+        assert_eq!(fault.to_string(), "no publication stb-1900-99999");
     }
 
     #[test]

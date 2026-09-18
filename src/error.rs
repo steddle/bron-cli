@@ -172,6 +172,14 @@ pub type Outcome<T> = std::result::Result<T, Fault>;
 #[error("{0}")]
 pub struct OwnDoing(pub &'static str);
 
+/// The register answered and holds no record under the identifier asked for.
+///
+/// Not-found, and marked so by the lane that asked: a register that answers an
+/// empty result set does so with a 200, so no status in the chain says it.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct NoRecord(pub String);
+
 /// Classifies a failure from a source module.
 ///
 /// Reqwest is the only thing that can tell reachability from unreadability, and
@@ -183,6 +191,10 @@ pub fn from_source(service: &'static str, error: anyhow::Error) -> Fault {
     // else the chain says about it.
     if error.downcast_ref::<OwnDoing>().is_some() {
         return Fault::Local(error);
+    }
+
+    if let Some(absent) = error.chain().find_map(|e| e.downcast_ref::<NoRecord>()) {
+        return Fault::NotFound(absent.to_string());
     }
 
     let transport_errors = || {
