@@ -55,7 +55,8 @@ pub struct SearchResults {
 
 pub struct Query<'a> {
     pub terms: &'a str,
-    /// Matched against the decision title, which carries the court name.
+    /// The court's whole name as the search title opens with it, e.g. `Hoge
+    /// Raad`, matched without regard to case.
     pub court: Option<&'a str>,
     /// Decisions before this date are dropped.
     pub from: Option<NaiveDate>,
@@ -120,26 +121,34 @@ pub fn search(client: &Client, query: &Query) -> Result<SearchResults> {
             .json(&payload),
     )?;
 
-    let response: SearchResponse = serde_json::from_str(&fetched.text)
-        .context("rechtspraak search returned an unreadable body")?;
+    let (hits, returned) = read_hits(&fetched.text, query)?;
+
+    // Upstream filled the page and the filters still left us short: there is no
+    // way to distinguish exhausted from truncated, so report it as truncated.
+    let truncated = hits.len() < query.limit as usize && returned >= page_size;
+
+    Ok(SearchResults { hits, truncated })
+}
+
+/// The hits a search body carries that pass the query's narrowings, and how
+/// many rows the body carried before them.
+fn read_hits(body: &str, query: &Query) -> Result<(Vec<CaseHit>, u32)> {
+    let response: SearchResponse =
+        serde_json::from_str(body).context("rechtspraak search returned an unreadable body")?;
 
     let court = query.court.map(str::to_lowercase);
     let returned = response.results.len() as u32;
 
-    let hits: Vec<CaseHit> = response
+    let hits = response
         .results
         .into_iter()
         .filter_map(|r| {
             let id = r.ecli?.parse::<Ecli>().ok()?;
             let decided_on = r.date.as_deref().and_then(dutch_date);
+            let named = r.title.as_deref().and_then(court_of);
 
             if let Some(court) = &court
-                && !r
-                    .title
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_lowercase()
-                    .contains(court)
+                && named.map(str::to_lowercase).as_ref() != Some(court)
             {
                 return None;
             }
@@ -151,6 +160,7 @@ pub fn search(client: &Client, query: &Query) -> Result<SearchResults> {
 
             Some(CaseHit {
                 id,
+                court: named.map(str::to_string),
                 title: r.title,
                 summary: r.fragment,
                 decided_on,
@@ -159,11 +169,14 @@ pub fn search(client: &Client, query: &Query) -> Result<SearchResults> {
         .take(query.limit as usize)
         .collect();
 
-    // Upstream filled the page and the filters still left us short: there is no
-    // way to distinguish exhausted from truncated, so report it as truncated.
-    let truncated = hits.len() < query.limit as usize && returned >= page_size;
+    Ok((hits, returned))
+}
 
-    Ok(SearchResults { hits, truncated })
+/// The court a search title names: `Hoge Raad, 12-12-2025, 25/01812` opens with
+/// it, up to the first comma. No court name holds a comma.
+fn court_of(title: &str) -> Option<&str> {
+    let (court, _) = title.split_once(", ")?;
+    Some(court.trim()).filter(|court| !court.is_empty())
 }
 
 /// Fetches one decision by ECLI.
@@ -388,6 +401,49 @@ mod tests {
 
         let text = case.full_text.expect("an opinion has a body");
         assert!(text.contains("prejudiciele vraag"), "{text}");
+    }
+
+    /// As the search endpoint answers: the court opens the title, before the
+    /// date. The Parket's name contains the Hoge Raad's.
+    const HITS: &str = r#"{"Results":[
+      {"TitelEmphasis":"ECLI:NL:PHR:2026:883","Titel":"Parket bij de Hoge Raad, 18-09-2026, 25/03844","Uitspraakdatum":"18-09-2026"},
+      {"TitelEmphasis":"ECLI:NL:HR:2025:1888","Titel":"Hoge Raad, 12-12-2025, 25/01812","Uitspraakdatum":"12-12-2025"},
+      {"TitelEmphasis":"ECLI:NL:CRVB:2023:792","Titel":"Centrale Raad van Beroep, 25-04-2023, 22/3228 WIA, 23/1043 WIA","Uitspraakdatum":"25-04-2023"}
+    ]}"#;
+
+    fn asking(court: Option<&str>) -> Query<'_> {
+        Query {
+            terms: "cassatie",
+            court,
+            from: None,
+            limit: 20,
+        }
+    }
+
+    /// 'Hoge Raad' names one court. Matched as a substring it also names the
+    /// Parket bij de Hoge Raad, whose conclusies are not decisions of it.
+    #[test]
+    fn a_court_is_matched_by_its_whole_name() {
+        let (hits, _) = read_hits(HITS, &asking(Some("Hoge Raad"))).unwrap();
+
+        let eclis: Vec<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
+        assert_eq!(eclis, ["ECLI:NL:HR:2025:1888"]);
+    }
+
+    #[test]
+    fn every_hit_names_its_court() {
+        let (hits, returned) = read_hits(HITS, &asking(None)).unwrap();
+
+        let courts: Vec<Option<&str>> = hits.iter().map(|hit| hit.court.as_deref()).collect();
+        assert_eq!(
+            courts,
+            [
+                Some("Parket bij de Hoge Raad"),
+                Some("Hoge Raad"),
+                Some("Centrale Raad van Beroep"),
+            ]
+        );
+        assert_eq!(returned, 3);
     }
 
     #[test]

@@ -238,7 +238,7 @@ pub enum Case {
     /// reproducible over time. The answer says so itself.
     Search {
         query: Vec<String>,
-        /// Filters on the court, e.g. 'Hoge Raad'.
+        /// Only decisions of this court, by its whole name, e.g. 'Hoge Raad'.
         #[arg(long)]
         court: Option<String>,
         /// Only decisions from this date onwards.

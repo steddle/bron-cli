@@ -793,6 +793,8 @@ impl From<model::AppealStatus> for AppealStatus {
 pub struct CaseHit {
     pub ecli: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub court: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -804,6 +806,7 @@ impl From<model::CaseHit> for CaseHit {
     fn from(hit: model::CaseHit) -> Self {
         Self {
             ecli: hit.id.into_string(),
+            court: hit.court,
             title: hit.title,
             summary: hit.summary,
             decided_on: hit.decided_on,

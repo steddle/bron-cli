@@ -64,6 +64,7 @@ pub enum AppealStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseHit {
     pub id: Ecli,
+    pub court: Option<String>,
     pub title: Option<String>,
     pub summary: Option<String>,
     pub decided_on: Option<NaiveDate>,
