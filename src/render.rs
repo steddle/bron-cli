@@ -706,6 +706,34 @@ fn caveat_line(caveat: &Caveat) -> String {
             line.push_str(" They are outside the counts above.");
             line
         }
+        Caveat::CitationNotRead {
+            number,
+            name,
+            because,
+        } => format!(
+            "note: {number} {name} reads as a citation, and the register gives no regulation \
+                 the name {name} ({because}). These are the nearest texts to it, not the article \
+                 cited."
+        ),
+        Caveat::RenditionsNotHeld { count, renditions } => format!(
+            "note: the service does not hold the text of {count} of the {renditions} \
+                 rendition(s) listed"
+        ),
+        Caveat::RenditionsUnread { count, renditions } => format!(
+            "note: {count} of the {renditions} rendition(s) listed are held and were not parsed \
+                 into articles, so they have no article to answer"
+        ),
+        // Every unit, the aanhef too: the count is the service's, and naming
+        // only some of it would be bron deciding which text matters.
+        Caveat::TextOutsideArticles { expression, units } => format!(
+            "note: rendition {expression} prints text outside its articles, which bron does \
+                 not read: {}. This answer is true of the articles alone.",
+            units
+                .iter()
+                .map(|(unit, count)| format!("{unit} ({count})"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
@@ -800,6 +828,56 @@ mod tests {
             "note: 2 articles in this law are numbered 1; their paths tell them apart:\n      \
              /Bijlage2/Artikel1\n      /Bijlage3/Artikel1"
         );
+    }
+
+    /// Every unit counted is named, the aanhef with the rest: the caveat is
+    /// raised for the others, and the reader is owed the whole count.
+    #[test]
+    fn text_outside_articles_names_the_rendition_and_every_unit() {
+        let note = caveat_line(&Caveat::TextOutsideArticles {
+            expression: "2026-09-12_0".into(),
+            units: [("aanhef".to_string(), 1), ("bijlage".to_string(), 10)].into(),
+        });
+
+        assert!(note.contains("2026-09-12_0"), "{note}");
+        assert!(note.contains("bijlage (10)"), "{note}");
+        assert!(note.contains("aanhef (1)"), "{note}");
+    }
+
+    /// The hits under a citation that was not read are the nearest texts to
+    /// an identifier, and the note says so and quotes the name as typed.
+    #[test]
+    fn a_citation_not_read_says_the_hits_are_not_the_article_cited() {
+        let note = caveat_line(&Caveat::CitationNotRead {
+            number: "3:305a".into(),
+            name: "WAMCA".into(),
+            because: "name_not_stated".into(),
+        });
+
+        assert!(note.contains("WAMCA"), "{note}");
+        assert!(note.contains("3:305a"), "{note}");
+        assert!(note.contains("name_not_stated"), "{note}");
+        assert!(note.contains("not the article"), "{note}");
+    }
+
+    #[test]
+    fn renditions_not_held_says_how_many_of_how_many() {
+        let note = caveat_line(&Caveat::RenditionsNotHeld {
+            count: 30,
+            renditions: 41,
+        });
+
+        assert!(note.contains("30 of the 41"), "{note}");
+    }
+
+    #[test]
+    fn renditions_unread_says_how_many_of_how_many() {
+        let note = caveat_line(&Caveat::RenditionsUnread {
+            count: 2,
+            renditions: 41,
+        });
+
+        assert!(note.contains("2 of the 41"), "{note}");
     }
 
     /// Three facts about the publisher's hash, and a reader told one must not

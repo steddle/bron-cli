@@ -18,6 +18,8 @@
 //! - **The date the answer is bound to.** For an as-of query that is the
 //!   resolved date, never today.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
@@ -321,6 +323,44 @@ pub enum Caveat {
         repeated: Vec<String>,
     },
 
+    /// A term shaped like a citation was ranked as a question, because the
+    /// register gives the name in it to no regulation.
+    ///
+    /// `number` is the article number read and `name` the part taken for the
+    /// law's name, as typed. `because` is `name_not_stated`, a name the
+    /// register states for nothing, or `name_not_standing`, one it states and
+    /// not on the day asked. The hits are the nearest texts to an identifier,
+    /// which may have nothing to do with the article meant.
+    CitationNotRead {
+        number: String,
+        name: String,
+        because: String,
+    },
+
+    /// Renditions in a history whose text the service does not hold, `count`
+    /// of the `renditions` the history lists.
+    RenditionsNotHeld { count: u32, renditions: u32 },
+
+    /// Renditions in a history whose bytes the service holds and did not parse
+    /// into articles, `count` of the `renditions` the history lists.
+    ///
+    /// Held is not read: such a rendition has no article to answer, and a
+    /// history that listed it beside the others without this would read as one
+    /// whose every held text can be quoted.
+    RenditionsUnread { count: u32, renditions: u32 },
+
+    /// The rendition `expression` prints text outside its articles, which bron
+    /// does not read: `units` counts it per element, `bijlage` or
+    /// `circulaire.divisie`, the `aanhef` included.
+    ///
+    /// Nothing outside `<artikel>` is stored, so an answer about such a
+    /// rendition is true of its articles and of nothing else. A comparison that
+    /// found no change found none in the articles.
+    TextOutsideArticles {
+        expression: String,
+        units: BTreeMap<String, u32>,
+    },
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -399,6 +439,23 @@ impl Caveat {
                 held_regulations: u32,
                 known_regulations: u32,
             },
+            CitationNotRead {
+                number: String,
+                name: String,
+                because: String,
+            },
+            RenditionsNotHeld {
+                count: u32,
+                renditions: u32,
+            },
+            RenditionsUnread {
+                count: u32,
+                renditions: u32,
+            },
+            TextOutsideArticles {
+                expression: String,
+                units: BTreeMap<String, u32>,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -456,6 +513,24 @@ impl Caveat {
                 held_regulations,
                 known_regulations,
             },
+            Ok(Stated::CitationNotRead {
+                number,
+                name,
+                because,
+            }) => Self::CitationNotRead {
+                number,
+                name,
+                because,
+            },
+            Ok(Stated::RenditionsNotHeld { count, renditions }) => {
+                Self::RenditionsNotHeld { count, renditions }
+            }
+            Ok(Stated::RenditionsUnread { count, renditions }) => {
+                Self::RenditionsUnread { count, renditions }
+            }
+            Ok(Stated::TextOutsideArticles { expression, units }) => {
+                Self::TextOutsideArticles { expression, units }
+            }
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
@@ -978,6 +1053,46 @@ mod tests {
         assert_eq!(Caveat::stated(&stated), Caveat::Unrecognised { stated });
     }
 
+    /// The units are a map, and a map the shape here does not read still
+    /// crosses whole: a count that is not a number is the service saying
+    /// something this build cannot name, not something to drop.
+    #[test]
+    fn a_map_of_units_is_read_and_one_this_build_cannot_read_is_carried_whole() {
+        assert_eq!(
+            Caveat::stated(&serde_json::json!({
+                "kind": "text_outside_articles",
+                "expression": "2026-09-12_0",
+                "units": {"bijlage": 10, "aanhef": 1},
+            })),
+            Caveat::TextOutsideArticles {
+                expression: "2026-09-12_0".into(),
+                units: [("aanhef".to_string(), 1), ("bijlage".to_string(), 10)].into(),
+            }
+        );
+
+        for stated in [
+            serde_json::json!({
+                "kind": "text_outside_articles",
+                "expression": "2026-09-12_0",
+                "units": {"bijlage": "ten"},
+            }),
+            serde_json::json!({"kind": "something_later", "units": {"bijlage": {"n": 10}}}),
+        ] {
+            let read = Caveat::stated(&stated);
+
+            assert_eq!(
+                read,
+                Caveat::Unrecognised {
+                    stated: stated.clone()
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(&read).unwrap(),
+                serde_json::json!({"kind": "unrecognised", "stated": stated})
+            );
+        }
+    }
+
     /// The count of texts no ranking reaches is read under its own name, and
     /// its scope with it: the number is of the corpus, so a search narrowed to
     /// one regulation reports the same figure and has to say why.
@@ -1088,6 +1203,19 @@ mod tests {
                 "kind": "held_text_only",
                 "held_regulations": 4,
                 "known_regulations": 25462,
+            }),
+            serde_json::json!({"kind": "renditions_unread", "count": 2, "renditions": 41}),
+            serde_json::json!({"kind": "renditions_not_held", "count": 30, "renditions": 41}),
+            serde_json::json!({
+                "kind": "citation_not_read",
+                "number": "3:305a",
+                "name": "WAMCA",
+                "because": "name_not_stated",
+            }),
+            serde_json::json!({
+                "kind": "text_outside_articles",
+                "expression": "2026-09-12_0",
+                "units": {"aanhef": 1, "bijlage": 10},
             }),
         ] {
             assert_eq!(
