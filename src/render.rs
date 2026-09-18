@@ -22,13 +22,19 @@ const READING: usize = 8;
 const SOURCE: usize = 11;
 const NOT_HELD: &str = "not held";
 
-pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
+/// Writes one answer for a person.
+///
+/// Where stdout carries rows, one per thing listed, every note on them goes to
+/// `err`: a caveat, the cursor, a legend. A shell script reading line by line
+/// then never reads a sentence as a row. An answer that is a document rather
+/// than a list keeps its notes beneath it on `out`.
+pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io::Result<()> {
     match answer {
         Answer::LawHits(a) => {
             for hit in &a.data {
                 writeln!(out, "{}  {}", hit.id, hit.title.as_deref().unwrap_or(""))?;
             }
-            caveats(&a.caveats, out)
+            caveats(&a.caveats, err)
         }
 
         Answer::Found(a) => {
@@ -128,8 +134,8 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 )?;
             }
 
-            writeln!(out, "\n* = the service holds this text")?;
-            caveats(&a.caveats, out)
+            writeln!(err, "* = the service holds this text")?;
+            caveats(&a.caveats, err)
         }
 
         Answer::Feed(a) => {
@@ -151,15 +157,15 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                 writeln!(out, "The register has done nothing since {}.", a.data.next)?;
             }
 
-            // The cursor and the corpus it belongs to go to stderr, so a shell
-            // script reads events on stdout and takes its next cursor from
-            // --json, where both are fields rather than a sentence.
-            eprintln!(
+            // A shell script takes its next cursor from --json, where it is a
+            // field rather than a sentence.
+            writeln!(
+                err,
                 "next {}  head {}  origin {}",
                 a.data.next, a.data.head, a.data.origin
-            );
+            )?;
 
-            caveats(&a.caveats, out)
+            caveats(&a.caveats, err)
         }
 
         Answer::Versions(a) => {
@@ -176,17 +182,17 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     None => writeln!(out)?,
                 }
             }
-            writeln!(out, "\n* = the service holds this text")?;
+            writeln!(err, "* = the service holds this text")?;
             if a.data
                 .iter()
                 .any(|version| version.unread_because.is_some())
             {
                 writeln!(
-                    out,
+                    err,
                     "unread = held and not parsed into articles, so it has none to answer"
                 )?;
             }
-            caveats(&a.caveats, out)
+            caveats(&a.caveats, err)
         }
 
         Answer::Articles(e) => {
@@ -317,7 +323,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     writeln!(out, "  {summary}")?;
                 }
             }
-            caveats(&e.caveats, out)
+            caveats(&e.caveats, err)
         }
 
         Answer::Case(e) => {
@@ -381,7 +387,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
                     writeln!(out, "  dossier {dossier}")?;
                 }
             }
-            caveats(&e.caveats, out)
+            caveats(&e.caveats, err)
         }
     }
 }
@@ -785,7 +791,7 @@ mod tests {
         });
 
         let mut out = Vec::new();
-        answer.render(&mut out).unwrap();
+        answer.render(&mut out, &mut io::sink()).unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -878,6 +884,52 @@ mod tests {
         });
 
         assert!(note.contains("2 of the 41"), "{note}");
+    }
+
+    /// Rows on stdout and every note on stderr, for the two lists read from a
+    /// publisher, whose endpoints no test can stand in for.
+    #[test]
+    fn a_list_read_from_a_publisher_keeps_its_notes_off_stdout() {
+        use bron::wire::{CaseHit, PublicationHit};
+
+        let cases = Answer::CaseHits(
+            Envelope::ok(vec![CaseHit {
+                ecli: "ECLI:NL:HR:2025:1888".into(),
+                court: Some("Hoge Raad".into()),
+                title: Some("Hoge Raad, 12-12-2025, 25/01812".into()),
+                summary: None,
+                decided_on: None,
+            }])
+            .with_caveats(vec![
+                Caveat::UnstableOrdering,
+                Caveat::Truncated { window: 20 },
+            ]),
+        );
+        let publications = Answer::PublicationHits(
+            Envelope::ok(vec![PublicationHit {
+                id: "kst-33669-6".into(),
+                title: Some("Programmatische aanpak stikstof".into()),
+                dossier: Some("33669".into()),
+                published_on: None,
+            }])
+            .with_caveats(vec![Caveat::Truncated { window: 20 }]),
+        );
+
+        for (answer, row) in [
+            (cases, "ECLI:NL:HR:2025:1888"),
+            (publications, "kst-33669-6"),
+        ] {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            super::answer(&answer, &mut out, &mut err).unwrap();
+            let (out, err) = (
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            );
+
+            assert!(out.contains(row), "{out}");
+            assert!(!out.contains("note:"), "{out}");
+            assert!(err.contains("note: filtered over a window of 20"), "{err}");
+        }
     }
 
     /// Three facts about the publisher's hash, and a reader told one must not

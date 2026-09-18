@@ -230,6 +230,10 @@ const PUBLISHED: &str = r#"{"bron":1,"grade":"authority",
  "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true,"later_field":9}],
  "caveats":[{"kind":"something_later","window":50}]}"#;
 
+const PUBLISHED_CUT: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true}],
+ "caveats":[{"kind":"truncated","window":1}]}"#;
+
 const FEED: &str = r#"{"bron":1,"grade":"authority",
  "data":{"origin":"8539df1d82a7060824be7ba17f500781","head":41,"next":40,"events":[
   {"seq":40,"event":"published","regulation_id":"BWBR0024282","label":"2026-07-01_0","in_force":{"from":"2026-07-01"},"withdrawn":false,"later_field":true}]},
@@ -372,12 +376,11 @@ async fn law_feed_says_in_words_that_a_cursor_belongs_to_another_corpus() {
     let output = bron(&server, &["law", "feed", "--since", "900"]).await;
 
     // The one caveat a poller most needs in plain words: throw the cursor away.
+    // Beside the cursor on stderr, since stdout is rows.
+    let err = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{output:?}");
-    assert!(
-        stdout(&output).contains("Start again from the head"),
-        "{output:?}"
-    );
-    assert!(!stdout(&output).contains("no sentence for"), "{output:?}");
+    assert!(err.contains("Start again from the head"), "{err}");
+    assert!(!err.contains("no sentence for"), "{err}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -998,6 +1001,48 @@ async fn law_changes_for_an_article_in_neither_rendition_is_not_found() {
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     assert_eq!(envelope["error"]["kind"], "not_found");
     assert!(envelope["error"].get("code").is_none(), "{envelope}");
+}
+
+/// Where stdout is rows, a limit on them goes to stderr beside the cursor, so
+/// a shell script reading line by line never reads a sentence as a row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_list_of_rows_keeps_its_caveats_off_stdout() {
+    const HITS: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet"}],
+ "caveats":[{"kind":"truncated","window":1}]}"#;
+
+    const VERSIONS: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"unread_because":"too_large"}],
+ "caveats":[{"kind":"truncated","window":1}]}"#;
+
+    for (route, body, args) in [
+        ("/api/v1/feed", FEED, &["law", "feed", "--since", "0"][..]),
+        ("/api/v1/regulations", HITS, &["law", "search", "Awb"][..]),
+        (
+            "/api/v1/expressions",
+            PUBLISHED_CUT,
+            &["law", "published", "--from", "2026-09-01"][..],
+        ),
+        (
+            "/api/v1/regulations/BWBR0008691/expressions",
+            VERSIONS,
+            &["law", "versions", "BWBR0008691"][..],
+        ),
+    ] {
+        let server = answering("GET", route, body).await;
+
+        let output = bron(&server, args).await;
+        let err = String::from_utf8_lossy(&output.stderr);
+
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        assert!(!stdout(&output).contains("note:"), "{args:?}: {output:?}");
+        // A legend is a note too, and read as a row it names a rendition `*`.
+        assert!(!stdout(&output).contains(" = "), "{args:?}: {output:?}");
+        assert!(
+            err.contains("note: filtered over a window of 1"),
+            "{args:?}: {err}"
+        );
+    }
 }
 
 /// A provision the rendition publishes and does not yet apply is never said to

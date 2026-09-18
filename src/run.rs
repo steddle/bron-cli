@@ -68,8 +68,8 @@ impl Answer {
         }
     }
 
-    pub fn render(&self, out: &mut impl Write) -> io::Result<()> {
-        render::answer(self, out)
+    pub fn render(&self, out: &mut impl Write, err: &mut impl Write) -> io::Result<()> {
+        render::answer(self, out, err)
     }
 }
 

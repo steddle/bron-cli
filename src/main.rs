@@ -106,7 +106,7 @@ fn emit(answer: &Answer, json: bool) -> io::Result<()> {
         answer.to_json(&mut out)?;
         out.write_all(b"\n")
     } else {
-        answer.render(&mut out)
+        answer.render(&mut out, &mut io::stderr().lock())
     }
 }
 
