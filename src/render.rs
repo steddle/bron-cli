@@ -165,14 +165,27 @@ pub fn answer(answer: &Answer, out: &mut impl Write) -> io::Result<()> {
         Answer::Versions(a) => {
             for version in &a.data {
                 let held = if version.held { "*" } else { " " };
-                writeln!(
+                write!(
                     out,
                     "{held} {}  {}",
                     version.label,
                     window(version.in_force.from, version.in_force.until)
                 )?;
+                match &version.unread_because {
+                    Some(because) => writeln!(out, "  unread: {because}")?,
+                    None => writeln!(out)?,
+                }
             }
             writeln!(out, "\n* = the service holds this text")?;
+            if a.data
+                .iter()
+                .any(|version| version.unread_because.is_some())
+            {
+                writeln!(
+                    out,
+                    "unread = held and not parsed into articles, so it has none to answer"
+                )?;
+            }
             caveats(&a.caveats, out)
         }
 

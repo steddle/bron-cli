@@ -44,6 +44,11 @@ pub struct Expression {
     pub size: Option<u64>,
     /// True where the service holds this rendition's text.
     pub held: bool,
+    /// Why held bytes were not parsed into articles: `too_large`,
+    /// `unparseable` or `paragraph_drift`, read as a string so a reason added
+    /// later crosses. Absent where they were, and where nothing is held.
+    #[serde(default)]
+    pub unread_because: Option<String>,
     pub blob: Option<String>,
 }
 

@@ -1100,3 +1100,26 @@ async fn the_service_unable_to_fetch_is_upstream_with_its_delay() {
     );
 }
 
+/// A held rendition that was not parsed into articles has none to answer, and
+/// a person reading the list is told which and why. `--json` is the envelope
+/// as sent, so the field reaches a consumer untouched.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_versions_says_which_held_renditions_were_not_read() {
+    const UNREAD: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"unread_because":"too_large"},
+         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true}]}"#;
+
+    let server = answering("GET", "/api/v1/regulations/BWBR0008691/expressions", UNREAD).await;
+
+    let json = bron(&server, &["--json", "law", "versions", "BWBR0008691"]).await;
+    assert_eq!(stdout(&json), format!("{UNREAD}\n"));
+
+    let output = bron(&server, &["law", "versions", "BWBR0008691"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    let unread = text.lines().find(|l| l.contains("2019-01-01_0")).unwrap();
+    let read = text.lines().find(|l| l.contains("2016-07-01_0")).unwrap();
+    assert!(unread.contains("too_large"), "{text}");
+    assert!(!read.contains("unread"), "{text}");
+}
