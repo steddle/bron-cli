@@ -548,23 +548,6 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 return Err(Fault::not_found("stored", what));
             }
 
-            // Asking for one number and getting several means the number named
-            // several. Both are answered, because picking would be bron
-            // deciding which was meant, but the reader has to be told: two
-            // headings reading "1" are otherwise indistinguishable from a
-            // duplicated row.
-            if let Some(number) = wanted.as_deref()
-                && articles.len() > 1
-            {
-                caveats.push(Caveat::AmbiguousArticle {
-                    number: number.to_string(),
-                    paths: articles
-                        .iter()
-                        .map(|a| a.path.clone().unwrap_or_else(|| a.number.clone()))
-                        .collect(),
-                });
-            }
-
             let articles = narrow(articles, paragraph.as_deref(), item.as_deref())?;
 
             // Read off what the answer carries rather than off the flag that

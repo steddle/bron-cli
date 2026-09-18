@@ -582,3 +582,70 @@ async fn law_versions_asks_for_the_whole_history() {
 
     assert!(output.status.success(), "{output:?}");
 }
+
+/// A number that names two articles is the service's to say: it reads the
+/// rendition and states the caveat with both paths. bron carries that one
+/// statement and adds none of its own, so the reader is told once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_number_naming_two_articles_is_said_once() {
+    let article = |path: &str| {
+        serde_json::json!({
+            "number": "1",
+            "path": path,
+            "stam_id": path,
+            "span": {"start": 10, "end": 90},
+            "paragraphs": [{"rendered": "Tekst.", "span": {"start": 20, "end": 80}}],
+        })
+    };
+    let stated = serde_json::json!({
+        "kind": "ambiguous_article",
+        "number": "1",
+        "paths": ["/Bijlage2/Artikel1", "/Bijlage3/Artikel1"],
+    });
+    let answer = serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": "2018-01-01",
+        "as_known_on": "2026-09-18",
+        "data": {
+            "regulation_id": "BWBR0008691",
+            "expression": {
+                "label": "2016-07-01_0",
+                "in_force": {"from": "2016-07-01"},
+                "held": true,
+                "blob": EARLIER_BLOB,
+            },
+            "articles": [article("/Bijlage2/Artikel1"), article("/Bijlage3/Artikel1")],
+        },
+        "caveats": [stated],
+    });
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0008691/articles"))
+        .and(query_param("number", "1"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(answer.to_string(), "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{EARLIER_BLOB}/provenance")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["--json", "law", "show", "BWBR0008691", "--article", "1"],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(envelope["data"].as_array().map(Vec::len), Some(2));
+    assert_eq!(envelope["caveats"], serde_json::json!([stated]));
+}

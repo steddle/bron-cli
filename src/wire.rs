@@ -137,8 +137,9 @@ pub enum Caveat {
     Truncated { window: u32 },
     /// Articles in the source yielded no text and were not stored.
     SkippedArticles { count: u32 },
-    /// An article number named more than one article, and all of them are in
-    /// the answer.
+    /// An article number named more than one article in the rendition, and the
+    /// service answered all of them. `paths` names each, including any that
+    /// `--paragraph` then drops.
     ///
     /// Numbers are not unique within a law: the Awb restarts at Artikel 1 in
     /// each of its annexes, and those annex articles carry no label at all,
@@ -365,6 +366,10 @@ impl Caveat {
             SkippedArticles {
                 count: u32,
             },
+            AmbiguousArticle {
+                number: String,
+                paths: Vec<String>,
+            },
             TableFlattened {
                 articles: Vec<String>,
                 cell_separator: String,
@@ -421,6 +426,9 @@ impl Caveat {
             Ok(Stated::UpstreamHashRewritten) => Self::UpstreamHashRewritten,
             Ok(Stated::Truncated { window }) => Self::Truncated { window },
             Ok(Stated::SkippedArticles { count }) => Self::SkippedArticles { count },
+            Ok(Stated::AmbiguousArticle { number, paths }) => {
+                Self::AmbiguousArticle { number, paths }
+            }
             Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
             Ok(Stated::TableFlattened {
                 articles,
@@ -1051,6 +1059,11 @@ mod tests {
             serde_json::json!({"kind": "cursor_ahead", "asked": 90, "head": 40}),
             serde_json::json!({"kind": "truncated", "window": 20}),
             serde_json::json!({"kind": "skipped_articles", "count": 14}),
+            serde_json::json!({
+                "kind": "ambiguous_article",
+                "number": "1",
+                "paths": ["/Bijlage2/Artikel1", "/Bijlage3/Artikel1"],
+            }),
             serde_json::json!({
                 "kind": "table_flattened",
                 "articles": ["2.10"],
