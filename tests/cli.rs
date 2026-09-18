@@ -425,3 +425,160 @@ async fn a_failure_bron_states_itself_carries_no_code() {
     assert_eq!(envelope["error"]["kind"], "usage");
     assert!(envelope["error"].get("code").is_none(), "{envelope}");
 }
+
+/// One rendition's articles, shaped as the service shapes them. A label opens
+/// with the day its rendition commenced.
+fn articles_of(as_of: &str, label: &str, blob: &str, text: &str) -> String {
+    serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": as_of,
+        "as_known_on": "2026-09-18",
+        "data": {
+            "regulation_id": "BWBR0008691",
+            "expression": {
+                "label": label,
+                "in_force": {"from": &label[..10]},
+                "held": true,
+                "upstream_hash_check": "matches",
+                "blob": blob,
+            },
+            "articles": [{
+                "number": "1",
+                "label": "Artikel 1",
+                "stam_id": "2760033",
+                "span": {"start": 10, "end": 90},
+                "paragraphs": [
+                    {"number": "1", "rendered": text, "span": {"start": 20, "end": 80}},
+                ],
+            }],
+        },
+    })
+    .to_string()
+}
+
+const EARLIER_BLOB: &str = "35e29887c98339a23c835cd45fa22c0569f2db6e7d05fbca6c8de0d4fb15a0fb";
+const LATER_BLOB: &str = "4ba2172e7f7630289a08992d33c6a8b181dd6167300989f143f3a506357c6364";
+
+/// Answers one rendition's articles, and only to a request for the whole of
+/// it: the service pages this route by default, and `limit=none` is how the
+/// whole set is asked for.
+async fn holding_the_whole_of(
+    server: &MockServer,
+    as_of: &str,
+    label: &str,
+    blob: &str,
+    text: &str,
+) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0008691/articles"))
+        .and(query_param("as_of", as_of))
+        .and(query_param("limit", "none"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(articles_of(as_of, label, blob, text), "application/json"),
+        )
+        .expect(1)
+        .mount(server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{blob}/provenance")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
+            "application/json",
+        ))
+        .mount(server)
+        .await;
+}
+
+/// A comparison is between two whole renditions. A page of each would compare
+/// the first page and report the rest of the law as unchanged by saying nothing
+/// about it.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_asks_for_the_whole_of_both_renditions() {
+    let server = MockServer::start().await;
+    holding_the_whole_of(
+        &server,
+        "2018-01-01",
+        "2016-07-01_0",
+        EARLIER_BLOB,
+        "Eerste lid.",
+    )
+    .await;
+    holding_the_whole_of(
+        &server,
+        "2019-01-01",
+        "2019-01-01_0",
+        LATER_BLOB,
+        "Eerste lid, gewijzigd.",
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "changes",
+            "BWBR0008691",
+            "--from",
+            "2018-01-01",
+            "--to",
+            "2019-01-01",
+        ],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    // Each mock answers only a request carrying `limit=none`, and expects one.
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(envelope["data"]["summary"]["amended"], 1, "{envelope}");
+}
+
+/// At a terminal the whole law is what `law show` means.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_asks_for_the_whole_law() {
+    let server = MockServer::start().await;
+    holding_the_whole_of(
+        &server,
+        "2018-01-01",
+        "2016-07-01_0",
+        EARLIER_BLOB,
+        "Eerste lid.",
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "show",
+            "BWBR0008691",
+            "--as-of",
+            "2018-01-01",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// The whole history is what `law versions` means, and the service pages a
+/// regulation's renditions by default.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_versions_asks_for_the_whole_history() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0008691/expressions"))
+        .and(query_param("limit", "none"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(EXPRESSIONS, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["law", "versions", "BWBR0008691"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+}

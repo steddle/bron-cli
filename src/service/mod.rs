@@ -48,6 +48,11 @@ const ENV: &str = "BRON_MIRROR";
 /// wants to check a quotation can fetch those bytes and cut them again.
 const DEFAULT: &str = "https://bron.steddle.com/api/v1";
 
+/// What `limit` reads as the whole set, on the two routes one regulation
+/// bounds. The service pages both by default, and refuses the word on a route
+/// the corpus bounds.
+const WHOLE: &str = "none";
+
 #[derive(Debug)]
 pub struct Service {
     base: String,
@@ -127,7 +132,7 @@ impl Service {
     pub fn expressions(&self, client: &Client, law: &BwbId) -> Outcome<Answered<Vec<Expression>>> {
         let url = format!("{}/api/v1/regulations/{law}/expressions", self.base);
 
-        self.read(client, client.get(&url))
+        self.read(client, client.get(&url).query(&[("limit", WHOLE)]))
     }
 
     /// Which renditions the register published inside a window, across laws.
@@ -185,6 +190,11 @@ impl Service {
     }
 
     /// The rendition a point in both windows resolves to, and its articles.
+    ///
+    /// All of them, always. `law changes` compares two renditions read here,
+    /// and a page of each would compare the first page and say nothing about
+    /// the rest. Where `number` narrows the answer the set is a handful, so
+    /// asking for the whole of it costs nothing.
     pub fn articles(
         &self,
         client: &Client,
@@ -198,6 +208,7 @@ impl Service {
             // Always, because the answer is built from the leden and their
             // text is what `rendered` carries.
             ("rendered", "1".to_string()),
+            ("limit", WHOLE.to_string()),
         ];
 
         if let Some(date) = ask.as_known_on {
