@@ -263,16 +263,16 @@ mod tests {
         let fault = stated("not_found", Some("regulation_not_found"));
         assert_eq!(fault.stated_code(), Some("regulation_not_found"));
         assert_eq!(fault.kind(), "not_found");
-        assert_eq!(fault.code(), 2);
+        assert_eq!(fault.exit_byte(), 2);
 
         let fault = stated("usage", Some("unknown_parameter"));
         assert_eq!(fault.stated_code(), Some("unknown_parameter"));
-        assert_eq!(fault.code(), 1);
+        assert_eq!(fault.exit_byte(), 1);
 
         let fault = stated("source", Some("a_code_this_bron_predates"));
         assert_eq!(fault.stated_code(), Some("a_code_this_bron_predates"));
         assert_eq!(fault.kind(), "upstream");
-        assert_eq!(fault.code(), 4);
+        assert_eq!(fault.exit_byte(), 4);
 
         // A deployment that states no code is read as it states itself.
         assert_eq!(stated("not_found", None).stated_code(), None);

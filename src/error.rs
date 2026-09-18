@@ -77,14 +77,15 @@ pub enum Fault {
 }
 
 impl Fault {
-    pub fn code(&self) -> u8 {
+    /// The process exit byte, one of the [`exit`] constants.
+    pub fn exit_byte(&self) -> u8 {
         match self {
             Self::Usage(_) => exit::USAGE,
             Self::NotFound(_) => exit::NOT_FOUND,
             Self::Network { .. } => exit::NETWORK,
             Self::Upstream { .. } => exit::UPSTREAM,
             Self::Local(_) => exit::LOCAL,
-            Self::Stated { fault, .. } => fault.code(),
+            Self::Stated { fault, .. } => fault.exit_byte(),
         }
     }
 
@@ -119,7 +120,7 @@ impl Fault {
     }
 
     pub fn exit_code(&self) -> ExitCode {
-        ExitCode::from(self.code())
+        ExitCode::from(self.exit_byte())
     }
 
     pub fn not_found(kind: &'static str, id: impl std::fmt::Display) -> Self {
@@ -220,14 +221,14 @@ mod tests {
 
     #[test]
     fn every_kind_maps_to_its_documented_code() {
-        assert_eq!(Fault::usage("bad flag").code(), 1);
-        assert_eq!(Fault::not_found("law", "BWBR0000001").code(), 2);
+        assert_eq!(Fault::usage("bad flag").exit_byte(), 1);
+        assert_eq!(Fault::not_found("law", "BWBR0000001").exit_byte(), 2);
         assert_eq!(
             Fault::Network {
                 service: "rechtspraak",
                 source: anyhow::anyhow!("x")
             }
-            .code(),
+            .exit_byte(),
             3
         );
         assert_eq!(
@@ -235,10 +236,10 @@ mod tests {
                 service: "rechtspraak",
                 source: anyhow::anyhow!("x")
             }
-            .code(),
+            .exit_byte(),
             4
         );
-        assert_eq!(Fault::Local(anyhow::anyhow!("x")).code(), 5);
+        assert_eq!(Fault::Local(anyhow::anyhow!("x")).exit_byte(), 5);
     }
 
     #[test]
@@ -285,7 +286,7 @@ mod tests {
     #[test]
     fn a_non_transport_failure_is_upstream_rather_than_network() {
         let fault = from_source("rechtspraak", anyhow::anyhow!("malformed XML"));
-        assert_eq!(fault.code(), exit::UPSTREAM);
+        assert_eq!(fault.exit_byte(), exit::UPSTREAM);
     }
 
     #[test]
