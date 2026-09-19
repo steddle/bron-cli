@@ -974,22 +974,78 @@ async fn a_spent_shared_budget_is_not_told_as_the_callers_own_limit() {
     assert!(said.contains("30s"), "{said}");
 }
 
-/// A refusal whose body is no envelope, as an edge page is, is still the
-/// refusal with its delay, and carries no code nobody stated.
+/// A 503 whose body is no envelope came from the service or something in front
+/// of it, and is said to be that, with its status and the delay it named, and
+/// with no code nobody stated.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_refusal_without_an_envelope_still_names_its_delay() {
-    let (output, envelope, _) = failing(503, Some("60"), "<html>Service Unavailable</html>").await;
+async fn a_503_without_an_envelope_is_named_with_its_delay() {
+    let (output, envelope, said) =
+        failing(503, Some("60"), "<html>Service Unavailable</html>").await;
+    let message = envelope["error"]["message"].as_str().unwrap();
 
     assert_eq!(output.status.code(), Some(4), "{output:?}");
     assert_eq!(envelope["error"]["kind"], "upstream");
     assert!(envelope["error"].get("code").is_none(), "{envelope}");
+    assert!(message.contains("503"), "{envelope}");
+    assert!(message.contains("60s"), "{envelope}");
+    assert!(!said.contains("envelope"), "{said}");
+    assert!(!said.contains("unusable"), "{said}");
+}
+
+/// The edge answers a 504 of its own, as plain text, when the service takes
+/// longer than it waits. That is a timeout and reads as one: what a caller
+/// does about it is ask again later or narrow the question, never look for a
+/// contract bug that is not there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_504_from_the_edge_reads_as_a_timeout() {
+    let (output, envelope, said) = failing(504, None, "error code: 504").await;
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "upstream");
+    assert!(envelope["error"].get("code").is_none(), "{envelope}");
+    assert!(said.contains("504"), "{said}");
+    assert!(said.contains("did not answer in time"), "{said}");
+    assert!(said.contains("ask again later"), "{said}");
+    assert!(!said.contains("envelope"), "{said}");
+    assert!(!said.contains("unusable"), "{said}");
+}
+
+/// A 502 is something in front of the service getting nothing it could pass
+/// on, which is named for what it is and not read as an answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_502_from_the_edge_is_named_for_what_it_is() {
+    let (output, envelope, said) = failing(502, None, "error code: 502").await;
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(envelope["error"].get("code").is_none(), "{envelope}");
+    assert!(said.contains("502"), "{said}");
+    assert!(!said.contains("envelope"), "{said}");
+    assert!(!said.contains("unusable"), "{said}");
+}
+
+/// A 429 from in front of the service carries no envelope either. It is a
+/// refusal with its delay, and no answer was given to call unusable.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_429_without_an_envelope_is_a_refusal_and_not_an_answer() {
+    let (output, envelope, said) = failing(429, Some("30"), "Too Many Requests").await;
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(envelope["error"].get("code").is_none(), "{envelope}");
     assert!(
-        envelope["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("60s"),
-        "{envelope}"
+        said.contains("refused the request and asked for 30s"),
+        "{said}"
     );
+    assert!(!said.contains("unusable"), "{said}");
+}
+
+/// A 500 whose body is no envelope is not a gateway: the service itself sent
+/// something unreadable, and that is still what it is called.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_500_without_an_envelope_is_still_unreadable() {
+    let (output, _, said) = failing(500, None, "<html>Whoops</html>").await;
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(said.contains("unusable"), "{said}");
 }
 
 /// The service read the question and stated why it could not answer it. That

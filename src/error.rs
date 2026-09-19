@@ -63,6 +63,15 @@ pub enum Fault {
     #[error("the service could not answer: {0}")]
     Unanswered(String),
 
+    /// Nothing that could be read came back: a 502, 503 or 504 whose body is
+    /// not the bron envelope, which is the service or something in front of
+    /// it not answering in time, or a 429 refusal from in front of it. Exit 4
+    /// like [`Fault::Upstream`], and named for its status rather than called
+    /// an unusable answer, because none was given: a 504 is asked again later
+    /// or narrowed, never filed as a contract bug.
+    #[error("{0}")]
+    NoAnswer(String),
+
     /// bron could not do its own part on this machine.
     ///
     /// Not the network and not what came back over it: an HTTP client that
@@ -90,7 +99,7 @@ impl Fault {
             Self::Usage(_) => exit::USAGE,
             Self::NotFound(_) => exit::NOT_FOUND,
             Self::Network { .. } => exit::NETWORK,
-            Self::Upstream { .. } | Self::Unanswered(_) => exit::UPSTREAM,
+            Self::Upstream { .. } | Self::Unanswered(_) | Self::NoAnswer(_) => exit::UPSTREAM,
             Self::Local(_) => exit::LOCAL,
             Self::Stated { fault, .. } => fault.exit_byte(),
         }
@@ -103,7 +112,7 @@ impl Fault {
             Self::Usage(_) => "usage",
             Self::NotFound(_) => "not_found",
             Self::Network { .. } => "network",
-            Self::Upstream { .. } | Self::Unanswered(_) => "upstream",
+            Self::Upstream { .. } | Self::Unanswered(_) | Self::NoAnswer(_) => "upstream",
             Self::Local(_) => "local",
             Self::Stated { fault, .. } => fault.kind(),
         }

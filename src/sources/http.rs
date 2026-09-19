@@ -44,6 +44,10 @@ pub struct FetchedBytes {
     /// Digest of the exact bytes stored.
     pub blob: BlobId,
     pub bytes: Vec<u8>,
+    /// The HTTP status they came under. Only a service that speaks the
+    /// envelope answers a body under an error status; a publisher's is refused
+    /// before it gets here.
+    pub status: u16,
     /// The URL actually dialled. Recorded for provenance, never for identity.
     pub url: String,
 }
@@ -54,6 +58,8 @@ pub struct Fetched {
     pub blob: BlobId,
     /// Those bytes, decoded. Byte offsets into this are offsets into the blob.
     pub text: String,
+    /// See [`FetchedBytes::status`].
+    pub status: u16,
     /// The URL actually dialled. Recorded for provenance, never for identity.
     pub url: String,
 }
@@ -237,11 +243,21 @@ impl Client {
                     };
                     // The body may be the envelope stating which refusal this
                     // is. A body that cannot be read leaves the sentence alone.
+                    let status = response.status().as_u16();
                     let body = response.text().unwrap_or_default();
-                    return Err(Refused { sentence, body }.into());
+                    return Err(Refused {
+                        sentence,
+                        status,
+                        host,
+                        asked_for: backoff.asked_for(),
+                        body,
+                    }
+                    .into());
                 }
             }
         }
+
+        let status = response.status().as_u16();
 
         let response = match reading {
             Reading::Hashed => response
@@ -261,6 +277,7 @@ impl Client {
         Ok(FetchedBytes {
             blob,
             bytes: body.to_vec(),
+            status,
             url,
         })
     }
@@ -291,6 +308,7 @@ fn decoded(raw: FetchedBytes) -> Result<Fetched> {
     Ok(Fetched {
         blob: raw.blob,
         text,
+        status: raw.status,
         url: raw.url,
     })
 }
@@ -303,6 +321,10 @@ fn decoded(raw: FetchedBytes) -> Result<Fetched> {
 pub struct Refused {
     /// The refusal in words, with the delay the host named.
     pub sentence: String,
+    pub status: u16,
+    pub host: String,
+    /// The delay the host named, where it named one.
+    pub asked_for: Option<Duration>,
     pub body: String,
 }
 

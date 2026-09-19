@@ -5,6 +5,8 @@
 //! into a [`Fault`]. A second path around it is how `bron find` came to report
 //! that nothing matched a question the service had never been asked.
 
+use std::fmt::Write as _;
+
 use chrono::NaiveDate;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -168,7 +170,20 @@ impl Service {
             }
         };
 
-        let envelope: Envelope<T> = serde_json::from_str(&fetched.text).map_err(unreadable)?;
+        let envelope: Envelope<T> = match serde_json::from_str(&fetched.text) {
+            Ok(envelope) => envelope,
+            Err(e) => {
+                let host = reqwest::Url::parse(&fetched.url)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_string))
+                    .unwrap_or_default();
+
+                return Err(match gateway(&host, fetched.status, None) {
+                    Some(sentence) => Fault::NoAnswer(sentence),
+                    None => unreadable(e),
+                });
+            }
+        };
 
         match Answer::settle(envelope, fetched.text)? {
             Answer::Data(answered) => Ok(answered),
@@ -177,22 +192,59 @@ impl Service {
     }
 }
 
-/// A 429 or a 503 whose body states the failure, as that failure with the
-/// delay the service named beside its words. Anything else is handed back.
+/// A 429 or a 503, as the failure its body states with the delay the service
+/// named beside its words. Where the body is no envelope, as the refusal or
+/// the gateway failure it is. Anything else is handed back.
 fn refused(error: anyhow::Error) -> Result<Fault, anyhow::Error> {
     let Some(refusal) = error.downcast_ref::<Refused>() else {
         return Err(error);
     };
-    let Ok(Envelope::<serde::de::IgnoredAny> {
-        error: Some(mut stated),
-        ..
-    }) = serde_json::from_str(&refusal.body)
-    else {
-        return Err(error);
+
+    match serde_json::from_str(&refusal.body) {
+        Ok(Envelope::<serde::de::IgnoredAny> {
+            error: Some(mut stated),
+            ..
+        }) => {
+            stated.message = format!("{} ({})", stated.message, refusal.sentence);
+            Ok(stated.into_fault())
+        }
+        _ => Ok(Fault::NoAnswer(
+            gateway(&refusal.host, refusal.status, refusal.asked_for)
+                .unwrap_or_else(|| refusal.sentence.clone()),
+        )),
+    }
+}
+
+/// What a 502, 503 or 504 without the envelope is, in words, with its status.
+///
+/// None of the three is an answer. The service states its own failures in the
+/// envelope, so one of these with any other body came from the edge in front
+/// of it or from the service before it could answer, and what a caller does
+/// about each is not what it does about an unreadable answer.
+fn gateway(host: &str, status: u16, asked_for: Option<std::time::Duration>) -> Option<String> {
+    let mut sentence = match status {
+        504 => format!(
+            "{host} answered 504 Gateway Timeout: the service, or something in front of it, \
+             did not answer in time. Nothing is wrong with the question; ask again later, or \
+             narrow it"
+        ),
+        503 => format!(
+            "{host} answered 503 Service Unavailable: the service, or something in front of \
+             it, did not answer"
+        ),
+        502 => format!(
+            "{host} answered 502 Bad Gateway: something in front of the service got no answer \
+             from it that it could pass on"
+        ),
+        _ => return None,
     };
 
-    stated.message = format!("{} ({})", stated.message, refusal.sentence);
-    Ok(stated.into_fault())
+    if let Some(wait) = asked_for {
+        let _ = write!(sentence, ", and asked for {}s", wait.as_secs());
+    }
+    sentence.push('.');
+
+    Some(sentence)
 }
 
 #[cfg(test)]
