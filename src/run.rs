@@ -30,7 +30,12 @@ pub enum Answer {
     Parts(Box<Answered<service::Parts>>),
     Published(Answered<Vec<service::Expression>>),
     Feed(Answered<service::Feed>),
-    Changes(Box<Answered<service::Changes>>),
+    Changes {
+        answered: Box<Answered<service::Changes>>,
+        /// Whether --kind or --article narrowed the list, which the service's
+        /// summary does not follow.
+        narrowed: bool,
+    },
     Articles(Envelope<Vec<wire::Article>>),
     CaseHits(Envelope<Vec<wire::CaseHit>>),
     Case(Envelope<Box<wire::Case>>),
@@ -58,7 +63,7 @@ impl Answer {
             Self::Parts(a) => sent(out, &a.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
-            Self::Changes(a) => sent(out, &a.envelope),
+            Self::Changes { answered, .. } => sent(out, &answered.envelope),
             Self::Articles(e) => write(out, e),
             Self::CaseHits(e) => write(out, e),
             Self::Case(e) => write(out, e),
@@ -240,37 +245,6 @@ fn provenance(
     ))
 }
 
-/// bron's reading of one article or unit: its leden in order, each opened by the number
-/// the register gives it.
-///
-/// Assembled here rather than taken from the article's own rendering, because
-/// that string carries no lid numbers and the lid is the unit Dutch practice
-/// cites: `art. 6:162 lid 2 BW`. It is rendering, so it lives where the answer
-/// is built rather than on the shape the service sends.
-pub fn content(article: &service::Article) -> String {
-    leden(article).map(lid).collect::<Vec<_>>().join("\n")
-}
-
-/// The leden worth citing, which are the ones the register printed text in.
-///
-/// A repealed article is a single empty one. Keeping it would give every repeal
-/// a lid that says nothing, and the article's own emptiness beside its
-/// `vervallen` is the whole of what the register states.
-fn leden(article: &service::Article) -> impl Iterator<Item = &service::Paragraph> {
-    article
-        .paragraphs
-        .iter()
-        .filter(|lid| !lid.text().is_empty())
-}
-
-/// One lid as bron prints it, opened by its number where it has one.
-fn lid(lid: &service::Paragraph) -> String {
-    match &lid.number {
-        Some(number) => format!("{number}. {}", lid.text()),
-        None => lid.text().to_string(),
-    }
-}
-
 /// One article, in the shape a consumer parses.
 fn article(
     article: &service::Article,
@@ -287,12 +261,13 @@ fn article(
         label: article.label.clone(),
         title: article.title.clone(),
         path: article.path.clone(),
-        content: content(article),
+        content: article.text(),
         excerpt: excerpt(article.span, article.raw.as_deref()),
-        leden: leden(article)
+        leden: article
+            .leden()
             .map(|paragraph| wire::Lid {
                 number: paragraph.number.clone(),
-                content: lid(paragraph),
+                content: paragraph.cited(),
                 excerpt: excerpt(paragraph.span, paragraph.raw.as_deref()),
                 jci: paragraph.jci.clone(),
             })
@@ -436,7 +411,10 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         raw: *raw,
                     },
                 )
-                .map(|answered| Answer::Changes(Box::new(answered)))
+                .map(|answered| Answer::Changes {
+                    answered: Box::new(answered),
+                    narrowed: kind.is_some() || article.is_some(),
+                })
         }
 
         Law::Show {
@@ -689,75 +667,6 @@ fn client(quiet: bool) -> Outcome<Client> {
         // A sweep that pauses must say so rather than look hung.
         eprintln!("bron: waiting {:.1}s for {host}", waited.as_secs_f32());
     }))
-}
-
-#[cfg(test)]
-mod reading_tests {
-    use super::{content, leden};
-    use bron::service::{Article, Paragraph, Span};
-
-    fn paragraph(number: Option<&str>, text: &str) -> Paragraph {
-        Paragraph {
-            number: number.map(str::to_string),
-            rendered: Some(text.to_string()),
-            raw: None,
-            jci: None,
-            span: Span { start: 0, end: 1 },
-        }
-    }
-
-    fn article(leden: Vec<Paragraph>) -> Article {
-        Article {
-            kind: "artikel".into(),
-            position: None,
-            number: Some("162".into()),
-            label: None,
-            title: None,
-            path: None,
-            stam_id: "1".into(),
-            amended_by: None,
-            effect: None,
-            status: None,
-            in_force_from: None,
-            jci: None,
-            span: Span { start: 0, end: 1 },
-            raw: None,
-            images: Vec::new(),
-            paragraphs: leden,
-        }
-    }
-
-    /// The lid is the unit Dutch practice cites, and the service's own
-    /// rendering of an article carries no lid numbers at all.
-    #[test]
-    fn an_article_reads_as_its_leden_each_opened_by_its_number() {
-        let article = article(vec![
-            paragraph(Some("1"), "Eerste lid."),
-            paragraph(Some("2"), "Tweede lid."),
-        ]);
-
-        assert_eq!(content(&article), "1. Eerste lid.\n2. Tweede lid.");
-    }
-
-    /// An article printed without leden is one unnumbered unit, and opening it
-    /// with a number the register never printed would be bron writing text.
-    #[test]
-    fn an_article_without_leden_reads_as_itself() {
-        assert_eq!(
-            content(&article(vec![paragraph(None, "Eén geheel.")])),
-            "Eén geheel."
-        );
-    }
-
-    /// A repealed article is a single empty lid. Keeping it would give every
-    /// repeal a citable unit that says nothing.
-    #[test]
-    fn an_empty_lid_is_not_a_citable_unit() {
-        let repealed = article(vec![paragraph(None, "")]);
-
-        assert_eq!(leden(&repealed).count(), 0);
-        assert_eq!(content(&repealed), "");
-    }
 }
 
 #[cfg(test)]

@@ -124,7 +124,8 @@ pub struct Changes {
     pub regulation_id: String,
     pub from: Expression,
     pub to: Expression,
-    /// Counted over every unit the narrowing kept, listed or not.
+    /// Counted over every unit of both renditions, whatever `kind`, `article`
+    /// and `all` narrowed the list to.
     pub summary: Summary,
     /// Every kind of unit, under the name the service gives the list.
     pub articles: Vec<Change>,
@@ -180,6 +181,9 @@ pub struct Article {
     pub in_force_from: Option<NaiveDate>,
     pub jci: Option<String>,
     pub span: Span,
+    /// The service's reading of the whole unit, present only where
+    /// `rendered=1` asked for it. See [`Article::text`].
+    pub rendered: Option<String>,
     /// The publisher's own bytes at `span`, present only where `raw=1` asked
     /// for them. On the service's word: checking it means fetching the blob it
     /// was cut from, and not having to is why it is here.
@@ -202,6 +206,42 @@ impl Article {
             self.position,
         )
     }
+
+    /// bron's reading of the unit.
+    ///
+    /// An article reads as its leden in order, each opened by the number the
+    /// register gives it: the service's rendering of an article carries no lid
+    /// numbers, and the lid is the unit Dutch practice cites, `art. 6:162 lid 2
+    /// BW`. Any other unit reads as the service's rendering of it, because a
+    /// bijlage prints words beside its leden that no lid holds, and its leden
+    /// are pieces the parser cut rather than units anyone cites. Either falls
+    /// back to the other where the service sent nothing to read.
+    pub fn text(&self) -> String {
+        let leden = self
+            .leden()
+            .map(Paragraph::cited)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let rendered = self.rendered.clone().unwrap_or_default();
+
+        let is_article = matches!(self.kind.as_str(), "artikel" | "enig-artikel");
+        let (first, second) = if is_article {
+            (leden, rendered)
+        } else {
+            (rendered, leden)
+        };
+
+        if first.is_empty() { second } else { first }
+    }
+
+    /// The leden worth citing, which are the ones the register printed text in.
+    ///
+    /// A repealed article is a single empty one. Keeping it would give every
+    /// repeal a lid that says nothing, and the article's own emptiness beside
+    /// its `vervallen` is the whole of what the register states.
+    pub fn leden(&self) -> impl Iterator<Item = &Paragraph> {
+        self.paragraphs.iter().filter(|lid| !lid.text().is_empty())
+    }
 }
 
 /// See [`Article::name`].
@@ -213,7 +253,8 @@ pub fn name(
 ) -> String {
     match (label, number, position) {
         (Some(label), _, _) => label.to_string(),
-        (None, Some(number), _) => number.to_string(),
+        (None, Some(number), _) if matches!(kind, "artikel" | "enig-artikel") => number.to_string(),
+        (None, Some(number), _) => format!("{kind} {number}"),
         (None, None, Some(position)) => format!("{kind} {position}"),
         (None, None, None) => kind.to_string(),
     }
@@ -235,6 +276,14 @@ impl Paragraph {
     /// The service's reading, or the empty string where it sent none.
     pub fn text(&self) -> &str {
         self.rendered.as_deref().unwrap_or_default()
+    }
+
+    /// One lid as bron prints it, opened by its number where it has one.
+    pub fn cited(&self) -> String {
+        match &self.number {
+            Some(number) => format!("{number}. {}", self.text()),
+            None => self.text().to_string(),
+        }
     }
 }
 
@@ -322,4 +371,112 @@ pub struct Compare<'a> {
     pub article: Option<&'a str>,
     pub all: bool,
     pub raw: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paragraph(number: Option<&str>, text: &str) -> Paragraph {
+        Paragraph {
+            number: number.map(str::to_string),
+            rendered: Some(text.to_string()),
+            raw: None,
+            jci: None,
+            span: Span { start: 0, end: 1 },
+        }
+    }
+
+    fn unit(kind: &str, rendered: Option<&str>, leden: Vec<Paragraph>) -> Article {
+        Article {
+            kind: kind.into(),
+            position: None,
+            number: Some("162".into()),
+            label: None,
+            title: None,
+            path: None,
+            stam_id: "1".into(),
+            amended_by: None,
+            effect: None,
+            status: None,
+            in_force_from: None,
+            jci: None,
+            span: Span { start: 0, end: 1 },
+            rendered: rendered.map(str::to_string),
+            raw: None,
+            images: Vec::new(),
+            paragraphs: leden,
+        }
+    }
+
+    fn article(leden: Vec<Paragraph>) -> Article {
+        unit("artikel", None, leden)
+    }
+
+    /// The lid is the unit Dutch practice cites, and the service's own
+    /// rendering of an article carries no lid numbers at all.
+    #[test]
+    fn an_article_reads_as_its_leden_each_opened_by_its_number() {
+        let article = unit(
+            "artikel",
+            Some("Eerste lid.\nTweede lid."),
+            vec![
+                paragraph(Some("1"), "Eerste lid."),
+                paragraph(Some("2"), "Tweede lid."),
+            ],
+        );
+
+        assert_eq!(article.text(), "1. Eerste lid.\n2. Tweede lid.");
+    }
+
+    /// An article printed without leden is one unnumbered unit, and opening it
+    /// with a number the register never printed would be bron writing text.
+    #[test]
+    fn an_article_without_leden_reads_as_itself() {
+        assert_eq!(
+            article(vec![paragraph(None, "Eén geheel.")]).text(),
+            "Eén geheel."
+        );
+    }
+
+    /// A repealed article is a single empty lid. Keeping it would give every
+    /// repeal a citable unit that says nothing.
+    #[test]
+    fn an_empty_lid_is_not_a_citable_unit() {
+        let repealed = article(vec![paragraph(None, "")]);
+
+        assert_eq!(repealed.leden().count(), 0);
+        assert_eq!(repealed.text(), "");
+    }
+
+    /// A bijlage prints words beside its leden that no lid holds, and its
+    /// own rendering is the only place they are.
+    #[test]
+    fn a_unit_that_is_no_article_reads_as_its_own_rendering() {
+        let bijlage = unit(
+            "bijlage",
+            Some("Toelichting.\n1 Stofgroep"),
+            vec![paragraph(None, "1 Stofgroep")],
+        );
+
+        assert_eq!(bijlage.text(), "Toelichting.\n1 Stofgroep");
+        assert_eq!(
+            unit("bijlage", None, vec![paragraph(None, "1 Stofgroep")]).text(),
+            "1 Stofgroep"
+        );
+    }
+
+    /// A number alone names an article; on any other unit it needs its kind,
+    /// or bijlage Ia and an article Ia read the same.
+    #[test]
+    fn a_number_names_a_unit_with_its_kind_unless_it_is_an_article() {
+        assert_eq!(name(None, Some("162"), "artikel", Some(3)), "162");
+        assert_eq!(name(None, Some("1"), "enig-artikel", None), "1");
+        assert_eq!(name(None, Some("Ia"), "bijlage", Some(2)), "bijlage Ia");
+        assert_eq!(name(None, None, "aanhef", Some(1)), "aanhef 1");
+        assert_eq!(
+            name(Some("Lijst Ia"), Some("Ia"), "bijlage", None),
+            "Lijst Ia"
+        );
+    }
 }

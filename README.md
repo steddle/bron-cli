@@ -58,7 +58,7 @@ $ bron law changes BWBR0005289 --from 2019-01-01 --article 119a
 BWBR0005289
 2019-01-01_0 (2019-01-01 to 2019-03-31) -> 2026-07-16_0 (2026-07-16 onwards)
 
-29 amended, 0 commenced, 5 added, 1 repealed, 0 withdrawn, 305 unchanged
+in the whole regulation: 29 amended, 0 commenced, 5 added, 1 repealed, 0 withdrawn, 305 unchanged
 
 AMENDED    Artikel 119a
            through stb-2022-146

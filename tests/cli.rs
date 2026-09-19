@@ -1487,3 +1487,163 @@ async fn law_versions_carries_the_title_the_hash_and_the_images() {
 
     assert!(err.contains("publisher's hash"), "{err}");
 }
+
+/// A bijlage prints words beside its leden that no lid holds, and the unit's
+/// own rendering carries them. A change only there is still a change a person
+/// reads, in `law changes` and in `law parts` alike.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bijlage_changed_outside_its_leden_shows_the_words_that_changed() {
+    let bijlage = |rendered: &str| {
+        let mut side = side(
+            "bijlage",
+            "goed",
+            "2026-07-09",
+            "1 Stofgroep: fenethylaminen",
+        );
+        side["rendered"] = format!("{rendered}\n1 Stofgroep: fenethylaminen").into();
+        side
+    };
+    let expression = |label: &str, blob: &str| {
+        serde_json::json!({
+            "regulation_id": "BWBR0001941", "label": label, "in_force": {"from": &label[..10]},
+            "withdrawn": false, "held": true, "upstream_hash_check": "matches", "blob": blob,
+        })
+    };
+    let changes = serde_json::json!({
+        "bron": 1, "grade": "authority",
+        "data": {
+            "regulation_id": "BWBR0001941",
+            "from": expression("2026-01-28_0", EARLIER_BLOB),
+            "to": expression("2026-07-09_0", LATER_BLOB),
+            "summary": {"unchanged": 0, "amended": 1, "added": 0, "commenced": 0, "repealed": 0, "withdrawn": 0},
+            "articles": [{
+                "change": "amended", "kind": "bijlage", "number": "Ia", "label": "Lijst Ia",
+                "from": bijlage("Toelichting bij de lijst."),
+                "to": bijlage("Toelichting bij de gewijzigde lijst."),
+            }],
+        },
+    });
+    let parts = serde_json::json!({
+        "bron": 1, "grade": "authority", "as_of": "2026-07-09",
+        "data": {
+            "regulation_id": "BWBR0001941",
+            "expression": expression("2026-07-09_0", LATER_BLOB),
+            "parts": [bijlage("Toelichting bij de gewijzigde lijst.")],
+        },
+    });
+
+    let server = MockServer::start().await;
+    for (route, body) in [("changes", changes), ("parts", parts)] {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/regulations/BWBR0001941/{route}")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(body.to_string(), "application/json"),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    let compared = bron(
+        &server,
+        &[
+            "law",
+            "changes",
+            "BWBR0001941",
+            "--from",
+            "2026-01-28",
+            "--to",
+            "2026-07-09",
+        ],
+    )
+    .await;
+    let text = stdout(&compared);
+    assert!(compared.status.success(), "{compared:?}");
+    assert!(text.contains("{+gewijzigde+}"), "{text}");
+
+    let shown = bron(&server, &["law", "parts", "BWBR0001941"]).await;
+    let text = stdout(&shown);
+    assert!(shown.status.success(), "{shown:?}");
+    assert!(
+        text.contains("Toelichting bij de gewijzigde lijst."),
+        "{text}"
+    );
+}
+
+/// The service counts every unit whatever narrowed the list, so above a list
+/// narrowed to one article the counts are said to be the whole regulation's.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_says_the_counts_above_a_narrowed_list_are_the_whole_regulations() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0001941/changes",
+        &changes_of_the_opiumwet(),
+    )
+    .await;
+    let window = [
+        "law",
+        "changes",
+        "BWBR0001941",
+        "--from",
+        "2026-09-16",
+        "--to",
+        "2026-09-17",
+    ];
+    let counts = "1 amended, 1 commenced, 0 added, 0 repealed, 0 withdrawn, 47 unchanged";
+
+    let whole = stdout(&bron(&server, &window).await);
+    assert!(whole.lines().any(|l| l == counts), "{whole}");
+
+    for narrowing in [&["--article", "I"][..], &["--kind", "bijlage"][..]] {
+        let text = stdout(&bron(&server, &[&window[..], narrowing].concat()).await);
+        assert!(
+            text.lines()
+                .any(|l| l == format!("in the whole regulation: {counts}")),
+            "{narrowing:?}: {text}"
+        );
+    }
+}
+
+/// The service takes neither a place nor a page of 0, and a command line that
+/// asks for one is refused before it reaches the service.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_refuses_a_place_or_a_limit_of_zero() {
+    let server = MockServer::start().await;
+
+    for args in [
+        &[
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "aanhef",
+            "--position",
+            "0",
+        ][..],
+        &["law", "parts", "BWBR0001941", "--limit", "0"][..],
+    ] {
+        let output = bron(&server, args).await;
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "{args:?}"
+        );
+    }
+}
+
+/// A rendition the service holds no text of names no blob, and no source line
+/// is printed with an empty slot where the digest would stand.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_prints_no_source_where_the_rendition_names_no_blob() {
+    let unheld = PARTS.replace(
+        r#""blob":"1eb72c0011119cf2fdcbc0660f12e7a0cf0612a40cb602f3a30a42a1db5b8de9","#,
+        "",
+    );
+    assert_ne!(unheld, PARTS);
+    let server = answering("GET", "/api/v1/regulations/BWBR0001941/parts", &unheld).await;
+
+    let output = bron(&server, &["law", "parts", "BWBR0001941"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(!text.contains("source:"), "{text}");
+}

@@ -226,8 +226,6 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
         Answer::Parts(a) => {
             bound(a.as_of, a.as_known_on, out)?;
 
-            let blob = a.data.expression.blob.as_deref().unwrap_or_default();
-
             for part in &a.data.parts {
                 write!(out, "{}", part.name())?;
                 if let Some(title) = &part.title {
@@ -237,12 +235,14 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 if let Some(path) = &part.path {
                     writeln!(out, "{path}")?;
                 }
-                writeln!(out, "\n{}\n", crate::run::content(part))?;
-                writeln!(
-                    out,
-                    "source: {blob} ({}..{})",
-                    part.span.start, part.span.end
-                )?;
+                writeln!(out, "\n{}\n", part.text())?;
+                if let Some(blob) = &a.data.expression.blob {
+                    writeln!(
+                        out,
+                        "source: {blob} ({}..{})",
+                        part.span.start, part.span.end
+                    )?;
+                }
                 if let Some(jci) = &part.jci {
                     writeln!(out, "{jci}")?;
                 }
@@ -324,7 +324,10 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&e.caveats, out)
         }
 
-        Answer::Changes(a) => {
+        Answer::Changes {
+            answered: a,
+            narrowed,
+        } => {
             let changes = &a.data;
 
             writeln!(out, "{}", changes.regulation_id)?;
@@ -337,6 +340,13 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 window(changes.to.in_force.from, changes.to.in_force.until)
             )?;
 
+            // The service counts every unit whatever narrowed the list, so
+            // above a narrowed list the counts say whose they are. Kept rather
+            // than left out: how much changed around the unit asked about is
+            // still an answer, as long as it is not read as that unit's.
+            if *narrowed {
+                write!(out, "in the whole regulation: ")?;
+            }
             let s = &changes.summary;
             writeln!(
                 out,
@@ -364,7 +374,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     writeln!(out, "           commenced on {day}")?;
                 }
 
-                let text = |side: &bron::service::Article| crate::run::content(side);
+                let text = bron::service::Article::text;
                 match (&unit.from, &unit.to) {
                     (Some(from), Some(to)) if unit.change == "amended" => {
                         for line in word_diff(&text(from), &text(to)) {

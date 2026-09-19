@@ -133,6 +133,9 @@ pub enum Law {
         /// markup travels. With it each excerpt also carries the slice itself,
         /// on the service's word: checking it means fetching the blob it was
         /// cut from, and not having to is the reason it is offered at all.
+        ///
+        /// Only --json carries the slice. A person reads bron's reading either
+        /// way, so without --json this asks for bytes nothing prints.
         #[arg(long)]
         raw: bool,
 
@@ -161,14 +164,14 @@ pub enum Law {
 
         /// The place of one unit among the units of --kind, from 1: how a unit
         /// that prints no number is asked for.
-        #[arg(long, requires = "kind")]
+        #[arg(long, requires = "kind", value_parser = clap::value_parser!(u32).range(1..))]
         position: Option<u32>,
 
         /// Also carry the publisher's own bytes at every span. See `law show`.
         #[arg(long)]
         raw: bool,
 
-        #[arg(long, default_value_t = 20)]
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..))]
         limit: u32,
 
         /// How many units to skip.
