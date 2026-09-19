@@ -29,8 +29,8 @@ use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, BlobProvenance, Expression, Feed, Image, Paragraph, Published,
-    RegisterEvent, Regulation, Span, Window, name,
+    Article, Articles, Ask, BlobProvenance, Expression, Feed, Image, Paragraph, Parts, Published,
+    RegisterEvent, Regulation, Span, Units, Window, name,
 };
 pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -224,6 +224,37 @@ impl Service {
 
         if ask.not_commenced {
             query.push(("not_commenced", "1".to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// The rendition a point in both windows resolves to, and the units of
+    /// text asked of it.
+    pub fn parts(&self, client: &Client, law: &BwbId, ask: &Units<'_>) -> Outcome<Answered<Parts>> {
+        let url = format!("{}/api/v1/regulations/{law}/parts", self.base);
+
+        let mut query = vec![
+            ("as_of", ask.as_of.to_string()),
+            ("rendered", "1".to_string()),
+            ("limit", ask.limit.to_string()),
+            ("offset", ask.offset.to_string()),
+        ];
+
+        if let Some(date) = ask.as_known_on {
+            query.push(("as_known_on", date.to_string()));
+        }
+        if let Some(kind) = ask.kind {
+            query.push(("kind", kind.to_string()));
+        }
+        if let Some(number) = ask.number {
+            query.push(("number", number.to_string()));
+        }
+        if let Some(position) = ask.position {
+            query.push(("position", position.to_string()));
+        }
+        if ask.raw {
+            query.push(("raw", "1".to_string()));
         }
 
         self.read(client, client.get(&url).query(&query))

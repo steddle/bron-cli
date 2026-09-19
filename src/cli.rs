@@ -90,7 +90,11 @@ pub enum Law {
         limit: u32,
     },
 
-    /// Shows a law, or one article from it.
+    /// Shows a law's articles, or one of them.
+    ///
+    /// Articles only: `artikel`, or `enig-artikel` for a regulation's one
+    /// article. A bijlage, the aanhef, the closing formula and every other unit
+    /// a rendition prints beside its articles is `law parts`.
     Show {
         /// BWB identifier, e.g. BWBR0005289.
         id: String,
@@ -131,6 +135,45 @@ pub enum Law {
         /// cut from, and not having to is the reason it is offered at all.
         #[arg(long)]
         raw: bool,
+
+        #[command(flatten)]
+        moment: Moment,
+    },
+
+    /// The units of text a rendition prints, in document order: its articles,
+    /// and beside them the aanhef, a bijlage, the closing formula.
+    ///
+    /// Each under the element the register printed it as, with the span and
+    /// digest that place it. Every kind unless --kind names one, so the whole
+    /// of what a rendition prints is one question.
+    Parts {
+        /// BWB identifier, e.g. BWBR0001941.
+        id: String,
+
+        /// One kind of unit, as the register names the element: bijlage,
+        /// aanhef, tekst, wetsluiting, artikel.
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// The number the register prints for a unit of --kind, e.g. Ia.
+        #[arg(long, requires = "kind", conflicts_with = "position")]
+        number: Option<String>,
+
+        /// The place of one unit among the units of --kind, from 1: how a unit
+        /// that prints no number is asked for.
+        #[arg(long, requires = "kind")]
+        position: Option<u32>,
+
+        /// Also carry the publisher's own bytes at every span. See `law show`.
+        #[arg(long)]
+        raw: bool,
+
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+
+        /// How many units to skip.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
 
         #[command(flatten)]
         moment: Moment,

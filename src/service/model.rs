@@ -108,6 +108,15 @@ pub struct Articles {
     pub articles: Vec<Article>,
 }
 
+/// What a rendition's units of text resolved to, of any kind and in document
+/// order.
+#[derive(Debug, Deserialize)]
+pub struct Parts {
+    pub regulation_id: String,
+    pub expression: Expression,
+    pub parts: Vec<Article>,
+}
+
 /// One unit of text, where it sits in the frozen bytes, and what stands there.
 ///
 /// On `/articles` an article; on `/parts` and `/changes` a unit of any kind.
@@ -252,4 +261,17 @@ pub struct Ask<'a> {
     pub raw: bool,
     /// Narrow to what this rendition publishes and does not yet apply.
     pub not_commenced: bool,
+}
+
+/// Which units of a rendition to ask for. See [`Ask`] for the two coordinates.
+#[derive(Debug)]
+pub struct Units<'a> {
+    pub as_of: NaiveDate,
+    pub as_known_on: Option<NaiveDate>,
+    pub kind: Option<&'a str>,
+    pub number: Option<&'a str>,
+    pub position: Option<u32>,
+    pub raw: bool,
+    pub limit: u32,
+    pub offset: u32,
 }

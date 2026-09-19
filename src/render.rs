@@ -200,6 +200,40 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&a.caveats, err)
         }
 
+        // A document rather than a list: the text of each unit, and the notes
+        // on the answer beneath it.
+        Answer::Parts(a) => {
+            bound(a.as_of, a.as_known_on, out)?;
+
+            let blob = a.data.expression.blob.as_deref().unwrap_or_default();
+
+            for part in &a.data.parts {
+                write!(out, "{}", part.name())?;
+                if let Some(title) = &part.title {
+                    write!(out, "  {title}")?;
+                }
+                writeln!(out)?;
+                if let Some(path) = &part.path {
+                    writeln!(out, "{path}")?;
+                }
+                writeln!(out, "\n{}\n", crate::run::content(part))?;
+                writeln!(
+                    out,
+                    "source: {blob} ({}..{})",
+                    part.span.start, part.span.end
+                )?;
+                if let Some(jci) = &part.jci {
+                    writeln!(out, "{jci}")?;
+                }
+                if !part.images.is_empty() {
+                    writeln!(out, "images: {}", part.images.join(", "))?;
+                }
+                writeln!(out)?;
+            }
+
+            caveats(&a.caveats, out)
+        }
+
         Answer::Articles(e) => {
             let articles = data(e);
 
@@ -580,9 +614,9 @@ fn caveat_line(caveat: &Caveat) -> String {
             articles,
             cell_separator,
         } => format!(
-            "note: article(s) {} print a table. Its rows are one line each with cells \
-                 separated by [{}], so a value belongs to the heading in the same position \
-                 on the row above rather than to the line it follows.",
+            "note: {} print(s) a table. Its rows are one line each with cells separated by \
+                 [{}], so a value belongs to the heading in the same position on the row above \
+                 rather than to the line it follows.",
             articles.join(", "),
             cell_separator.trim(),
         ),
@@ -657,9 +691,9 @@ fn caveat_line(caveat: &Caveat) -> String {
             articles.join(", "),
         ),
         Caveat::IllustrationOmitted { articles } => format!(
-            "note: article(s) {} print an image, which bron does not hold. Where the image \
-                 is a formula, the text states what its variables mean and not the formula \
-                 itself.",
+            "note: {} print(s) an image, which the text does not place. Where the image is a \
+                 formula, the text states what its variables mean and not the formula itself. \
+                 The rendition names the digest each image is held under: law versions --json.",
             articles.join(", "),
         ),
         Caveat::Retroactive {
@@ -744,11 +778,11 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: {count} of the {renditions} rendition(s) listed are held and were not parsed \
                  into articles, so they have no article to answer"
         ),
-        // Every unit, the aanhef too: the count is the service's, and naming
+        // Every element, the aanhef too: the count is the service's, and naming
         // only some of it would be bron deciding which text matters.
         Caveat::TextOutsideArticles { expression, units } => format!(
-            "note: rendition {expression} prints text outside its articles, which bron does \
-                 not read: {}. This answer is true of the articles alone.",
+            "note: rendition {expression} prints words that no unit holds: {}. No answer \
+                 covers them and no comparison compared them.",
             units
                 .iter()
                 .map(|(unit, count)| format!("{unit} ({count})"))

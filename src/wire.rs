@@ -350,13 +350,11 @@ pub enum Caveat {
     /// whose every held text can be quoted.
     RenditionsUnread { count: u32, renditions: u32 },
 
-    /// The rendition `expression` prints text outside its articles, which bron
-    /// does not read: `units` counts it per element, `bijlage` or
-    /// `circulaire.divisie`, the `aanhef` included.
+    /// The rendition `expression` prints words that no unit holds: beside the
+    /// units of a chapter or a bijlage that holds some, or under an element
+    /// without the publisher's identity. `units` counts them per element.
     ///
-    /// Nothing outside `<artikel>` is stored, so an answer about such a
-    /// rendition is true of its articles and of nothing else. A comparison that
-    /// found no change found none in the articles.
+    /// No answer covers those words and no comparison compared them.
     TextOutsideArticles {
         expression: String,
         units: BTreeMap<String, u32>,

@@ -29,6 +29,7 @@ pub enum Answer {
     LawHits(Answered<Vec<service::Regulation>>),
     Found(Answered<service::SearchData>),
     Versions(Answered<Vec<service::Expression>>),
+    Parts(Answered<service::Parts>),
     Published(Answered<Vec<service::Expression>>),
     Feed(Answered<service::Feed>),
     Changes(Envelope<Box<wire::Changes>>),
@@ -56,6 +57,7 @@ impl Answer {
             Self::LawHits(a) => sent(out, &a.envelope),
             Self::Found(a) => sent(out, &a.envelope),
             Self::Versions(a) => sent(out, &a.envelope),
+            Self::Parts(a) => sent(out, &a.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
             Self::Changes(e) => write(out, e),
@@ -240,14 +242,14 @@ fn provenance(
     ))
 }
 
-/// bron's reading of one article: its leden in order, each opened by the number
+/// bron's reading of one article or unit: its leden in order, each opened by the number
 /// the register gives it.
 ///
 /// Assembled here rather than taken from the article's own rendering, because
 /// that string carries no lid numbers and the lid is the unit Dutch practice
 /// cites: `art. 6:162 lid 2 BW`. It is rendering, so it lives where the answer
 /// is built rather than on the shape the service sends.
-fn content(article: &service::Article) -> String {
+pub fn content(article: &service::Article) -> String {
     leden(article).map(lid).collect::<Vec<_>>().join("\n")
 }
 
@@ -346,6 +348,36 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
         Law::Versions { id } => service
             .expressions(&client, &parse_id(id)?)
             .map(Answer::Versions),
+
+        Law::Parts {
+            id,
+            kind,
+            number,
+            position,
+            raw,
+            limit,
+            offset,
+            moment,
+        } => {
+            let (as_of, as_known_on) = moment.coordinates(today);
+
+            service
+                .parts(
+                    &client,
+                    &parse_id(id)?,
+                    &service::Units {
+                        as_of,
+                        as_known_on,
+                        kind: kind.as_deref(),
+                        number: number.as_deref(),
+                        position: *position,
+                        raw: *raw,
+                        limit: *limit,
+                        offset: *offset,
+                    },
+                )
+                .map(Answer::Parts)
+        }
 
         Law::Published {
             from,

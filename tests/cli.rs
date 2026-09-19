@@ -1414,3 +1414,183 @@ async fn a_hit_without_a_number_is_ranked_like_any_other() {
         "{text}"
     );
 }
+
+/// Two units of the Opiumwet that are no article, as `/parts` answers them: an
+/// aanhef, which prints no number, and a bijlage that prints images.
+const PARTS: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-19","as_known_on":"2026-09-19",
+ "data":{"regulation_id":"BWBR0001941",
+  "expression":{"regulation_id":"BWBR0001941","label":"2026-09-17_0","in_force":{"from":"2026-09-17"},"withdrawn":false,"held":true,"upstream_hash_check":"matches","blob":"1eb72c0011119cf2fdcbc0660f12e7a0cf0612a40cb602f3a30a42a1db5b8de9","later_field":1},
+  "parts":[
+   {"kind":"aanhef","position":1,"stam_id":"1","versie_id":"1","content_hash":"a61a","span":{"start":100,"end":400},
+    "paragraphs":[{"content_hash":"a61a","rendered":"Wij WILHELMINA, bij de gratie Gods.","span":{"start":100,"end":400}}]},
+   {"kind":"bijlage","position":2,"number":"Ia","label":"Lijst Ia","path":"/BijlageIa","stam_id":"17364373","versie_id":"31676452","content_hash":"53c7",
+    "jci":"jci1.3:c:BWBR0001941&bijlage=Ia&z=2026-09-17&g=2026-09-17","span":{"start":339090,"end":365513},"images":["272866.png","272867.png"],
+    "paragraphs":[{"content_hash":"53c7","rendered":"1 Stofgroep: fenethylaminen","span":{"start":339090,"end":365513}}]}]},
+ "caveats":[{"kind":"illustration_omitted","articles":["Lijst Ia"]}]}"#;
+
+/// `law parts` is one call to the service, so `--json` is what it answered,
+/// and the narrowing reaches the service as asked.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_prints_the_envelope_the_service_sent() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/parts"))
+        .and(query_param("kind", "bijlage"))
+        .and(query_param("number", "Ia"))
+        .and(query_param("as_of", "2026-09-19"))
+        .and(query_param("as_known_on", "2026-09-18"))
+        .and(query_param("rendered", "1"))
+        .and(query_param("raw", "1"))
+        .and(query_param("limit", "5"))
+        .and(query_param("offset", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(PARTS, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "bijlage",
+            "--number",
+            "Ia",
+            "--as-of",
+            "2026-09-19",
+            "--as-known-on",
+            "2026-09-18",
+            "--raw",
+            "--limit",
+            "5",
+            "--offset",
+            "2",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{PARTS}\n"));
+}
+
+/// A unit that prints no number is asked for by its place among its kind.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_asks_for_a_unit_by_its_place() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/parts"))
+        .and(query_param("kind", "aanhef"))
+        .and(query_param("position", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(PARTS, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "aanhef",
+            "--position",
+            "1",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// Each unit under its name, its text, where it stands and the images it
+/// prints; the note on the answer beneath it.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_names_each_unit_and_prints_its_text() {
+    let server = answering("GET", "/api/v1/regulations/BWBR0001941/parts", PARTS).await;
+
+    let output = bron(&server, &["law", "parts", "BWBR0001941"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("as in force on 2026-09-19"), "{text}");
+    assert!(text.lines().any(|l| l == "aanhef 1"), "{text}");
+    assert!(
+        text.contains("Wij WILHELMINA, bij de gratie Gods."),
+        "{text}"
+    );
+    assert!(text.lines().any(|l| l == "Lijst Ia"), "{text}");
+    assert!(text.lines().any(|l| l == "/BijlageIa"), "{text}");
+    assert!(text.contains("1 Stofgroep: fenethylaminen"), "{text}");
+    assert!(
+        text.contains("source: 1eb72c0011119cf2fdcbc0660f12e7a0cf0612a40cb602f3a30a42a1db5b8de9 (339090..365513)"),
+        "{text}"
+    );
+    assert!(text.contains("jci1.3:c:BWBR0001941&bijlage=Ia"), "{text}");
+    assert!(text.contains("images: 272866.png, 272867.png"), "{text}");
+    assert!(text.contains("note: Lijst Ia print(s) an image"), "{text}");
+}
+
+/// No such unit is a not-found, with the code the service stated.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_for_a_unit_the_rendition_does_not_print_is_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/parts"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"part_not_found","message":"no part of BWBR0001941 rendition 2026-09-17_0 [nope]","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["--json", "law", "parts", "BWBR0001941", "--kind", "nope"],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "part_not_found");
+}
+
+/// A number or a place is a number or a place among units of one kind, and
+/// the two name one unit two ways.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_refuses_a_number_or_a_place_without_a_kind() {
+    let server = MockServer::start().await;
+
+    for args in [
+        &["law", "parts", "BWBR0001941", "--number", "Ia"][..],
+        &["law", "parts", "BWBR0001941", "--position", "1"][..],
+        &[
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "bijlage",
+            "--number",
+            "Ia",
+            "--position",
+            "1",
+        ][..],
+    ] {
+        let output = bron(&server, args).await;
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+    }
+}
+
+/// `law show` answers articles, and says so where a reader looks for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_says_it_answers_articles_only() {
+    let server = MockServer::start().await;
+
+    let output = bron(&server, &["law", "show", "--help"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout(&output).contains("law parts"), "{output:?}");
+}
