@@ -102,42 +102,42 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                             .distance
                             .map_or_else(|| "    -".to_string(), |d| format!("{d:.3}"));
 
-                        writeln!(
-                            out,
-                            "{}",
-                            hit_row(
-                                &distance,
-                                &hit.source,
-                                &unit,
-                                &hit.regulation_id,
-                                &hit.expression,
-                                &hit.found_by.join("+"),
-                                &name(hit.label.as_deref(), hit.number.as_deref(), &hit.kind, None),
-                            )
-                        )?;
+                        let found_by = hit.found_by.join("+");
+                        let hit_name =
+                            name(hit.label.as_deref(), hit.number.as_deref(), &hit.kind, None);
+                        let row = HitRow {
+                            distance: &distance,
+                            source: &hit.source,
+                            unit: &unit,
+                            regulation: &hit.regulation_id,
+                            expression: &hit.expression,
+                            found_by: &found_by,
+                            name: &hit_name,
+                        };
+                        writeln!(out, "{}", row.line())?;
 
                         // The same words in other places, each named as the
                         // hit is, so a text sitting in two regulations is not
                         // read as found once.
                         for place in &hit.also {
-                            writeln!(
-                                out,
-                                "{}",
-                                hit_row(
-                                    "",
-                                    "also",
-                                    &unit_of(&place.unit, place.lid.as_ref()),
-                                    &place.regulation_id,
-                                    &place.expression,
-                                    "",
-                                    &name(
-                                        place.label.as_deref(),
-                                        place.number.as_deref(),
-                                        &place.kind,
-                                        None
-                                    ),
-                                )
-                            )?;
+                            let place_unit = unit_of(&place.unit, place.lid.as_ref());
+                            let place_name = name(
+                                place.label.as_deref(),
+                                place.number.as_deref(),
+                                &place.kind,
+                                None,
+                            );
+                            // No distance and no finder: neither is stated of
+                            // another place, only of the hit.
+                            let row = HitRow {
+                                source: "also",
+                                unit: &place_unit,
+                                regulation: &place.regulation_id,
+                                expression: &place.expression,
+                                name: &place_name,
+                                ..HitRow::default()
+                            };
+                            writeln!(out, "{}", row.line())?;
                         }
                         let unnamed = (hit.places as usize).saturating_sub(1 + hit.also.len());
                         if unnamed > 0 {
@@ -749,8 +749,8 @@ fn unit_of(unit: &str, lid: Option<&SearchLid>) -> String {
 }
 
 /// A window, or `-` where none is stated.
-fn stated(window_: Option<bron::service::Window>) -> String {
-    window_.map_or_else(|| "-".to_string(), |w| window(w.from, w.until))
+fn stated(bounds: Option<bron::service::Window>) -> String {
+    bounds.map_or_else(|| "-".to_string(), |w| window(w.from, w.until))
 }
 
 /// Where a unit stands in its rendition's document.
@@ -759,20 +759,37 @@ fn span(side: &Article) -> String {
 }
 
 /// One row of a ranking: a hit, or another place its words sit, in one column
-/// order so a reader comparing the two compares like with like.
-fn hit_row(
-    distance: &str,
-    source: &str,
-    unit: &str,
-    regulation: &str,
-    expression: &str,
-    found_by: &str,
-    name: &str,
-) -> String {
-    let row = format!(
-        "{distance:>5}  {source:<11} {unit:<8} {regulation}  {expression}  {found_by:<FOUND_BY$} {name}"
-    );
-    row.trim_end().to_string()
+/// order so a reader comparing the two compares like with like. Named fields,
+/// because two of them read as identifiers and a swap would still look
+/// plausible, only in the wrong columns.
+#[derive(Default)]
+struct HitRow<'a> {
+    distance: &'a str,
+    source: &'a str,
+    unit: &'a str,
+    regulation: &'a str,
+    expression: &'a str,
+    found_by: &'a str,
+    name: &'a str,
+}
+
+impl HitRow<'_> {
+    fn line(&self) -> String {
+        let Self {
+            distance,
+            source,
+            unit,
+            regulation,
+            expression,
+            found_by,
+            name,
+        } = self;
+        format!(
+            "{distance:>5}  {source:<11} {unit:<8} {regulation}  {expression}  {found_by:<FOUND_BY$} {name}"
+        )
+        .trim_end()
+        .to_string()
+    }
 }
 
 /// Shows what changed inside an amended article.
