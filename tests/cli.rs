@@ -513,50 +513,6 @@ async fn holding_the_whole_of(
         .await;
 }
 
-/// A comparison is between two whole renditions. A page of each would compare
-/// the first page and report the rest of the law as unchanged by saying nothing
-/// about it.
-#[tokio::test(flavor = "multi_thread")]
-async fn law_changes_asks_for_the_whole_of_both_renditions() {
-    let server = MockServer::start().await;
-    holding_the_whole_of(
-        &server,
-        "2018-01-01",
-        "2016-07-01_0",
-        EARLIER_BLOB,
-        "Eerste lid.",
-    )
-    .await;
-    holding_the_whole_of(
-        &server,
-        "2019-01-01",
-        "2019-01-01_0",
-        LATER_BLOB,
-        "Eerste lid, gewijzigd.",
-    )
-    .await;
-
-    let output = bron(
-        &server,
-        &[
-            "--json",
-            "law",
-            "changes",
-            "BWBR0008691",
-            "--from",
-            "2018-01-01",
-            "--to",
-            "2019-01-01",
-        ],
-    )
-    .await;
-    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
-
-    // Each mock answers only a request carrying `limit=none`, and expects one.
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(envelope["data"]["summary"]["amended"], 1, "{envelope}");
-}
-
 /// At a terminal the whole law is what `law show` means.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_show_asks_for_the_whole_law() {
@@ -830,188 +786,6 @@ async fn help_asked_for_under_json_is_still_help() {
     assert!(stdout(&output).contains("--since"), "{output:?}");
 }
 
-/// Two articles per rendition: 1 amended between them, 2 left alone.
-fn two_articles_of(as_of: &str, label: &str, blob: &str, first: &str) -> String {
-    let article = |number: &str, stam: &str, text: &str| {
-        serde_json::json!({
-            "kind": "artikel",
-            "number": number,
-            "label": format!("Artikel {number}"),
-            "stam_id": stam,
-            "span": {"start": 10, "end": 90},
-            "paragraphs": [{"number": "1", "rendered": text, "span": {"start": 20, "end": 80}}],
-        })
-    };
-
-    serde_json::json!({
-        "bron": 1,
-        "grade": "authority",
-        "as_of": as_of,
-        "data": {
-            "regulation_id": "BWBR0008691",
-            "expression": {
-                "regulation_id": "BWBR0008691",
-                "label": label,
-                "in_force": {"from": &label[..10]},
-                "held": true,
-                "upstream_hash_check": "matches",
-                "blob": blob,
-            },
-            "articles": [
-                article("1", "2760033", first),
-                article("2", "2760034", "Ongewijzigd."),
-            ],
-        },
-    })
-    .to_string()
-}
-
-async fn holding_two_articles(
-    server: &MockServer,
-    as_of: &str,
-    label: &str,
-    blob: &str,
-    first: &str,
-) {
-    Mock::given(method("GET"))
-        .and(path("/api/v1/regulations/BWBR0008691/articles"))
-        .and(query_param("as_of", as_of))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            two_articles_of(as_of, label, blob, first),
-            "application/json",
-        ))
-        .mount(server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(format!("/api/v1/blobs/{blob}/provenance")))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
-            "application/json",
-        ))
-        .mount(server)
-        .await;
-}
-
-/// The summary counts what was asked about. With `--article` that is the
-/// articles bearing that number, so an unchanged article elsewhere in the law
-/// is not counted into an answer about article 1.
-#[tokio::test(flavor = "multi_thread")]
-async fn law_changes_counts_only_the_article_asked_for() {
-    let server = MockServer::start().await;
-    holding_two_articles(
-        &server,
-        "2018-01-01",
-        "2016-07-01_0",
-        EARLIER_BLOB,
-        "Eerste lid.",
-    )
-    .await;
-    holding_two_articles(
-        &server,
-        "2019-01-01",
-        "2019-01-01_0",
-        LATER_BLOB,
-        "Eerste lid, gewijzigd.",
-    )
-    .await;
-
-    let changes = |article: &'static str| {
-        let server = &server;
-        async move {
-            let mut args = vec![
-                "--json",
-                "law",
-                "changes",
-                "BWBR0008691",
-                "--from",
-                "2018-01-01",
-                "--to",
-                "2019-01-01",
-            ];
-            args.extend(["--article", article]);
-            let output = bron(server, &args).await;
-            assert!(output.status.success(), "{output:?}");
-            serde_json::from_str::<serde_json::Value>(&stdout(&output)).unwrap()["data"]["summary"]
-                .clone()
-        }
-    };
-
-    assert_eq!(
-        changes("1").await,
-        serde_json::json!({"unchanged": 0, "amended": 1, "commenced": 0, "added": 0, "repealed": 0, "withdrawn": 0})
-    );
-    assert_eq!(
-        changes("2").await,
-        serde_json::json!({"unchanged": 1, "amended": 0, "commenced": 0, "added": 0, "repealed": 0, "withdrawn": 0})
-    );
-
-    let human = bron(
-        &server,
-        &[
-            "law",
-            "changes",
-            "BWBR0008691",
-            "--from",
-            "2018-01-01",
-            "--to",
-            "2019-01-01",
-            "--article",
-            "1",
-        ],
-    )
-    .await;
-    assert!(
-        stdout(&human)
-            .contains("1 amended, 0 commenced, 0 added, 0 repealed, 0 withdrawn, 0 unchanged"),
-        "{human:?}"
-    );
-}
-
-/// A number that names no article on either side is no such thing, as a lid
-/// that is not there is: an all-zero summary would read as 'nothing changed'.
-#[tokio::test(flavor = "multi_thread")]
-async fn law_changes_for_an_article_in_neither_rendition_is_not_found() {
-    let server = MockServer::start().await;
-    holding_two_articles(
-        &server,
-        "2018-01-01",
-        "2016-07-01_0",
-        EARLIER_BLOB,
-        "Eerste lid.",
-    )
-    .await;
-    holding_two_articles(
-        &server,
-        "2019-01-01",
-        "2019-01-01_0",
-        LATER_BLOB,
-        "Eerste lid, gewijzigd.",
-    )
-    .await;
-
-    let output = bron(
-        &server,
-        &[
-            "--json",
-            "law",
-            "changes",
-            "BWBR0008691",
-            "--from",
-            "2018-01-01",
-            "--to",
-            "2019-01-01",
-            "--article",
-            "9",
-        ],
-    )
-    .await;
-    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
-
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    assert_eq!(envelope["error"]["kind"], "not_found");
-    assert!(envelope["error"].get("code").is_none(), "{envelope}");
-}
-
 /// Where stdout is rows, a limit on them goes to stderr beside the cursor, so
 /// a shell script reading line by line never reads a sentence as a row.
 #[tokio::test(flavor = "multi_thread")]
@@ -1181,109 +955,6 @@ async fn law_versions_says_which_held_renditions_were_not_read() {
     let read = text.lines().find(|l| l.contains("2016-07-01_0")).unwrap();
     assert!(unread.contains("too_large"), "{text}");
     assert!(!read.contains("unread"), "{text}");
-}
-
-/// One rendition holding artikel 119b with the status and day it prints.
-fn waiting_or_applying(
-    label: &str,
-    blob: &str,
-    status: &str,
-    in_force_from: Option<&str>,
-) -> String {
-    let mut article = serde_json::json!({
-        "kind": "artikel",
-        "number": "119b",
-        "label": "Artikel 119b",
-        "stam_id": "2760119",
-        "status": status,
-        "span": {"start": 10, "end": 90},
-        "paragraphs": [{"number": "1", "rendered": "Tekst.", "span": {"start": 20, "end": 80}}],
-    });
-    if let Some(day) = in_force_from {
-        article["in_force_from"] = day.into();
-    }
-
-    serde_json::json!({
-        "bron": 1,
-        "grade": "authority",
-        "data": {
-            "regulation_id": "BWBR0005289",
-            "expression": {
-                "regulation_id": "BWBR0005289",
-                "label": label,
-                "in_force": {"from": &label[..10]},
-                "held": true,
-                "upstream_hash_check": "matches",
-                "blob": blob,
-            },
-            "articles": [article],
-        },
-    })
-    .to_string()
-}
-
-/// Words that stay and a status that goes from `nogniet` to `goed`: the
-/// provision started to apply, on the day the later rendition states. Each
-/// side's status is its own rendition's.
-#[tokio::test(flavor = "multi_thread")]
-async fn law_changes_says_a_provision_commenced_and_on_which_day() {
-    let server = MockServer::start().await;
-    for (as_of, label, blob, status, day) in [
-        ("2026-01-01", "2025-07-01_0", EARLIER_BLOB, "nogniet", None),
-        (
-            "2027-06-01",
-            "2027-01-01_0",
-            LATER_BLOB,
-            "goed",
-            Some("2027-01-01"),
-        ),
-    ] {
-        Mock::given(method("GET"))
-            .and(path("/api/v1/regulations/BWBR0005289/articles"))
-            .and(query_param("as_of", as_of))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
-                waiting_or_applying(label, blob, status, day),
-                "application/json",
-            ))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path(format!("/api/v1/blobs/{blob}/provenance")))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(
-                r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
-                "application/json",
-            ))
-            .mount(&server)
-            .await;
-    }
-
-    let args = [
-        "law",
-        "changes",
-        "BWBR0005289",
-        "--from",
-        "2026-01-01",
-        "--to",
-        "2027-06-01",
-    ];
-
-    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
-    let envelope: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
-    let change = &envelope["data"]["articles"][0];
-
-    assert!(json.status.success(), "{json:?}");
-    assert_eq!(change["change"], "commenced", "{envelope}");
-    assert_eq!(change["before"]["status"], "nogniet", "{envelope}");
-    assert_eq!(change["after"]["status"], "goed", "{envelope}");
-    assert_eq!(change["after"]["in_force_from"], "2027-01-01", "{envelope}");
-    assert_eq!(envelope["data"]["summary"]["commenced"], 1, "{envelope}");
-    assert_eq!(envelope["data"]["summary"]["unchanged"], 0, "{envelope}");
-
-    let human = bron(&server, &args).await;
-    let text = stdout(&human);
-    assert!(human.status.success(), "{human:?}");
-    assert!(text.contains("commenced on 2027-01-01"), "{text}");
-    assert!(text.contains("1 commenced"), "{text}");
 }
 
 /// A rendition of BWBR0020368 as the service answers it on 2015-01-01: one of
@@ -1593,4 +1264,178 @@ async fn law_show_says_it_answers_articles_only() {
 
     assert!(output.status.success(), "{output:?}");
     assert!(stdout(&output).contains("law parts"), "{output:?}");
+}
+
+/// One unit's side of a comparison, as `/changes` sends it with `rendered=1`.
+fn side(kind: &str, status: &str, in_force_from: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": kind, "position": 1, "stam_id": "2986423", "versie_id": "1", "content_hash": "a61a",
+        "amended_by": "stb-2026-262", "status": status, "in_force_from": in_force_from,
+        "span": {"start": 10, "end": 90},
+        "paragraphs": [{"content_hash": "a61a", "rendered": text, "span": {"start": 20, "end": 80}}],
+    })
+}
+
+/// The Opiumwet between 2026-09-16 and 2026-09-17 as the service compares it:
+/// Lijst I amended, which a comparison of its articles alone never saw, beside
+/// an article that commenced.
+fn changes_of_the_opiumwet() -> String {
+    let expression = |label: &str, blob: &str| {
+        serde_json::json!({
+            "regulation_id": "BWBR0001941", "label": label, "in_force": {"from": &label[..10]},
+            "withdrawn": false, "held": true, "upstream_hash_check": "matches", "blob": blob,
+        })
+    };
+
+    serde_json::json!({
+        "bron": 1, "grade": "authority", "as_of": "2026-09-17", "as_known_on": "2026-09-19",
+        "data": {
+            "regulation_id": "BWBR0001941",
+            "from": expression("2026-07-09_0", EARLIER_BLOB),
+            "to": expression("2026-09-17_0", LATER_BLOB),
+            "summary": {"unchanged": 47, "amended": 1, "added": 0, "commenced": 1, "repealed": 0, "withdrawn": 0},
+            "articles": [
+                {
+                    "change": "amended", "kind": "bijlage", "number": "I", "label": "Lijst I", "path": "/BijlageI",
+                    "from": side("bijlage", "goed", "2026-07-09", "Cocaïne | Heroïne"),
+                    "to": side("bijlage", "goed", "2026-09-17", "Cocaïne | Heroïne | Nitazenen"),
+                },
+                {
+                    "change": "commenced", "kind": "artikel", "number": "13c", "label": "Artikel 13c",
+                    "from": side("artikel", "nogniet", "2026-07-09", "Tekst."),
+                    "to": side("artikel", "goed", "2026-09-17", "Tekst."),
+                },
+            ],
+        },
+        "caveats": [{"kind": "articles_not_compared", "repeated": ["2760090"]}],
+    })
+    .to_string()
+}
+
+/// `law changes` is one call to the service's own comparison, so the summary
+/// and the rows are the service's, and `--json` is the envelope as sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_prints_the_comparison_the_service_made() {
+    let answer = changes_of_the_opiumwet();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/changes"))
+        .and(query_param("from", "2026-09-16"))
+        .and(query_param("to", "2026-09-17"))
+        .and(query_param("rendered", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(answer.clone(), "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "law",
+        "changes",
+        "BWBR0001941",
+        "--from",
+        "2026-09-16",
+        "--to",
+        "2026-09-17",
+    ];
+
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{answer}\n"));
+
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+    assert!(human.status.success(), "{human:?}");
+    assert!(
+        text.contains("2026-07-09_0 (2026-07-09 onwards) -> 2026-09-17_0 (2026-09-17 onwards)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("1 amended, 1 commenced, 0 added, 0 repealed, 0 withdrawn, 47 unchanged"),
+        "{text}"
+    );
+    assert!(text.contains("AMENDED    Lijst I"), "{text}");
+    assert!(text.contains("{+| Nitazenen+}"), "{text}");
+    assert!(text.contains("through stb-2026-262"), "{text}");
+    assert!(text.contains("COMMENCED  Artikel 13c"), "{text}");
+    assert!(text.contains("commenced on 2026-09-17"), "{text}");
+    assert!(text.contains("stam-id 2760090"), "{text}");
+    assert!(!text.contains("no sentence for"), "{text}");
+}
+
+/// What narrows the comparison is the service's to apply, so every flag
+/// reaches it as asked.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_sends_what_narrows_the_comparison() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/changes"))
+        .and(query_param("from", "2026-09-16"))
+        .and(query_param("to", "2026-09-17"))
+        .and(query_param("kind", "bijlage"))
+        .and(query_param("article", "I"))
+        .and(query_param("all", "1"))
+        .and(query_param("raw", "1"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(changes_of_the_opiumwet(), "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "changes",
+            "BWBR0001941",
+            "--from",
+            "2026-09-16",
+            "--to",
+            "2026-09-17",
+            "--kind",
+            "bijlage",
+            "--article",
+            "I",
+            "--all",
+            "--raw",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// A number or a kind neither rendition prints is the service's not-found,
+/// with its code: an all-zero summary would read as 'nothing changed'.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_for_a_unit_in_neither_rendition_is_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/changes"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"article_not_found","message":"no article of BWBR0001941 between 2026-09-16 and 2026-09-17 [9999]","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "changes",
+            "BWBR0001941",
+            "--from",
+            "2026-09-16",
+            "--to",
+            "2026-09-17",
+            "--article",
+            "9999",
+        ],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "article_not_found");
 }

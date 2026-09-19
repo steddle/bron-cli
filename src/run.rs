@@ -8,8 +8,6 @@ use std::io::{self, Write};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
-use bron::blob::BlobId;
-use bron::diff;
 use bron::error::{Fault, Outcome, from_source};
 use bron::ids::{BwbId, Ecli, PublicationId};
 use bron::model::{AppealStatus, Direction, Relation};
@@ -29,10 +27,10 @@ pub enum Answer {
     LawHits(Answered<Vec<service::Regulation>>),
     Found(Answered<service::SearchData>),
     Versions(Answered<Vec<service::Expression>>),
-    Parts(Answered<service::Parts>),
+    Parts(Box<Answered<service::Parts>>),
     Published(Answered<Vec<service::Expression>>),
     Feed(Answered<service::Feed>),
-    Changes(Envelope<Box<wire::Changes>>),
+    Changes(Box<Answered<service::Changes>>),
     Articles(Envelope<Vec<wire::Article>>),
     CaseHits(Envelope<Vec<wire::CaseHit>>),
     Case(Envelope<Box<wire::Case>>),
@@ -60,7 +58,7 @@ impl Answer {
             Self::Parts(a) => sent(out, &a.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
-            Self::Changes(e) => write(out, e),
+            Self::Changes(a) => sent(out, &a.envelope),
             Self::Articles(e) => write(out, e),
             Self::CaseHits(e) => write(out, e),
             Self::Case(e) => write(out, e),
@@ -273,25 +271,6 @@ fn lid(lid: &service::Paragraph) -> String {
     }
 }
 
-/// One article in the terms a comparison is made in.
-fn compared_article(article: &service::Article) -> diff::Article {
-    diff::Article {
-        stam_id: Some(article.stam_id.clone()),
-        number: article.number.clone(),
-        label: article.label.clone(),
-        path: article.path.clone(),
-        title: article.title.clone(),
-        leden: leden(article)
-            .map(|paragraph| diff::Lid {
-                number: paragraph.number.clone(),
-                text: paragraph.text().to_string(),
-            })
-            .collect(),
-        effect: article.effect.clone(),
-        status: article.status.clone(),
-    }
-}
-
 /// One article, in the shape a consumer parses.
 fn article(
     article: &service::Article,
@@ -376,7 +355,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         offset: *offset,
                     },
                 )
-                .map(Answer::Parts)
+                .map(|answered| Answer::Parts(Box::new(answered)))
         }
 
         Law::Published {
@@ -434,7 +413,8 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             from,
             to,
             all,
-            article: wanted,
+            kind,
+            article,
             raw,
         } => {
             let law: BwbId = parse_id(id)?;
@@ -443,129 +423,20 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 return Err(Fault::usage(format!("--from {from} is after --to {to}")));
             }
 
-            let ask = |on: NaiveDate| service::Ask {
-                as_of: on,
-                as_known_on: None,
-                number: None,
-                raw: *raw,
-                // A diff is between two whole renditions: narrowing one side
-                // to what has not commenced would report every other article
-                // as removed.
-                not_commenced: false,
-            };
-
-            let earlier = service.articles(&client, &law, &ask(*from))?;
-            let later = service.articles(&client, &law, &ask(to))?;
-
-            let mut caveats = earlier.caveats;
-            caveats.extend(later.caveats);
-
-            let before = earlier.data;
-            let after = later.data;
-
-            // Read off both renditions rather than off the comparison, which
-            // leaves out articles it cannot place and would call one of those
-            // absent.
-            if let Some(number) = wanted.as_deref()
-                && !before
-                    .articles
-                    .iter()
-                    .chain(&after.articles)
-                    .any(|article| article.number.as_deref() == Some(number))
-            {
-                return Err(Fault::not_found(
-                    "article",
-                    format!("{number} in either rendition of {law}"),
-                ));
-            }
-
-            let before_provenance = provenance(&client, service, &law, &before.expression)?;
-            let after_provenance = provenance(&client, service, &law, &after.expression)?;
-
-            let earlier_compared: Vec<diff::Article> =
-                before.articles.iter().map(compared_article).collect();
-            let later_compared: Vec<diff::Article> =
-                after.articles.iter().map(compared_article).collect();
-            let comparison = diff::compare(&earlier_compared, &later_compared);
-
-            if !comparison.is_whole() {
-                caveats.push(Caveat::ArticlesNotCompared {
-                    unidentified_from: comparison.unidentified.before,
-                    unidentified_to: comparison.unidentified.after,
-                    repeated: comparison.repeated,
-                });
-            }
-
-            let mut summary = wire::ChangeSummary::default();
-            let mut articles = Vec::new();
-
-            for change in comparison.changes {
-                // Before the count, so the summary is of the articles asked
-                // about and not of the whole regulation.
-                if wanted
-                    .as_deref()
-                    .is_some_and(|number| change.number.as_deref() != Some(number))
-                {
-                    continue;
-                }
-
-                match change.change {
-                    diff::Change::Unchanged => summary.unchanged += 1,
-                    diff::Change::Amended => summary.amended += 1,
-                    diff::Change::Commenced => summary.commenced += 1,
-                    diff::Change::Added => summary.added += 1,
-                    diff::Change::Repealed => summary.repealed += 1,
-                    diff::Change::Withdrawn => summary.withdrawn += 1,
-                }
-
-                if !*all && !change.change.is_change() {
-                    continue;
-                }
-
-                articles.push(wire::ArticleChange {
-                    change: change.change.as_str(),
-                    number: change.number,
-                    label: change.label,
-                    path: change.path,
-                    before: change.before.map(|at| {
-                        side(
-                            &before.articles[at],
-                            &before.expression.label,
-                            &before_provenance,
-                        )
-                    }),
-                    after: change.after.map(|at| {
-                        side(
-                            &after.articles[at],
-                            &after.expression.label,
-                            &after_provenance,
-                        )
-                    }),
-                });
-            }
-
-            // Read off what the answer carries rather than off the flag that
-            // asked for it. `--all` decides which articles are in the list at
-            // all, and a caveat about the request cannot see that.
-            if articles.iter().any(|change| {
-                [&change.before, &change.after]
-                    .into_iter()
-                    .flatten()
-                    .any(wire::Side::reports_a_slice)
-            }) {
-                caveats.push(Caveat::UnverifiedSlice);
-            }
-
-            Ok(Answer::Changes(
-                Envelope::ok(Box::new(wire::Changes {
-                    law_id: law.into_string(),
-                    from: compared(&before.expression, before_provenance.blob),
-                    to: compared(&after.expression, after_provenance.blob),
-                    articles,
-                    summary,
-                }))
-                .with_caveats(caveats),
-            ))
+            service
+                .changes(
+                    &client,
+                    &law,
+                    &service::Compare {
+                        from: *from,
+                        to,
+                        kind: kind.as_deref(),
+                        article: article.as_deref(),
+                        all: *all,
+                        raw: *raw,
+                    },
+                )
+                .map(|answered| Answer::Changes(Box::new(answered)))
         }
 
         Law::Show {
@@ -786,28 +657,6 @@ fn run_publication(cmd: &Publication, quiet: bool) -> Outcome<Answer> {
 
 // -- shared --------------------------------------------------------------
 
-/// One side of a comparison, with the span that places it.
-fn side(article: &service::Article, version: &str, provenance: &wire::Provenance) -> wire::Side {
-    wire::Side {
-        version: version.to_string(),
-        excerpt: excerpt(article.span, article.raw.as_deref()),
-        content: content(article),
-        amended_by: article.amended_by.clone(),
-        effect: article.effect.clone(),
-        status: article.status.clone(),
-        in_force_from: article.in_force_from,
-        provenance: provenance.clone(),
-    }
-}
-
-fn compared(expression: &service::Expression, blob: BlobId) -> wire::ComparedVersion {
-    wire::ComparedVersion {
-        version: expression.label.clone(),
-        in_force: expression.in_force.into(),
-        blob,
-    }
-}
-
 /// A window that runs backwards is a request nobody meant to make.
 fn ordered(
     from: Option<NaiveDate>,
@@ -844,7 +693,7 @@ fn client(quiet: bool) -> Outcome<Client> {
 
 #[cfg(test)]
 mod reading_tests {
-    use super::{compared_article, content, diff, leden};
+    use super::{content, leden};
     use bron::service::{Article, Paragraph, Span};
 
     fn paragraph(number: Option<&str>, text: &str) -> Paragraph {
@@ -908,29 +757,6 @@ mod reading_tests {
 
         assert_eq!(leden(&repealed).count(), 0);
         assert_eq!(content(&repealed), "");
-    }
-
-    /// A comparison reads what the service's reads: the title, and each lid
-    /// that carries text as its number and its words, in order. An empty lid
-    /// says nothing and is left out.
-    #[test]
-    fn a_comparison_reads_the_title_and_every_lid_that_carries_text() {
-        let mut titled = article(vec![
-            paragraph(Some("1"), "Eerste lid."),
-            paragraph(Some("2"), ""),
-        ]);
-        titled.title = Some("Opschrift".into());
-
-        let compared = compared_article(&titled);
-
-        assert_eq!(compared.title.as_deref(), Some("Opschrift"));
-        assert_eq!(
-            compared.leden,
-            vec![diff::Lid {
-                number: Some("1".into()),
-                text: "Eerste lid.".into(),
-            }]
-        );
     }
 }
 

@@ -22,7 +22,6 @@
 #![deny(clippy::all)]
 
 pub mod blob;
-pub mod diff;
 pub mod error;
 pub mod ids;
 pub mod model;

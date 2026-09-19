@@ -29,8 +29,8 @@ use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, BlobProvenance, Expression, Feed, Image, Paragraph, Parts, Published,
-    RegisterEvent, Regulation, Span, Units, Window, name,
+    Article, Articles, Ask, BlobProvenance, Change, Changes, Compare, Expression, Feed, Image,
+    Paragraph, Parts, Published, RegisterEvent, Regulation, Span, Summary, Units, Window, name,
 };
 pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -192,10 +192,9 @@ impl Service {
 
     /// The rendition a point in both windows resolves to, and its articles.
     ///
-    /// All of them, always. `law changes` compares two renditions read here,
-    /// and a page of each would compare the first page and say nothing about
-    /// the rest. Where `number` narrows the answer the set is a handful, so
-    /// asking for the whole of it costs nothing.
+    /// All of them, always: at a terminal the whole law is what `law show`
+    /// means. Where `number` narrows the answer the set is a handful, so asking
+    /// for the whole of it costs nothing.
     pub fn articles(
         &self,
         client: &Client,
@@ -252,6 +251,39 @@ impl Service {
         }
         if let Some(position) = ask.position {
             query.push(("position", position.to_string()));
+        }
+        if ask.raw {
+            query.push(("raw", "1".to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// The service's comparison of a regulation between two days.
+    ///
+    /// Always rendered, because a person reads what changed in the words.
+    pub fn changes(
+        &self,
+        client: &Client,
+        law: &BwbId,
+        ask: &Compare<'_>,
+    ) -> Outcome<Answered<Changes>> {
+        let url = format!("{}/api/v1/regulations/{law}/changes", self.base);
+
+        let mut query = vec![
+            ("from", ask.from.to_string()),
+            ("to", ask.to.to_string()),
+            ("rendered", "1".to_string()),
+        ];
+
+        if let Some(kind) = ask.kind {
+            query.push(("kind", kind.to_string()));
+        }
+        if let Some(article) = ask.article {
+            query.push(("article", article.to_string()));
+        }
+        if ask.all {
+            query.push(("all", "1".to_string()));
         }
         if ask.raw {
             query.push(("raw", "1".to_string()));

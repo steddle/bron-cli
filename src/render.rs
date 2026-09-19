@@ -303,18 +303,16 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&e.caveats, out)
         }
 
-        Answer::Changes(e) => {
-            let Some(changes) = &e.data else {
-                return Ok(());
-            };
+        Answer::Changes(a) => {
+            let changes = &a.data;
 
-            writeln!(out, "{}", changes.law_id)?;
+            writeln!(out, "{}", changes.regulation_id)?;
             writeln!(
                 out,
                 "{} ({}) -> {} ({})\n",
-                changes.from.version,
+                changes.from.label,
                 window(changes.from.in_force.from, changes.from.in_force.until),
-                changes.to.version,
+                changes.to.label,
                 window(changes.to.in_force.from, changes.to.in_force.until)
             )?;
 
@@ -325,40 +323,41 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 s.amended, s.commenced, s.added, s.repealed, s.withdrawn, s.unchanged
             )?;
 
-            for article in &changes.articles {
-                let label = article
-                    .label
-                    .as_deref()
-                    .or(article.number.as_deref())
-                    .unwrap_or_default();
-                writeln!(out, "{:<10} {label}", article.change.to_uppercase())?;
+            for unit in &changes.articles {
+                let side = unit.to.as_ref().or(unit.from.as_ref());
+                let name = bron::service::name(
+                    unit.label.as_deref(),
+                    unit.number.as_deref(),
+                    &unit.kind,
+                    side.and_then(|side| side.position),
+                );
+                writeln!(out, "{:<10} {name}", unit.change.to_uppercase())?;
 
-                if let Some(after) = &article.after
-                    && let Some(act) = &after.amended_by
-                {
+                if let Some(act) = unit.to.as_ref().and_then(|to| to.amended_by.as_ref()) {
                     writeln!(out, "           through {act}")?;
                 }
 
-                if article.change == "commenced"
-                    && let Some(day) = article.after.as_ref().and_then(|after| after.in_force_from)
+                if unit.change == "commenced"
+                    && let Some(day) = unit.to.as_ref().and_then(|to| to.in_force_from)
                 {
                     writeln!(out, "           commenced on {day}")?;
                 }
 
-                match (&article.before, &article.after) {
-                    (Some(before), Some(after)) if article.change == "amended" => {
-                        for line in word_diff(&before.content, &after.content) {
+                let text = |side: &bron::service::Article| crate::run::content(side);
+                match (&unit.from, &unit.to) {
+                    (Some(from), Some(to)) if unit.change == "amended" => {
+                        for line in word_diff(&text(from), &text(to)) {
                             writeln!(out, "  {line}")?;
                         }
                     }
-                    (None, Some(after)) => writeln!(out, "  + {}", first_line(&after.content))?,
-                    (Some(before), None) => writeln!(out, "  - {}", first_line(&before.content))?,
+                    (None, Some(to)) => writeln!(out, "  + {}", first_line(&text(to)))?,
+                    (Some(from), None) => writeln!(out, "  - {}", first_line(&text(from)))?,
                     _ => {}
                 }
                 writeln!(out)?;
             }
 
-            caveats(&e.caveats, out)
+            caveats(&a.caveats, out)
         }
 
         Answer::CaseHits(e) => {
@@ -731,36 +730,15 @@ fn caveat_line(caveat: &Caveat) -> String {
                  proof; fetch the blob and slice it at those offsets to check it."
                 .to_string()
         }
-        // Said because the counts above cannot say it. An article left out
-        // of a comparison is left out of its totals too, so silence here
-        // reads as 'nothing changed'.
-        Caveat::ArticlesNotCompared {
-            unidentified_from,
-            unidentified_to,
-            repeated,
-        } => {
-            let mut line = String::from("note: not every article could be compared.");
-            if unidentified_from + unidentified_to > 0 {
-                // Counted per rendition, and said that way. A missing
-                // stam-id is the register declining to say whether the one
-                // here is the one there, so one total would read as two
-                // articles where there may be one.
-                line.push_str(&format!(
-                    " {unidentified_from} article(s) in the earlier rendition and \
-                         {unidentified_to} in the later carry no stam-id, so nothing says \
-                         whether one on either side is the same article."
-                ));
-            }
-            if !repeated.is_empty() {
-                line.push_str(&format!(
-                    " The register used stam-id {} more than once inside one rendition, and \
-                         picking one of those would be a guess.",
-                    repeated.join(", "),
-                ));
-            }
-            line.push_str(" They are outside the counts above.");
-            line
-        }
+        // Said because the counts above cannot say it. A unit left out of a
+        // comparison is left out of its totals too, so silence here reads as
+        // 'nothing changed'.
+        Caveat::ArticlesNotCompared { repeated } => format!(
+            "note: not every unit could be compared. The register used stam-id {} more than \
+                 once inside one rendition, and picking one of those would be a guess. They are \
+                 outside the counts above.",
+            repeated.join(", "),
+        ),
         Caveat::CitationNotRead {
             number,
             name,

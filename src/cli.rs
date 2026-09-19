@@ -242,9 +242,11 @@ pub enum Law {
 
     /// What changed in a law between two dates.
     ///
-    /// Articles are matched on upstream's own identity, so a renumbered article
-    /// reads as one amendment rather than a removal plus an addition. Both
-    /// texts travel with the answer, each from its own frozen document.
+    /// The service's own comparison, unit by unit: the articles, and the
+    /// bijlagen, aanhef and closing formula beside them. Units are matched on
+    /// upstream's own identity, so a renumbered article reads as one amendment
+    /// rather than a removal plus an addition. Both texts travel with the
+    /// answer, each from its own frozen document.
     ///
     /// Whether a change reaches conduct from before it is transitional law, and
     /// not a question bron answers. The act that made each change is named.
@@ -259,11 +261,17 @@ pub enum Law {
         #[arg(long, value_name = "YYYY-MM-DD")]
         to: Option<NaiveDate>,
 
-        /// Also list articles that did not change.
+        /// Also list units that did not change.
         #[arg(long)]
         all: bool,
 
-        /// Only this article number.
+        /// Only units of this kind, as the register names the element:
+        /// artikel, bijlage, aanhef, wetsluiting.
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// Only units carrying this number as printed on either side: an
+        /// article's, or with --kind a bijlage's.
         #[arg(long)]
         article: Option<String>,
 

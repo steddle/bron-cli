@@ -304,25 +304,14 @@ pub enum Caveat {
     /// facts, and only one of them is a proof.
     UnverifiedSlice,
 
-    /// Articles a comparison could not place, and why.
+    /// Units a comparison left out because the register used their stam-id
+    /// more than once inside one rendition, where a match would have to pick
+    /// one and calling that an identity would be a guess.
     ///
-    /// `unidentified_from` and `unidentified_to` count articles carrying no
-    /// `stam-id`, one count per rendition. Nothing identifies them, so whether
-    /// the one in the earlier rendition is the one in the later is exactly what
-    /// the register declined to say, and one total would read as two articles.
-    ///
-    /// `repeated` are stam-ids the register used more than once inside one
-    /// rendition, where a match would have to pick one and calling that an
-    /// identity would be a guess.
-    ///
-    /// Both are left out of the comparison and out of its counts, which is why
-    /// this has to be said: without it `law changes` answers "nothing changed"
-    /// where the answer is "this could not be compared".
-    ArticlesNotCompared {
-        unidentified_from: u32,
-        unidentified_to: u32,
-        repeated: Vec<String>,
-    },
+    /// Left out of the counts too, which is why this has to be said: without it
+    /// `law changes` answers "nothing changed" where the answer is "this could
+    /// not be compared".
+    ArticlesNotCompared { repeated: Vec<String> },
 
     /// A term shaped like a citation was ranked as a question, because the
     /// register gives the name in it to no regulation.
@@ -455,6 +444,9 @@ impl Caveat {
                 expression: String,
                 units: BTreeMap<String, u32>,
             },
+            ArticlesNotCompared {
+                repeated: Vec<String>,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -530,6 +522,7 @@ impl Caveat {
             Ok(Stated::TextOutsideArticles { expression, units }) => {
                 Self::TextOutsideArticles { expression, units }
             }
+            Ok(Stated::ArticlesNotCompared { repeated }) => Self::ArticlesNotCompared { repeated },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
@@ -634,23 +627,6 @@ impl Excerpt {
 // -- laws ----------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-pub struct Window {
-    pub from: NaiveDate,
-    /// Absent when open-ended.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub until: Option<NaiveDate>,
-}
-
-impl From<crate::service::Window> for Window {
-    fn from(window: crate::service::Window) -> Self {
-        Self {
-            from: window.from,
-            until: window.until,
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
 pub struct Article {
     pub law_id: String,
     pub version: String,
@@ -717,54 +693,6 @@ pub struct Lid {
     pub jci: Option<String>,
 }
 
-/// What happened to one article between two versions of a law.
-///
-/// Both sides carry their own text, digest and offsets, from two different
-/// frozen documents. A consumer never has to trust our comparison: it can run
-/// its own over `before.content` and `after.content`, or verify either against
-/// the bytes its span points at.
-#[derive(Debug, Serialize)]
-pub struct ArticleChange {
-    /// `unchanged`, `amended`, `commenced`, `added`, `repealed` or `withdrawn`.
-    ///
-    /// `commenced` is the words staying while `status` goes from `nogniet` on
-    /// the earlier side to `goed` on the later, and the day is the later side's
-    /// `in_force_from` where the register states one.
-    pub change: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub number: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub before: Option<Side>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub after: Option<Side>,
-}
-
-/// One article as it stood in one version.
-#[derive(Debug, Serialize)]
-pub struct Side {
-    pub version: String,
-    pub content: String,
-    pub excerpt: Excerpt,
-    /// The act that produced this text. Where transitional law lives.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub amended_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effect: Option<String>,
-    /// What this side's rendition prints about whether the article applies:
-    /// `goed`, `nogniet` or `vervallen`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    /// The day the article took the form it has on this side, where the
-    /// register states one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub in_force_from: Option<NaiveDate>,
-    pub provenance: Provenance,
-}
-
 impl Article {
     /// What a reader calls this article. See [`crate::service::Article::name`].
     pub fn name(&self) -> String {
@@ -786,44 +714,6 @@ impl Article {
         self.provenance.frozen.reports()
             && (self.excerpt.quotes() || self.leden.iter().any(|lid| lid.excerpt.quotes()))
     }
-}
-
-impl Side {
-    /// See [`Article::reports_a_slice`].
-    pub fn reports_a_slice(&self) -> bool {
-        self.provenance.frozen.reports() && self.excerpt.quotes()
-    }
-}
-
-/// A comparison of two versions of one law.
-#[derive(Debug, Serialize)]
-pub struct Changes {
-    pub law_id: String,
-    pub from: ComparedVersion,
-    pub to: ComparedVersion,
-    pub articles: Vec<ArticleChange>,
-    /// Counts per outcome over the articles asked about, so a caller can size
-    /// the answer before reading it: every article compared, or with
-    /// `--article` those bearing that number. Unchanged articles are counted
-    /// whether or not `--all` lists them.
-    pub summary: ChangeSummary,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ComparedVersion {
-    pub version: String,
-    pub in_force: Window,
-    pub blob: BlobId,
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct ChangeSummary {
-    pub unchanged: u32,
-    pub amended: u32,
-    pub commenced: u32,
-    pub added: u32,
-    pub repealed: u32,
-    pub withdrawn: u32,
 }
 
 // -- decisions -----------------------------------------------------------

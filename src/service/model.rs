@@ -117,6 +117,43 @@ pub struct Parts {
     pub parts: Vec<Article>,
 }
 
+/// A regulation compared between two days, unit by unit on the publisher's
+/// own identity.
+#[derive(Debug, Deserialize)]
+pub struct Changes {
+    pub regulation_id: String,
+    pub from: Expression,
+    pub to: Expression,
+    /// Counted over every unit the narrowing kept, listed or not.
+    pub summary: Summary,
+    /// Every kind of unit, under the name the service gives the list.
+    pub articles: Vec<Change>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Summary {
+    pub unchanged: u32,
+    pub amended: u32,
+    pub added: u32,
+    pub commenced: u32,
+    pub repealed: u32,
+    pub withdrawn: u32,
+}
+
+/// What happened to one unit, named as the side that still exists names it.
+#[derive(Debug, Deserialize)]
+pub struct Change {
+    /// `unchanged`, `amended`, `added`, `commenced`, `repealed` or `withdrawn`,
+    /// read as a string so one added later crosses.
+    pub change: String,
+    pub kind: String,
+    pub number: Option<String>,
+    pub label: Option<String>,
+    pub path: Option<String>,
+    pub from: Option<Article>,
+    pub to: Option<Article>,
+}
+
 /// One unit of text, where it sits in the frozen bytes, and what stands there.
 ///
 /// On `/articles` an article; on `/parts` and `/changes` a unit of any kind.
@@ -274,4 +311,15 @@ pub struct Units<'a> {
     pub raw: bool,
     pub limit: u32,
     pub offset: u32,
+}
+
+/// Which two days to compare, and how to narrow the comparison.
+#[derive(Debug)]
+pub struct Compare<'a> {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    pub kind: Option<&'a str>,
+    pub article: Option<&'a str>,
+    pub all: bool,
+    pub raw: bool,
 }

@@ -58,7 +58,7 @@ $ bron law changes BWBR0005289 --from 2019-01-01 --article 119a
 BWBR0005289
 2019-01-01_0 (2019-01-01 to 2019-03-31) -> 2026-07-16_0 (2026-07-16 onwards)
 
-29 amended, 5 added, 1 repealed, 0 withdrawn, 305 unchanged
+29 amended, 0 commenced, 5 added, 1 repealed, 0 withdrawn, 305 unchanged
 
 AMENDED    Artikel 119a
            through stb-2022-146
@@ -116,7 +116,7 @@ happened is an answer.
 
 ## Machine use
 
-Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law parts`, `law published` and `law feed` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code. A failure bron states itself carries none, so presence says who stated it.
+Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law parts`, `law changes`, `law published` and `law feed` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code. A failure bron states itself carries none, so presence says who stated it.
 
 ```
 $ bron --json find 6:162 BW
@@ -157,7 +157,7 @@ Nothing is kept. bron writes one thing between runs, its share of the per-host r
 
 - Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date, and renditions the publisher has withdrawn named rather than quietly served.
 - Content-addressed provenance. Each document is named by the SHA-256 of its own bytes, and every article and lid carries a byte range into it, so a reader can fetch those bytes and cut the quotation again.
-- Amendment diffs. `bron law changes` matches articles on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
+- Amendment diffs. `bron law changes` compares a law between two dates unit by unit, its bijlagen and aanhef beside its articles, and matches them on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
 - An appeal answer that is never a boolean. `no_published_successor` is dated to the moment bron read the decision, because 'nothing published' is a claim about what the register held then and not about whether an appeal was brought.
 - Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers rather than each pacing itself perfectly and together going three times too fast.
 - Nothing kept between runs. bron writes its share of the rate-limit budget and nothing else, so there is no store to migrate, verify or grow stale.
