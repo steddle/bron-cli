@@ -163,7 +163,10 @@ fn narrow(
         article.content = lid.content.clone();
         article.excerpt = lid.excerpt.clone();
         article.jci = lid.jci.clone();
-        article.label = article.label.map(|label| format!("{label} lid {number}"));
+        article.label = Some(match article.label.take() {
+            Some(label) => format!("{label} lid {number}"),
+            None => format!("{} lid {number}", article.name()),
+        });
         article.leden = vec![lid];
         narrowed.push(article);
     }
@@ -748,6 +751,18 @@ mod narrow_tests {
 
     /// An item has no byte range in this corpus, so the answer stays at the
     /// lid's rather than inventing one nobody measured.
+    /// An article without a label is named by its number, and the name of a
+    /// lid answer still says which lid it is.
+    #[test]
+    fn a_lid_answer_without_a_label_still_names_the_lid() {
+        let mut unlabelled = items();
+        unlabelled.label = None;
+
+        let narrowed = narrow(vec![unlabelled], Some("2"), None).unwrap();
+
+        assert_eq!(narrowed[0].label.as_deref(), Some("3 lid 2"));
+    }
+
     #[test]
     fn an_item_answer_points_at_the_lid_that_holds_it() {
         let narrowed = narrow(vec![items()], Some("2"), Some("b")).unwrap();

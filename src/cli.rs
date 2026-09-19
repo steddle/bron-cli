@@ -135,7 +135,8 @@ pub enum Law {
         /// cut from, and not having to is the reason it is offered at all.
         ///
         /// Only --json carries the slice. A person reads bron's reading either
-        /// way, so without --json this asks for bytes nothing prints.
+        /// way, so without --json the bytes are fetched and only the note
+        /// about them prints.
         #[arg(long)]
         raw: bool,
 

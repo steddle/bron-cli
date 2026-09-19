@@ -4,6 +4,7 @@
 //! things. Anything the envelope marks as a caveat is printed, because a limit
 //! on what an answer supports is not a detail a reader may miss.
 
+use std::fmt::Write as _;
 use std::io::{self, Write};
 
 use chrono::NaiveDate;
@@ -195,11 +196,12 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     window(version.in_force.from, version.in_force.until),
                     version.upstream_hash_check,
                 );
+                // Writing to a String cannot fail.
                 if let Some(because) = &version.unread_because {
-                    row.push_str(&format!("  unread: {because}"));
+                    let _ = write!(row, "  unread: {because}");
                 }
                 if let Some(title) = &version.regulation_title {
-                    row.push_str(&format!("  {title}"));
+                    let _ = write!(row, "  {title}");
                 }
                 writeln!(out, "{}", row.trim_end())?;
             }
