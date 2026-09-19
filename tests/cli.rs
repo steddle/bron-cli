@@ -41,7 +41,7 @@ fn stdout(output: &Output) -> String {
 /// it is the service's, and re-serialising would lose every one of them.
 const LOOKUP: &str = r#"{"bron":1,  "grade":"authority","as_of":"2019-06-01","as_known_on":"2020-01-01",
  "data":{"kind":"lookup","citation":"6:162","later_field":{"x":1},
-  "resolved":[{"reading":"book","source":"wetgeving","regulation_id":"BWBR0005289","expression":"2019-04-01_0","withdrawn":false,"held":true,"upstream_hash_check":"matches","number":"162","label":"Artikel 162","content_hash":"f8125445","caveats":[]}]},
+  "resolved":[{"reading":"book","source":"wetgeving","regulation_id":"BWBR0005289","expression":"2019-04-01_0","held":true,"number":"162","label":"Artikel 162","content_hash":"f8125445","caveats":[]}]},
  "caveats":[{"kind":"something_later","count":3,"labels":["a","b"]}]}"#;
 
 const REGULATIONS: &str = r#"{"bron":1,"grade":"authority",
@@ -2258,6 +2258,39 @@ async fn a_feed_event_carries_its_rendition_windows() {
     assert!(listed.trim_end().ends_with("BWBR0024283"), "{text}");
 }
 
+/// A window the event does not state reads as `-` on either axis, one
+/// convention in one row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_feed_event_marks_a_window_it_does_not_state_one_way() {
+    const HALF: &str = r#"{"bron":1,"grade":"authority",
+ "data":{"origin":"a","head":41,"next":41,"events":[
+  {"seq":41,"event":"rescheduled","regulation_id":"BWBR0024282","label":"2026-07-01_0","as_known":{"from":"2026-07-02"},"withdrawn":false}]}}"#;
+    let server = answering("GET", "/api/v1/feed", HALF).await;
+
+    let text = stdout(&bron(&server, &["law", "feed", "--since", "40"]).await);
+    let row = text.lines().find(|l| l.contains("BWBR0024282")).unwrap();
+
+    assert!(row.contains("2026-07-01_0  -  "), "{text}");
+    assert!(row.ends_with("2026-07-02 onwards"), "{text}");
+}
+
+/// A regulation with no renditions to list prints no legend for rows that are
+/// not there, as `law published` does not for an empty window.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_versions_with_nothing_to_list_prints_no_legend() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0005537/expressions",
+        r#"{"bron":1,"grade":"authority","data":[]}"#,
+    )
+    .await;
+
+    let output = bron(&server, &["law", "versions", "BWBR0005537"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+}
+
 /// A hit on `law search` says whether `law show` can answer it: the type,
 /// how much of it the corpus means to hold, and how many renditions it holds.
 #[tokio::test(flavor = "multi_thread")]
@@ -2283,6 +2316,44 @@ async fn a_law_search_row_says_how_much_of_the_law_is_held() {
     );
 }
 
+/// Where a character column starts, counted in characters as `{:<w$}` pads,
+/// not in bytes.
+fn column(line: &str, needle: &str) -> Option<usize> {
+    line.find(needle).map(|at| line[..at].chars().count())
+}
+
+/// A type the register spells with a diaeresis pads like any other, so the
+/// title starts in one place; a row without a title ends at its last column;
+/// and a column no row fills is not printed as an empty gap.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_law_search_row_pads_by_character_and_leaves_out_what_no_row_has() {
+    const ACCENTED: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"id":"BWBR0035184","title":"Regeling Awb","type":"ministeriële regeling","coverage":"current","expression_count":2,"held_count":1},
+         {"id":"BWBR0005537","type":"wet","coverage":"history","expression_count":236,"held_count":236}]}"#;
+    const UNTYPED: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","coverage":"history"}]}"#;
+
+    let accented = answering("GET", "/api/v1/regulations", ACCENTED).await;
+    let text = stdout(&bron(&accented, &["law", "search", "awb"]).await);
+    let regeling = text.lines().find(|l| l.starts_with("BWBR0035184")).unwrap();
+    let awb = text.lines().find(|l| l.starts_with("BWBR0005537")).unwrap();
+
+    assert_eq!(
+        column(regeling, "current"),
+        column(awb, "history"),
+        "{text}"
+    );
+    assert_eq!(awb, awb.trim_end(), "{text}");
+
+    let untyped = answering("GET", "/api/v1/regulations", UNTYPED).await;
+    let text = stdout(&bron(&untyped, &["law", "search", "awb"]).await);
+    assert!(
+        text.lines()
+            .any(|l| l == "BWBR0005537  history  Algemene wet bestuursrecht"),
+        "{text}"
+    );
+}
+
 /// A hit names the rendition it was found in, how it was found, and the other
 /// places the same text sits.
 #[tokio::test(flavor = "multi_thread")]
@@ -2299,18 +2370,23 @@ async fn a_hit_says_where_it_was_found_and_how() {
 
     assert!(hit.contains("2026-07-16_0"), "{text}");
     assert!(hit.contains("vector+text"), "{text}");
-    assert!(
-        text.lines()
-            .any(|l| l.trim() == "also BWBR0028749  2010-10-10_0  article  Artikel 162"),
-        "{text}"
-    );
+
+    let also: Vec<&str> = text.lines().filter(|l| l.contains(" also ")).collect();
+    assert_eq!(also.len(), 2, "{text}");
+
+    // Every column of an `also` row stands where the hit row has it, so a
+    // reader comparing the two compares like with like.
+    let expression = hit.find("2026-07-16_0");
+    for (row, rendition) in also.iter().zip(["2010-10-10_0", "2026-07-16_0"]) {
+        assert_eq!(row.find("BWBR"), hit.find("BWBR"), "{text}");
+        assert_eq!(row.find(rendition), expression, "{text}");
+        assert_eq!(row.find("Artikel 162"), hit.find("Artikel 162"), "{text}");
+    }
+    let unit = hit.find("article").unwrap();
+    assert_eq!(also[0].find("article"), Some(unit), "{text}");
     // The same words as the article's own lid are another place, and read as
     // one rather than as the hit printed twice.
-    assert!(
-        text.lines()
-            .any(|l| l.trim() == "also BWBR0005289  2026-07-16_0  lid      Artikel 162"),
-        "{text}"
-    );
+    assert_eq!(also[1].find("lid "), Some(unit), "{text}");
     assert!(
         text.lines().any(|l| l.trim() == "and 27 more place(s)"),
         "{text}"
@@ -2322,7 +2398,7 @@ async fn a_hit_says_where_it_was_found_and_how() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_lookup_says_the_lid_and_the_name_it_read() {
     const LID: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-19","data":{"kind":"lookup","citation":"8:4","paragraph":"2","name":"Awb",
- "resolved":[{"reading":"named","source":"wetgeving","regulation_id":"BWBR0005537","expression":"2026-08-15_0","withdrawn":false,"held":true,"number":"8:4","kind":"artikel","label":"Artikel 8:4","caveats":[]}]}}"#;
+ "resolved":[{"reading":"named","source":"wetgeving","regulation_id":"BWBR0005537","expression":"2026-08-15_0","held":true,"number":"8:4","kind":"artikel","label":"Artikel 8:4","caveats":[]}]}}"#;
     let server = answering("POST", "/api/v1/search", LID).await;
 
     let text = stdout(&bron(&server, &["find", "8:4", "lid", "2", "Awb"]).await);

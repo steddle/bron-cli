@@ -4,6 +4,8 @@
 //! things. Anything the envelope marks as a caveat is printed, because a limit
 //! on what an answer supports is not a detail a reader may miss.
 
+// Writing into a `String` cannot fail, which is why every `write!` into one
+// here discards its result. A buffer that becomes an `io::Write` must not.
 use std::fmt::Write as _;
 use std::io::{self, Write};
 
@@ -41,28 +43,40 @@ const FOUND_BY: usize = 11;
 pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io::Result<()> {
     match answer {
         Answer::LawHits(a) => {
-            // Widths read off the rows in this answer, so the title starts in
-            // one place on every row without padding for a type none of them
-            // has.
             let held = |hit: &Regulation| match (hit.held_count, hit.expression_count) {
                 (Some(held), Some(count)) => format!("{held} of {count} held"),
                 _ => String::new(),
             };
             let kind = |hit: &Regulation| hit.regulation_type.clone().unwrap_or_default();
-            let kind_width = a.data.iter().map(|h| kind(h).len()).max().unwrap_or(0);
-            let coverage_width = a.data.iter().map(|h| h.coverage.len()).max().unwrap_or(0);
-            let held_width = a.data.iter().map(|h| held(h).len()).max().unwrap_or(0);
+            // Widths read off the rows in this answer, counted in characters as
+            // `{:<w$}` pads, so the title starts in one place on every row. A
+            // column no row fills is left out rather than printed as a gap.
+            let width = |column: &dyn Fn(&Regulation) -> String| {
+                a.data
+                    .iter()
+                    .map(|hit| column(hit).chars().count())
+                    .max()
+                    .unwrap_or(0)
+            };
+            let kind_width = width(&kind);
+            let coverage_width = width(&|hit| hit.coverage.clone());
+            let held_width = width(&held);
 
             for hit in &a.data {
-                writeln!(
-                    out,
-                    "{}  {:<kind_width$}  {:<coverage_width$}  {:<held_width$}  {}",
-                    hit.id,
-                    kind(hit),
-                    hit.coverage,
-                    held(hit),
-                    hit.title.as_deref().unwrap_or(""),
-                )?;
+                let mut row = hit.id.clone();
+                for (value, width) in [
+                    (kind(hit), kind_width),
+                    (hit.coverage.clone(), coverage_width),
+                    (held(hit), held_width),
+                ] {
+                    if width > 0 {
+                        let _ = write!(row, "  {value:<width$}");
+                    }
+                }
+                if let Some(title) = &hit.title {
+                    let _ = write!(row, "  {title}");
+                }
+                writeln!(out, "{}", row.trim_end())?;
             }
             caveats(&a.caveats, err)
         }
@@ -90,14 +104,16 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
                         writeln!(
                             out,
-                            "{}  {:<11} {:<8} {}  {}  {:<FOUND_BY$} {}",
-                            distance,
-                            hit.source,
-                            unit,
-                            hit.regulation_id,
-                            hit.expression,
-                            hit.found_by.join("+"),
-                            name(hit.label.as_deref(), hit.number.as_deref(), &hit.kind, None),
+                            "{}",
+                            hit_row(
+                                &distance,
+                                &hit.source,
+                                &unit,
+                                &hit.regulation_id,
+                                &hit.expression,
+                                &hit.found_by.join("+"),
+                                &name(hit.label.as_deref(), hit.number.as_deref(), &hit.kind, None),
+                            )
                         )?;
 
                         // The same words in other places, each named as the
@@ -106,21 +122,26 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                         for place in &hit.also {
                             writeln!(
                                 out,
-                                "      also {}  {}  {:<8} {}",
-                                place.regulation_id,
-                                place.expression,
-                                unit_of(&place.unit, place.lid.as_ref()),
-                                name(
-                                    place.label.as_deref(),
-                                    place.number.as_deref(),
-                                    &place.kind,
-                                    None
-                                ),
+                                "{}",
+                                hit_row(
+                                    "",
+                                    "also",
+                                    &unit_of(&place.unit, place.lid.as_ref()),
+                                    &place.regulation_id,
+                                    &place.expression,
+                                    "",
+                                    &name(
+                                        place.label.as_deref(),
+                                        place.number.as_deref(),
+                                        &place.kind,
+                                        None
+                                    ),
+                                )
                             )?;
                         }
                         let unnamed = (hit.places as usize).saturating_sub(1 + hit.also.len());
                         if unnamed > 0 {
-                            writeln!(out, "      and {unnamed} more place(s)")?;
+                            writeln!(out, "{:>5}  and {unnamed} more place(s)", "")?;
                         }
                     }
                 }
@@ -205,7 +226,11 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             }
 
             for rendition in &a.data {
-                writeln!(out, "{}", rendition_row(rendition, true))?;
+                writeln!(
+                    out,
+                    "{}",
+                    rendition_row(rendition, Some(&rendition.regulation_id))
+                )?;
             }
             rendition_legend(&a.data, err)?;
             caveats(&a.caveats, err)
@@ -223,10 +248,8 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     let _ = write!(
                         row,
                         "  {label}  {:<WINDOW$}  {:<WINDOW$}",
-                        event
-                            .in_force
-                            .map_or_else(String::new, |w| window(w.from, w.until)),
-                        shown(event.as_known),
+                        stated(event.in_force),
+                        stated(event.as_known),
                     );
                 }
                 if event.withdrawn {
@@ -252,9 +275,11 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
         Answer::Versions(a) => {
             for version in &a.data {
-                writeln!(out, "{}", rendition_row(version, false))?;
+                writeln!(out, "{}", rendition_row(version, None))?;
             }
-            rendition_legend(&a.data, err)?;
+            if !a.data.is_empty() {
+                rendition_legend(&a.data, err)?;
+            }
             caveats(&a.caveats, err)
         }
 
@@ -271,13 +296,12 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             )?;
 
             for part in &a.data.parts {
-                unit(
-                    out,
+                write_unit(
                     part,
                     &a.data.expression,
                     blob_url.as_deref(),
-                    None,
-                    None,
+                    Narrowed::default(),
+                    out,
                 )?;
             }
 
@@ -308,13 +332,15 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             answered_by(header.as_deref(), &a.data.expression, out)?;
 
             for article in articles {
-                unit(
-                    out,
+                write_unit(
                     article,
                     &a.data.expression,
                     blob_url.as_deref(),
-                    paragraph.as_deref(),
-                    item.as_deref(),
+                    Narrowed {
+                        lid: paragraph.as_deref(),
+                        item: item.as_deref(),
+                    },
+                    out,
                 )?;
             }
             caveats(&a.caveats, out)
@@ -399,7 +425,6 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
                 // Where the unit stands in each side's document, which the
                 // lines above name, so either text can be cut again.
-                let span = |side: &Article| format!("{}..{}", side.span.start, side.span.end);
                 match (&change.from, &change.to) {
                     (Some(from), Some(to)) => {
                         writeln!(out, "           spans {} -> {}", span(from), span(to))?
@@ -533,22 +558,29 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
     }
 }
 
+/// What a question narrowed one unit to, named so a call site cannot pass
+/// the lid where the item goes: both are text, and swapping them prints the
+/// wrong cut of what is cited.
+#[derive(Default)]
+struct Narrowed<'a> {
+    /// The lid the question named, so a heading says which lid where the
+    /// service's label for the unit is absent and cannot.
+    lid: Option<&'a str>,
+    /// The item a letter opens; see [`crate::run::item`].
+    item: Option<&'a str>,
+}
+
 /// One unit of text, as `law show` and `law parts` both print it: what it is,
 /// its words, where those words stand in which document, and whether it
 /// applies.
-///
-/// `lid` is the lid the question named, so a heading says which lid where the
-/// service's label for the unit is absent and cannot. `item` cuts the words to
-/// the one item a letter opens; see [`crate::run::item`].
-fn unit(
-    out: &mut impl Write,
+fn write_unit(
     unit: &Article,
     rendition: &Expression,
     blob_url: Option<&str>,
-    lid: Option<&str>,
-    item: Option<&str>,
+    narrowed: Narrowed<'_>,
+    out: &mut impl Write,
 ) -> io::Result<()> {
-    match (&unit.label, lid) {
+    match (&unit.label, narrowed.lid) {
         (None, Some(lid)) => write!(out, "{} lid {lid}", unit.name())?,
         _ => write!(out, "{}", unit.name())?,
     }
@@ -568,7 +600,7 @@ fn unit(
     }
 
     let text = unit.text();
-    let text = match item {
+    let text = match narrowed.item {
         Some(letter) => crate::run::item(&text, letter)
             .unwrap_or_default()
             .to_string(),
@@ -644,7 +676,7 @@ fn answered_by(
 ///
 /// Both windows, because they diverge wherever something was published with
 /// retroactive effect; `-` where the manifest states no zicht dates.
-fn rendition_row(rendition: &Expression, with_regulation: bool) -> String {
+fn rendition_row(rendition: &Expression, regulation: Option<&str>) -> String {
     let held = if rendition.held { "*" } else { " " };
     // The service states images for held text only, so of a rendition it does
     // not hold the count is unknown, not zero.
@@ -655,15 +687,15 @@ fn rendition_row(rendition: &Expression, with_regulation: bool) -> String {
     };
 
     let mut row = format!("{held} ");
-    if with_regulation {
-        let _ = write!(row, "{}  ", rendition.regulation_id);
+    if let Some(regulation) = regulation {
+        let _ = write!(row, "{regulation}  ");
     }
     let _ = write!(
         row,
         "{}  {:<WINDOW$}  {:<WINDOW$}  {:<HASH_CHECK$}  {images:<IMAGES$}",
         rendition.label,
         window(rendition.in_force.from, rendition.in_force.until),
-        shown(rendition.as_known),
+        stated(rendition.as_known),
         rendition.upstream_hash_check,
     );
     if rendition.withdrawn {
@@ -716,9 +748,31 @@ fn unit_of(unit: &str, lid: Option<&SearchLid>) -> String {
     }
 }
 
-/// A zicht window, or `-` where the manifest states none.
-fn shown(as_known: Option<bron::service::Window>) -> String {
-    as_known.map_or_else(|| "-".to_string(), |w| window(w.from, w.until))
+/// A window, or `-` where none is stated.
+fn stated(window_: Option<bron::service::Window>) -> String {
+    window_.map_or_else(|| "-".to_string(), |w| window(w.from, w.until))
+}
+
+/// Where a unit stands in its rendition's document.
+fn span(side: &Article) -> String {
+    format!("{}..{}", side.span.start, side.span.end)
+}
+
+/// One row of a ranking: a hit, or another place its words sit, in one column
+/// order so a reader comparing the two compares like with like.
+fn hit_row(
+    distance: &str,
+    source: &str,
+    unit: &str,
+    regulation: &str,
+    expression: &str,
+    found_by: &str,
+    name: &str,
+) -> String {
+    let row = format!(
+        "{distance:>5}  {source:<11} {unit:<8} {regulation}  {expression}  {found_by:<FOUND_BY$} {name}"
+    );
+    row.trim_end().to_string()
 }
 
 /// Shows what changed inside an amended article.

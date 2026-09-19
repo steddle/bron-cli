@@ -295,12 +295,12 @@ async fn a_refusal_from_the_service_says_how_long_it_asked_for() {
 const LOOKUP: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-08-24","as_known_on":"2026-08-24",
   "data":{"kind":"lookup","citation":"8:4","resolved":[
     {"reading":"book","source":"wetgeving","regulation_id":"BWBR0005034",
-     "expression":"2026-07-01_0","withdrawn":false,"held":true,"number":"4","label":"Artikel 4",
+     "expression":"2026-07-01_0","held":true,"number":"4","label":"Artikel 4",
      "path":"/Boek8/HoofdstukI/Titeldeel1/Artikel4",
      "content_hash":"e0bd9a23c78b4c6a14be2e4e87c7ca61b706e1a5edecd4d409416e5998d8d199",
      "caveats":[]},
     {"reading":"literal","source":"wetgeving","regulation_id":"BWBR0005537",
-     "expression":"2026-08-15_0","withdrawn":false,"held":true,"number":"8:4","label":"Artikel 8:4",
+     "expression":"2026-08-15_0","held":true,"number":"8:4","label":"Artikel 8:4",
      "path":"/Hoofdstuk8/Titeldeel8.1/Afdeling8.1.1/Artikel8:4",
      "content_hash":"4ba2172e7f7630289a08992d33c6a8b181dd6167300989f143f3a506357c6364",
      "caveats":[{"kind":"upstream_hash_differs"}]}]},
@@ -312,7 +312,7 @@ const LOOKUP: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-08-24","as_k
 const LOOKUP_UNHELD: &str = r#"{"bron":1,"grade":"authority",
   "data":{"kind":"lookup","citation":"3:305a","resolved":[
     {"reading":"book","source":"wetgeving","regulation_id":"BWBR0005291",
-     "expression":"2025-07-01_0","withdrawn":false,"held":false,"number":"305a","caveats":[]}]},
+     "expression":"2025-07-01_0","held":false,"number":"305a","caveats":[]}]},
   "caveats":[{"kind":"reading_unresolved","reading":"literal","because":"no_regulation_prints_it"}]}"#;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -596,10 +596,10 @@ async fn a_reading_the_service_contradicts_itself_about_still_arrives() {
     let body = r#"{"bron":1,"grade":"authority","data":{"kind":"lookup","citation":"8:4",
       "resolved":[
         {"reading":"book","source":"wetgeving","regulation_id":"BWBR0005034",
-         "expression":"2026-07-01_0","withdrawn":false,"held":true,"number":"4","label":"Artikel 4",
+         "expression":"2026-07-01_0","held":true,"number":"4","label":"Artikel 4",
          "content_hash":"e0bd9a23","caveats":[]},
         {"reading":"literal","source":"wetgeving","regulation_id":"BWBR0005537",
-         "expression":"2026-08-15_0","withdrawn":false,"held":true,"number":"8:4","caveats":[]}]}}"#;
+         "expression":"2026-08-15_0","held":true,"number":"8:4","caveats":[]}]}}"#;
     let server = searching(body, 200).await;
     let home = Home::new();
     let base = server.uri();
