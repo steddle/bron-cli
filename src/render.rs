@@ -11,7 +11,9 @@ use std::io::{self, Write};
 
 use chrono::NaiveDate;
 
-use bron::service::{Article, Expression, Had, Lineage, Regulation, SearchData, SearchLid, name};
+use bron::service::{
+    Article, Expression, Had, Lineage, Produced, Regulation, Relation, SearchData, SearchLid, name,
+};
 use bron::wire::{AppealStatus, Body, Caveat, Envelope};
 
 use crate::run::Answer;
@@ -271,6 +273,138 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             )?;
 
             caveats(&a.caveats, err)
+        }
+
+        // Rows, one per text the act produced; the act itself is a note on
+        // them and goes to stderr.
+        Answer::Amendments(a) => {
+            let produced = &a.data.articles;
+            let named = |unit: &Produced| {
+                name(
+                    unit.label.as_deref(),
+                    unit.number.as_deref(),
+                    &unit.kind,
+                    None,
+                )
+            };
+            let width = |of: &dyn Fn(&Produced) -> String| {
+                produced
+                    .iter()
+                    .map(|u| of(u).chars().count())
+                    .max()
+                    .unwrap_or(0)
+            };
+            let effect = |unit: &Produced| unit.effect.clone().unwrap_or_default();
+            let (name_width, effect_width) = (width(&named), width(&effect));
+
+            for unit in produced {
+                let mut row = format!(
+                    "{}  {:<name_width$}  {:<effect_width$}",
+                    unit.regulation_id,
+                    named(unit),
+                    effect(unit),
+                );
+                if let Some(day) = unit.in_force_from {
+                    let _ = write!(row, "  {day}");
+                }
+                writeln!(out, "{}", row.trim_end())?;
+            }
+
+            if produced.is_empty() {
+                writeln!(
+                    out,
+                    "The act that established it produced no text held here."
+                )?;
+            }
+            if !a.data.established_by.is_empty() {
+                writeln!(err, "established by {}", a.data.established_by.join(", "))?;
+            }
+
+            caveats(&a.caveats, err)
+        }
+
+        // Rows, one per relation the register states.
+        Answer::Relations {
+            answered: a,
+            article,
+        } => {
+            let relations = &a.data.relations;
+            if relations.is_empty() {
+                writeln!(out, "The register states no relation for that.")?;
+                // Measured on production: the service matches an article by
+                // the label the register prints, so a bare number answers
+                // nothing and would read as an article nothing rests on.
+                if let Some(article) = article {
+                    writeln!(
+                        out,
+                        "note: the register states a relation under the label it prints, so \
+                         --article 'Artikel {article}' is what that reads as here."
+                    )?;
+                }
+                return caveats(&a.caveats, out);
+            }
+
+            let width = |of: &dyn Fn(&Relation) -> String| {
+                relations
+                    .iter()
+                    .map(|r| of(r).chars().count())
+                    .max()
+                    .unwrap_or(0)
+            };
+            let article = |relation: &Relation| relation.article.clone().unwrap_or_default();
+            let (kind_width, article_width) = (width(&|r| r.kind.clone()), width(&article));
+
+            for relation in relations {
+                // The article column is blank where the register states the
+                // relation for the regulation whole, which is a fact about
+                // that relation rather than a missing value.
+                writeln!(
+                    out,
+                    "{:<kind_width$}  {:<article_width$}  {}  {:<WINDOW$}  {}",
+                    relation.kind,
+                    article(relation),
+                    relation.related.regulation_id,
+                    stated(relation.in_force),
+                    relation.related.title.as_deref().unwrap_or(""),
+                )?;
+            }
+
+            caveats(&a.caveats, err)
+        }
+
+        // A document rather than a list: one regulation, and what the index
+        // states about it.
+        Answer::About(a) => {
+            let about = &a.data;
+            writeln!(
+                out,
+                "{}  {}",
+                about.id,
+                about.title.as_deref().unwrap_or("")
+            )?;
+
+            let mut line = Vec::new();
+            if let Some(kind) = &about.regulation_type {
+                line.push(kind.clone());
+            }
+            line.push(about.coverage.clone());
+            if let (Some(held), Some(count)) = (about.held_count, about.expression_count) {
+                line.push(format!("{held} of {count} renditions held"));
+            }
+            writeln!(out, "{}", line.join(", "))?;
+
+            for (what, named) in [
+                ("authority", about.authority.clone().into_iter().collect()),
+                ("legal areas", about.legal_areas.clone()),
+                ("domains", about.government_domains.clone()),
+                ("established by", about.established_by.clone()),
+            ] {
+                if !named.is_empty() {
+                    writeln!(out, "{what}: {}", named.join(", "))?;
+                }
+            }
+
+            caveats(&a.caveats, out)
         }
 
         // One row per text, because a history is a list: what the unit said,

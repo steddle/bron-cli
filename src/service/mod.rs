@@ -31,9 +31,9 @@ use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, Carried, Change, Changes, Compare, Expression, Feed, Had, History,
-    Image, Lineage, Paragraph, Parts, Published, RegisterEvent, Regulation, Span, Summary, Units,
-    Window, name,
+    Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Expression, Feed, Had,
+    History, Image, Lineage, Paragraph, Parts, Produced, Published, RegisterEvent, Regulation,
+    Related, Relating, Relation, Relations, Span, Summary, Units, Window, name,
 };
 pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -127,6 +127,13 @@ impl Service {
                 .get(&url)
                 .query(&[("q", query), ("limit", &limit.to_string())]),
         )
+    }
+
+    /// What the index knows about one regulation.
+    pub fn regulation(&self, client: &Client, law: &BwbId) -> Outcome<Answered<Regulation>> {
+        let url = format!("{}/api/v1/regulations/{law}", self.base);
+
+        self.read(client, client.get(&url))
     }
 
     /// Every rendition a regulation has ever had, held or not.
@@ -258,6 +265,48 @@ impl Service {
         }
         if ask.raw {
             query.push(("raw", "1".to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// The texts the act that established a regulation produced elsewhere.
+    pub fn amendments(
+        &self,
+        client: &Client,
+        law: &BwbId,
+        limit: u32,
+        offset: u32,
+    ) -> Outcome<Answered<Amendments>> {
+        let url = format!("{}/api/v1/regulations/{law}/amendments", self.base);
+        let query = [("limit", limit.to_string()), ("offset", offset.to_string())];
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// What the register states relates a regulation to another.
+    pub fn relations(
+        &self,
+        client: &Client,
+        law: &BwbId,
+        ask: &Relating<'_>,
+    ) -> Outcome<Answered<Relations>> {
+        let url = format!("{}/api/v1/regulations/{law}/relations", self.base);
+
+        let mut query = vec![
+            ("as_of", ask.as_of.to_string()),
+            ("limit", ask.limit.to_string()),
+            ("offset", ask.offset.to_string()),
+        ];
+
+        if let Some(day) = ask.as_known_on {
+            query.push(("as_known_on", day.to_string()));
+        }
+        if let Some(kind) = ask.kind {
+            query.push(("kind", kind.to_string()));
+        }
+        if let Some(article) = ask.article {
+            query.push(("article", article.to_string()));
         }
 
         self.read(client, client.get(&url).query(&query))

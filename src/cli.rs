@@ -225,6 +225,62 @@ pub enum Law {
         moment: Moment,
     },
 
+    /// The texts the act that established this regulation produced elsewhere.
+    ///
+    /// An amending act is published as a regulation of its own, and what it
+    /// did stands in the laws it amended. This answers those texts, from the
+    /// regulations whose text the corpus holds.
+    Amendments {
+        /// BWB identifier, e.g. BWBR0046553.
+        id: String,
+
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
+        limit: u32,
+
+        /// How many rows to skip.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+
+    /// What the register states rests on a law, and what cites it.
+    ///
+    /// The WTI's own relations: what a law is the grondslag for, what refers
+    /// to it, and from which article where the register states one.
+    Relations {
+        /// BWB identifier, e.g. BWBR0005289.
+        id: String,
+
+        /// One kind of relation, as the register groups them, e.g.
+        /// grondslag_voor or verwijzing_door.
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// One article, as the service matches it. The register states a
+        /// relation under the label it prints, `Artikel 162`.
+        #[arg(long)]
+        article: Option<String>,
+
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
+        limit: u32,
+
+        /// How many rows to skip.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+
+        #[command(flatten)]
+        moment: Moment,
+    },
+
+    /// What the index knows about one regulation.
+    ///
+    /// How much of it the corpus means to hold and how much it does, which is
+    /// what says whether `law show` can answer about it; the body the register
+    /// names for it; and the publications that created it.
+    About {
+        /// BWB identifier, e.g. BWBR0005289.
+        id: String,
+    },
+
     /// Every text one article, or one other unit, has had.
     ///
     /// Read from the renditions the corpus holds, so a window whose renditions

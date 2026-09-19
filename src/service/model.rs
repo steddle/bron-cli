@@ -29,6 +29,16 @@ pub struct Regulation {
     /// How much of the regulation the corpus means to hold: `manifest`,
     /// `current` or `history`, read as a string so a state added later crosses.
     pub coverage: String,
+    /// The body the register names, and where it files the regulation.
+    pub authority: Option<String>,
+    #[serde(default)]
+    pub legal_areas: Vec<String>,
+    #[serde(default)]
+    pub government_domains: Vec<String>,
+    /// The publications that created it, as `stb-2019-130`. Empty where the
+    /// register names none, absent where its WTI has not been read.
+    #[serde(default)]
+    pub established_by: Vec<String>,
     /// How many renditions the register publishes, and how many the corpus
     /// holds the text of.
     pub expression_count: Option<u32>,
@@ -127,6 +137,61 @@ pub struct Parts {
     pub regulation_id: String,
     pub expression: Expression,
     pub parts: Vec<Article>,
+}
+
+/// The texts the act that established a regulation produced elsewhere.
+#[derive(Debug, Deserialize)]
+pub struct Amendments {
+    pub regulation_id: String,
+    /// The publications the register names as having created the regulation.
+    pub established_by: Vec<String>,
+    /// One per unit of text the act produced, in whatever regulation.
+    pub articles: Vec<Produced>,
+}
+
+/// One unit of text an act produced, where it stands now.
+#[derive(Debug, Deserialize)]
+pub struct Produced {
+    pub regulation_id: String,
+    pub kind: String,
+    pub number: Option<String>,
+    pub label: Option<String>,
+    pub title: Option<String>,
+    /// As the earliest rendition placing this text prints it.
+    pub in_force_from: Option<NaiveDate>,
+    pub effect: Option<String>,
+    pub status: Option<String>,
+}
+
+/// What the register states relates a regulation, or one of its articles, to
+/// another.
+#[derive(Debug, Deserialize)]
+pub struct Relations {
+    pub regulation_id: String,
+    pub relations: Vec<Relation>,
+}
+
+/// One relation the register states.
+#[derive(Debug, Deserialize)]
+pub struct Relation {
+    /// The WTI's group name, e.g. `grondslag_voor` or `verwijzing_door`.
+    pub kind: String,
+    /// The register's label for the article it is stated for. Absent where it
+    /// is stated for the regulation whole.
+    pub article: Option<String>,
+    pub related: Related,
+    pub in_force: Option<Window>,
+    pub as_known: Option<Window>,
+}
+
+/// The far end of a relation.
+#[derive(Debug, Deserialize)]
+pub struct Related {
+    pub regulation_id: String,
+    pub kind: Option<String>,
+    pub label: Option<String>,
+    pub title: Option<String>,
+    pub jci: Option<String>,
 }
 
 /// The texts one unit has had, from held renditions only.
@@ -413,6 +478,21 @@ pub struct Units<'a> {
     pub number: Option<&'a str>,
     pub position: Option<u32>,
     pub raw: bool,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+/// Which relations to ask for, and how to narrow them.
+#[derive(Debug)]
+pub struct Relating<'a> {
+    pub as_of: NaiveDate,
+    pub as_known_on: Option<NaiveDate>,
+    /// One kind of relation, as the WTI groups them.
+    pub kind: Option<&'a str>,
+    /// One article, as the service matches it. Passed on as typed: what the
+    /// service matches it against is the service's rule, not one this end
+    /// guesses at.
+    pub article: Option<&'a str>,
     pub limit: u32,
     pub offset: u32,
 }

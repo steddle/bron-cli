@@ -2706,3 +2706,215 @@ async fn law_history_asks_for_a_bijlage_by_kind_and_reports_a_number_that_is_not
     assert_eq!(missing.status.code(), Some(2), "{missing:?}");
     assert_eq!(envelope["error"]["code"], "article_not_found");
 }
+
+/// One regulation as the index holds it, which says whether `law show` can
+/// answer about it at all.
+const REGULATION: &str = r#"{"bron":1,"grade":"authority",
+ "data":{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","language":"nl","authority":"Veiligheid en Justitie",
+  "legal_areas":["Staats- en bestuursrecht","Bestuursrecht"],"government_domains":["Overheid, bestuur en koninkrijk"],
+  "established_by":[],"coverage":"history","expression_count":236,"held_count":236,"later_field":true}}"#;
+
+/// `law about` is one call to the service, and says what the index knows: how
+/// much of the regulation the corpus means to hold, and how much it does.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_about_says_what_the_index_holds() {
+    let server = answering("GET", "/api/v1/regulations/BWBR0005537", REGULATION).await;
+
+    let json = bron(&server, &["--json", "law", "about", "BWBR0005537"]).await;
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{REGULATION}\n"));
+
+    let text = stdout(&bron(&server, &["law", "about", "BWBR0005537"]).await);
+    assert!(
+        text.lines()
+            .any(|l| l == "BWBR0005537  Algemene wet bestuursrecht"),
+        "{text}"
+    );
+    assert!(
+        text.contains("wet, history, 236 of 236 renditions held"),
+        "{text}"
+    );
+    assert!(text.contains("Veiligheid en Justitie"), "{text}");
+    assert!(
+        text.contains("Staats- en bestuursrecht, Bestuursrecht"),
+        "{text}"
+    );
+}
+
+/// A regulation the register holds no record of is the service's not-found.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_about_for_a_regulation_that_is_not_there_is_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0000001"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"regulation_not_found","message":"no regulation [BWBR0000001]","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "law", "about", "BWBR0000001"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "regulation_not_found");
+}
+
+/// The texts the act that established a regulation produced elsewhere.
+const AMENDMENTS: &str = r#"{"bron":1,"grade":"authority",
+ "data":{"regulation_id":"BWBR0046553","established_by":["stb-2022-146"],
+  "articles":[
+   {"regulation_id":"BWBR0002565","kind":"artikel","number":"183b","label":"Artikel 183b","stam_id":"13989213","versie_id":"28541682","in_force_from":"2022-07-01","effect":"wijziging","status":"goed","content_hash":"85c3"},
+   {"regulation_id":"BWBR0046553","kind":"aanhef","stam_id":"16326653","versie_id":"28541862","in_force_from":"2022-07-01","effect":"nieuwe-regeling","status":"goed","content_hash":"ffb6"}]},
+ "caveats":[{"kind":"held_text_only","held_regulations":46908,"known_regulations":46915}]}"#;
+
+/// `law amendments` is one call, and answers what the act did elsewhere: one
+/// row per text it produced, and the act itself on stderr, off the rows.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_amendments_lists_what_the_establishing_act_produced() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0046553/amendments"))
+        .and(query_param("limit", "5"))
+        .and(query_param("offset", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(AMENDMENTS, "application/json"))
+        // Asked twice: once for a consumer, once for a person.
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let json = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "amendments",
+            "BWBR0046553",
+            "--limit",
+            "5",
+            "--offset",
+            "10",
+        ],
+    )
+    .await;
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{AMENDMENTS}\n"));
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "amendments",
+            "BWBR0046553",
+            "--limit",
+            "5",
+            "--offset",
+            "10",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+    let said = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        text.lines()
+            .any(|l| l == "BWBR0002565  Artikel 183b  wijziging        2022-07-01"),
+        "{text}"
+    );
+    // A unit the register prints no number for is named by what it is.
+    assert!(
+        text.lines()
+            .any(|l| l == "BWBR0046553  aanhef        nieuwe-regeling  2022-07-01"),
+        "{text}"
+    );
+    assert!(said.contains("established by stb-2022-146"), "{said}");
+    assert!(!text.contains("established by"), "{text}");
+}
+
+/// What the register states rests on a regulation, and what cites it.
+const RELATIONS: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-19","as_known_on":"2026-09-19",
+ "data":{"regulation_id":"BWBR0005289","relations":[
+  {"kind":"grondslag_voor","related":{"regulation_id":"BWBR0007122","title":"Uitvoeringsbesluit aansprakelijkheid gevaarlijke stoffen","jci":"jci1.3:c:BWBR0007122"},"in_force":{"from":"1995-02-01"},"as_known":{"from":"1995-02-01"}},
+  {"kind":"grondslag_voor","article":"Artikel 175","related":{"regulation_id":"BWBR0007122","title":"Uitvoeringsbesluit aansprakelijkheid gevaarlijke stoffen","jci":"jci1.3:c:BWBR0007122"},"in_force":{"from":"1995-02-01"},"as_known":{"from":"1995-02-01"}}]}}"#;
+
+/// `law relations` is one call, and its rows say which article a relation is
+/// stated for, where the register states one, and which it points at.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_relations_says_what_rests_on_a_law_and_from_which_article() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0005289/relations"))
+        .and(query_param("kind", "grondslag_voor"))
+        .and(query_param("article", "Artikel 175"))
+        .and(query_param("as_of", "2019-06-01"))
+        .and(query_param("limit", "50"))
+        .and(query_param("offset", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(RELATIONS, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "relations",
+            "BWBR0005289",
+            "--kind",
+            "grondslag_voor",
+            "--article",
+            "Artikel 175",
+            "--as-of",
+            "2019-06-01",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    // Stated for the regulation whole, where the register names no article.
+    assert!(
+        text.lines().any(|l| l
+            == "grondslag_voor               BWBR0007122  1995-02-01 onwards        Uitvoeringsbesluit aansprakelijkheid gevaarlijke stoffen"),
+        "{text}"
+    );
+    assert!(
+        text.lines().any(|l| l
+            == "grondslag_voor  Artikel 175  BWBR0007122  1995-02-01 onwards        Uitvoeringsbesluit aansprakelijkheid gevaarlijke stoffen"),
+        "{text}"
+    );
+}
+
+/// A law nothing rests on is an answer, not a failure, and it says so rather
+/// than printing nothing at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_relations_says_in_words_that_the_register_states_none() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0005289/relations",
+        r#"{"bron":1,"grade":"authority","data":{"regulation_id":"BWBR0005289","relations":[]}}"#,
+    )
+    .await;
+
+    let output = bron(&server, &["law", "relations", "BWBR0005289"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        stdout(&output).contains("The register states no relation for that."),
+        "{output:?}"
+    );
+
+    // Measured on production: the service matches an article by the label the
+    // register prints, so a bare number answers nothing, which would read as
+    // an article nothing rests on.
+    let numbered = bron(
+        &server,
+        &["law", "relations", "BWBR0005289", "--article", "175"],
+    )
+    .await;
+    assert!(
+        stdout(&numbered).contains("--article 'Artikel 175'"),
+        "{numbered:?}"
+    );
+}

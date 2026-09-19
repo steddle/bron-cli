@@ -28,6 +28,14 @@ pub enum Answer {
     Found(Answered<service::SearchData>),
     Versions(Answered<Vec<service::Expression>>),
     History(Box<Answered<service::History>>),
+    About(Box<Answered<service::Regulation>>),
+    Amendments(Box<Answered<service::Amendments>>),
+    Relations {
+        answered: Box<Answered<service::Relations>>,
+        /// The article the question named, so an empty answer can say how the
+        /// register states a relation for one.
+        article: Option<String>,
+    },
     Parts {
         answered: Box<Answered<service::Parts>>,
         /// See `Articles::blob_url`.
@@ -86,6 +94,9 @@ impl Answer {
             Self::Found(a) => sent(out, &a.envelope),
             Self::Versions(a) => sent(out, &a.envelope),
             Self::History(a) => sent(out, &a.envelope),
+            Self::About(a) => sent(out, &a.envelope),
+            Self::Amendments(a) => sent(out, &a.envelope),
+            Self::Relations { answered, .. } => sent(out, &answered.envelope),
             Self::Parts { answered, .. } => sent(out, &answered.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
@@ -227,6 +238,43 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
         Law::Search { query, limit } => service
             .regulations(&client, &query.join(" "), *limit)
             .map(Answer::LawHits),
+
+        Law::Amendments { id, limit, offset } => service
+            .amendments(&client, &parse_id(id)?, *limit, *offset)
+            .map(|answered| Answer::Amendments(Box::new(answered))),
+
+        Law::Relations {
+            id,
+            kind,
+            article,
+            limit,
+            offset,
+            moment,
+        } => {
+            let (as_of, as_known_on) = moment.coordinates(today);
+
+            service
+                .relations(
+                    &client,
+                    &parse_id(id)?,
+                    &service::Relating {
+                        as_of,
+                        as_known_on,
+                        kind: kind.as_deref(),
+                        article: article.as_deref(),
+                        limit: *limit,
+                        offset: *offset,
+                    },
+                )
+                .map(|answered| Answer::Relations {
+                    answered: Box::new(answered),
+                    article: article.clone(),
+                })
+        }
+
+        Law::About { id } => service
+            .regulation(&client, &parse_id(id)?)
+            .map(|answered| Answer::About(Box::new(answered))),
 
         Law::History {
             id,
