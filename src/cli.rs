@@ -79,6 +79,42 @@ pub enum Command {
         #[command(flatten)]
         moment: Moment,
     },
+
+    /// The bytes a digest names, checked against it.
+    ///
+    /// What every answer's `source:` line invites: fetch the document, hash
+    /// it, and cut the span again. bron hashes the bytes as they arrive and
+    /// hands them over untouched on stdout, so `bron blob D | shasum -a 256`
+    /// prints D, and refuses bytes that hash to anything else. With --span the
+    /// slice is cut from those bytes. A note on stderr says what was checked.
+    ///
+    /// With --json the answer is what was checked, and the text where the
+    /// bytes are text; bytes that are no text, an image, are for the human
+    /// form to hand over.
+    Blob {
+        /// SHA-256 of the document, as 64 lowercase hex characters.
+        digest: String,
+
+        /// A byte range to cut, as an answer prints it: 349072..361267.
+        #[arg(long, value_name = "START..END", value_parser = byte_range)]
+        span: Option<(usize, usize)>,
+    },
+}
+
+/// A byte range as `start..end`, the first no later than the second.
+fn byte_range(text: &str) -> Result<(usize, usize), String> {
+    let (start, end) = text
+        .split_once("..")
+        .ok_or_else(|| format!("[{text}] is not a byte range as START..END"))?;
+    let parse = |n: &str| {
+        n.parse::<usize>()
+            .map_err(|_| format!("[{text}] is not a byte range as START..END"))
+    };
+    let (start, end) = (parse(start)?, parse(end)?);
+    if start > end {
+        return Err(format!("[{text}] ends before it starts"));
+    }
+    Ok((start, end))
 }
 
 #[derive(Debug, Subcommand)]

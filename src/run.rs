@@ -60,6 +60,12 @@ pub enum Answer {
     Appeal(Envelope<wire::AppealStatus>),
     PublicationHits(Envelope<Vec<wire::PublicationHit>>),
     Publication(Envelope<Box<wire::Publication>>),
+    Blob {
+        envelope: Envelope<Box<wire::Blob>>,
+        /// The bytes handed over, the whole document or the span cut from
+        /// it, exactly as they hashed.
+        bytes: Vec<u8>,
+    },
 }
 
 impl Answer {
@@ -88,6 +94,7 @@ impl Answer {
             Self::Appeal(e) => write(out, e),
             Self::PublicationHits(e) => write(out, e),
             Self::Publication(e) => write(out, e),
+            Self::Blob { envelope, .. } => write(out, envelope),
         }
     }
 
@@ -112,7 +119,45 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
             limit,
             moment,
         } => run_find(&query.join(" "), *limit, moment, today, quiet, &service),
+        Command::Blob { digest, span } => run_blob(digest, *span, quiet, &service),
     }
+}
+
+/// The bytes a digest names, checked against it, and the span asked for.
+fn run_blob(
+    digest: &str,
+    span: Option<(usize, usize)>,
+    quiet: bool,
+    service: &Service,
+) -> Outcome<Answer> {
+    let fetched = service.blob(&client(quiet)?, digest)?;
+    let read_at = Utc::now();
+    let length = fetched.bytes.len();
+
+    let bytes = match span {
+        Some((start, end)) if end > length => {
+            return Err(Fault::usage(format!(
+                "span {start}..{end} is outside the {length} bytes of {digest}"
+            )));
+        }
+        Some((start, end)) => fetched.bytes[start..end].to_vec(),
+        None => fetched.bytes.clone(),
+    };
+
+    let provenance = bron::sources::Provenance {
+        blob: fetched.blob,
+        url: fetched.url.clone(),
+        byte_len: length,
+    };
+
+    Ok(Answer::Blob {
+        envelope: Envelope::ok(Box::new(wire::Blob {
+            provenance: wire::Provenance::frozen(&provenance, read_at),
+            span: span.map(|(start, end)| wire::ByteRange { start, end }),
+            text: String::from_utf8(bytes.clone()).ok(),
+        })),
+        bytes,
+    })
 }
 
 /// Cuts the text of a lid down to the one item a letter opens.

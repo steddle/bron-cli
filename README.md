@@ -52,7 +52,15 @@ in force through stb-2017-170 (wijziging)
 
 `law show` answers articles. What a rendition prints beside them, the aanhef, a bijlage, the closing formula, is `law parts`: `bron law parts BWBR0001941 --kind bijlage --number Ia`, or `--position` for a unit that prints no number.
 
-Every answer ends with the digest of the document it was read from, where those bytes can be fetched, the byte range inside them, and the act that put that text in force. Fetch the blob, slice it at `349072..361267`, and you have the publisher's own characters; `--raw` sends that slice along instead. Ask what changed since, and bron names the amending act per article:
+Every answer ends with the digest of the document it was read from, where those bytes can be fetched, the byte range inside them, and the act that put that text in force. `bron blob` makes that check one command: it fetches the document, hashes the bytes as they arrive, refuses any that hash to something else, and hands over what the digest names, or the span cut from it.
+
+```
+$ bron blob c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3 --span 349072..361267
+<artikel bwb-ng-variabel-deel="/Boek6/Titeldeel1/Afdeling11/Artikel119a" [...]
+1338780 bytes hash to c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3; cut at 349072..361267
+```
+
+The bytes go to stdout and what was checked to stderr, so `bron blob <digest> | shasum -a 256` prints the digest back. `--raw` sends the slice along with an answer instead. Ask what changed since, and bron names the amending act per article:
 
 ```
 $ bron law changes BWBR0005289 --from 2019-01-01 --article 119a
@@ -151,10 +159,11 @@ Exit 4 covers two things, and what is printed tells them apart. **The service st
 
 `bron law` reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. Fetch those bytes, hash them, slice them, and either they say what bron said or they do not. In the wetgeving lane the service froze them and names the digest; a decision or a publication is one bron fetched and hashed itself, and `provenance.frozen_by` on those answers says so and states when.
+Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not. In the wetgeving lane the service froze them and names the digest; a decision or a publication is one bron fetched and hashed itself, and `provenance.frozen_by` on those answers says so and states when.
 
 ```
 bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
+bron blob <digest> --span 349072..361267        # fetch it, hash it, cut it yourself
 BRON_MIRROR=https://bron.example.org/api/v1     # another deployment
 ```
 

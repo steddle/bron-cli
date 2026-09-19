@@ -542,6 +542,22 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&e.caveats, out)
         }
 
+        // The bytes on stdout exactly as they hashed, and nothing else there:
+        // anything written beside them would change what a pipe hashes. What
+        // was checked goes to stderr.
+        Answer::Blob { envelope, bytes } => {
+            out.write_all(bytes)?;
+            let Some(blob) = &envelope.data else {
+                return Ok(());
+            };
+            let checked = &blob.provenance;
+            write!(err, "{} bytes hash to {}", checked.byte_len, checked.blob)?;
+            if let Some(span) = blob.span {
+                write!(err, "; cut at {}..{}", span.start, span.end)?;
+            }
+            writeln!(err, "\n{}", checked.url)
+        }
+
         Answer::PublicationHits(e) => {
             for hit in data(e) {
                 let mut row = hit.id.clone();

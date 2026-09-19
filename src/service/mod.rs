@@ -293,6 +293,36 @@ impl Service {
         self.read(client, client.get(&url).query(&query))
     }
 
+    /// The bytes a digest names, checked against it.
+    ///
+    /// Hashed here, from the bytes as they arrived, so what is handed on is
+    /// what the digest names or nothing at all: bytes that hash to anything
+    /// else are refused rather than quoted.
+    pub fn blob(&self, client: &Client, digest: &str) -> Outcome<crate::sources::FetchedBytes> {
+        if !is_sha256_hex(digest) {
+            return Err(Fault::usage(format!(
+                "[{digest}] is not a SHA-256 digest as 64 lowercase hex characters"
+            )));
+        }
+
+        let url = format!("{}/api/v1/blobs/{digest}", self.base);
+        let fetched = self.read_raw(client, client.get(&url))?;
+
+        if fetched.blob.to_string() != digest {
+            return Err(Fault::Upstream {
+                service: client::SERVICE,
+                source: anyhow::anyhow!(
+                    "the {} bytes served under {digest} hash to {}, which is not the document \
+                     that digest names",
+                    fetched.bytes.len(),
+                    fetched.blob
+                ),
+            });
+        }
+
+        Ok(fetched)
+    }
+
     /// Where a blob is readable, for a digest that names one.
     ///
     /// The digest is the service's own word and is checked before it reaches a
@@ -319,9 +349,13 @@ fn normalise(base: &str) -> String {
 }
 
 /// Checked before the digest reaches a URL, so a value the service controls
-/// cannot walk out of the blobs path.
+/// cannot walk out of the blobs path. The service's own rule: 64 lowercase hex
+/// characters, and it refuses anything else as `invalid_digest`.
 fn is_sha256_hex(digest: &str) -> bool {
-    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 #[cfg(test)]
@@ -416,6 +450,8 @@ mod tests {
         assert_eq!(service.blob_url("../../etc/passwd"), None);
         assert_eq!(service.blob_url(&"a".repeat(63)), None);
         assert_eq!(service.blob_url(&"z".repeat(64)), None);
+        // The service's rule is lowercase, and it refuses the upper case.
+        assert_eq!(service.blob_url(&"A".repeat(64)), None);
         assert_eq!(service.blob_url(""), None);
     }
 

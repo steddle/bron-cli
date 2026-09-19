@@ -621,6 +621,28 @@ impl Provenance {
 
 // -- laws ----------------------------------------------------------------
 
+// -- documents -----------------------------------------------------------
+
+/// A document bron fetched by its digest and hashed itself, and the part of it
+/// that was asked for.
+#[derive(Debug, Serialize)]
+pub struct Blob {
+    pub provenance: Provenance,
+    /// The byte range cut, where one was asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<ByteRange>,
+    /// The bytes handed over, where they are text. Absent where they are not,
+    /// an image, which the human form hands over as bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ByteRange {
+    pub start: usize,
+    pub end: usize,
+}
+
 // -- decisions -----------------------------------------------------------
 
 #[derive(Debug, Serialize)]

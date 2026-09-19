@@ -2409,3 +2409,160 @@ async fn a_lookup_says_the_lid_and_the_name_it_read() {
         "{text}"
     );
 }
+
+// -- slice 3: the routes nothing reached ---------------------------------
+
+/// A document the service holds, and the digest of its own bytes.
+const DOCUMENT: &[u8] = b"<toestand><artikel>Eerste lid.</artikel></toestand>";
+
+fn digest_of(bytes: &[u8]) -> String {
+    bron::blob::BlobId::of(bytes).to_string()
+}
+
+async fn serving_blob(digest: &str, bytes: &[u8]) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{digest}")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(bytes.to_vec(), "application/octet-stream"),
+        )
+        .mount(&server)
+        .await;
+    server
+}
+
+/// The check the README tells every reader to make, as one command: fetch the
+/// bytes a digest names, hash them, and hand them over untouched, so a pipe to
+/// any SHA-256 tool prints the digest back.
+#[tokio::test(flavor = "multi_thread")]
+async fn bron_blob_hands_over_the_bytes_a_digest_names_and_nothing_else() {
+    let digest = digest_of(DOCUMENT);
+    let server = serving_blob(&digest, DOCUMENT).await;
+
+    let output = bron(&server, &["blob", &digest]).await;
+    let said = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, DOCUMENT);
+    assert!(
+        said.contains(&format!("{} bytes hash to {digest}", DOCUMENT.len())),
+        "{said}"
+    );
+}
+
+/// A span is cut from bytes bron hashed itself, which is what makes the slice
+/// a proof rather than a report.
+#[tokio::test(flavor = "multi_thread")]
+async fn bron_blob_cuts_a_span_out_of_bytes_it_hashed() {
+    let digest = digest_of(DOCUMENT);
+    let server = serving_blob(&digest, DOCUMENT).await;
+
+    let output = bron(&server, &["blob", &digest, "--span", "19..30"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"Eerste lid.");
+}
+
+/// Bytes that do not hash to the digest they were served under are refused,
+/// and none of them reach stdout: handing them over would be quoting a
+/// document the digest does not name.
+#[tokio::test(flavor = "multi_thread")]
+async fn bron_blob_refuses_bytes_that_do_not_hash_to_their_digest() {
+    let digest = digest_of(DOCUMENT);
+    let server = serving_blob(&digest, b"<toestand>something else</toestand>").await;
+
+    let output = bron(&server, &["blob", &digest]).await;
+    let said = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(said.contains(&digest), "{said}");
+    assert!(said.contains("hash to"), "{said}");
+}
+
+/// A digest the service holds nothing under is its not-found, with its code.
+#[tokio::test(flavor = "multi_thread")]
+async fn bron_blob_for_a_digest_that_names_nothing_is_not_found() {
+    let digest = "0".repeat(64);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{digest}")))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            format!(r#"{{"bron":1,"grade":"authority","error":{{"kind":"not_found","code":"blob_not_found","message":"no blob [{digest}]","detail":[]}}}}"#),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "blob", &digest]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "blob_not_found");
+}
+
+/// What is not a digest, and a span outside the document, are the caller's to
+/// fix, and the first never reaches the service.
+#[tokio::test(flavor = "multi_thread")]
+async fn bron_blob_refuses_what_is_no_digest_and_a_span_outside_the_bytes() {
+    let digest = digest_of(DOCUMENT);
+    let server = serving_blob(&digest, DOCUMENT).await;
+
+    for args in [
+        &["blob", "../../etc/passwd"][..],
+        &["blob", &digest.to_uppercase()][..],
+        &["blob", &digest, "--span", "30..19"][..],
+        &["blob", &digest, "--span", "0..999"][..],
+        &["blob", &digest, "--span", "nine"][..],
+    ] {
+        let output = bron(&server, args).await;
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        assert!(output.stdout.is_empty(), "{args:?}: {output:?}");
+    }
+
+    let asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|request| request.url.path().to_string())
+        .collect();
+    assert!(
+        asked.iter().all(|path| path.ends_with(&digest)),
+        "{asked:?}"
+    );
+}
+
+/// `--json` answers what was checked, in bron's own envelope: the digest, the
+/// address, the length and the span, and the text where the bytes are text.
+/// Bytes that are no text, an image, are left for the human form to hand over.
+#[tokio::test(flavor = "multi_thread")]
+async fn bron_blob_answers_what_it_checked_under_json() {
+    let digest = digest_of(DOCUMENT);
+    let server = serving_blob(&digest, DOCUMENT).await;
+
+    let output = bron(&server, &["--json", "blob", &digest, "--span", "19..30"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let data = &envelope["data"];
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(data["provenance"]["blob"], digest.as_str(), "{envelope}");
+    assert_eq!(data["provenance"]["byte_len"], DOCUMENT.len(), "{envelope}");
+    assert_eq!(data["provenance"]["frozen_by"], "bron", "{envelope}");
+    assert_eq!(
+        data["span"],
+        serde_json::json!({"start": 19, "end": 30}),
+        "{envelope}"
+    );
+    assert_eq!(data["text"], "Eerste lid.", "{envelope}");
+
+    let image = [0x89, b'P', b'N', b'G', 0xff, 0xfe];
+    let png = digest_of(&image);
+    let server = serving_blob(&png, &image).await;
+    let output = bron(&server, &["--json", "blob", &png]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(envelope["data"].get("text").is_none(), "{envelope}");
+    assert_eq!(envelope["data"]["provenance"]["byte_len"], 6, "{envelope}");
+}

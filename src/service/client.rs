@@ -192,6 +192,51 @@ impl Service {
     }
 }
 
+impl Service {
+    /// Reads the bytes a route serves on success, where the success is no
+    /// envelope: the one such route is a frozen document. A failure is read
+    /// as on every other route, from the envelope the service states it in.
+    pub(super) fn read_raw(
+        &self,
+        client: &Client,
+        request: reqwest::blocking::RequestBuilder,
+    ) -> Outcome<crate::sources::FetchedBytes> {
+        let fetched = client
+            .fetch_raw(request)
+            .map_err(|e| refused(e).unwrap_or_else(|e| from_source(SERVICE, e)))?;
+
+        if (200..300).contains(&fetched.status) {
+            return Ok(fetched);
+        }
+
+        let body = String::from_utf8_lossy(&fetched.bytes);
+        match serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(&body) {
+            Ok(Envelope {
+                error: Some(stated),
+                ..
+            }) => Err(stated.into_fault()),
+            _ => {
+                let host = reqwest::Url::parse(&fetched.url)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_string))
+                    .unwrap_or_default();
+
+                Err(match gateway(&host, fetched.status, None) {
+                    Some(sentence) => Fault::NoAnswer(sentence),
+                    None => Fault::Upstream {
+                        service: SERVICE,
+                        source: anyhow::anyhow!(
+                            "{} answered {} and no bron envelope with it",
+                            fetched.url,
+                            fetched.status
+                        ),
+                    },
+                })
+            }
+        }
+    }
+}
+
 /// A 429 or a 503, as the failure its body states with the delay the service
 /// named beside its words. Where the body is no envelope, as the refusal or
 /// the gateway failure it is. Anything else is handed back.

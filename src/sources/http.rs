@@ -299,6 +299,13 @@ impl Client {
     pub fn fetch_answered(&self, request: RequestBuilder) -> Result<Fetched> {
         decoded(self.fetch_on(request, Reading::Envelope)?)
     }
+
+    /// Reads the bytes a service that speaks the envelope serves on success,
+    /// undecoded: a document it froze, which may be no text at all. A failure
+    /// still comes in the envelope, under its status.
+    pub fn fetch_raw(&self, request: RequestBuilder) -> Result<FetchedBytes> {
+        self.fetch_on(request, Reading::Envelope)
+    }
 }
 
 fn decoded(raw: FetchedBytes) -> Result<Fetched> {
