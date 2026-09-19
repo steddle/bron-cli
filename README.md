@@ -174,7 +174,9 @@ Nothing is kept. bron writes one thing between runs, its share of the per-host r
 ## Features
 
 - Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date, and renditions the publisher has withdrawn named rather than quietly served.
-- Content-addressed provenance. Each document is named by the SHA-256 of its own bytes, and every article and lid carries a byte range into it, so a reader can fetch those bytes and cut the quotation again.
+- Content-addressed provenance. Each document is named by the SHA-256 of its own bytes, and every article and lid carries a byte range into it, so a reader can fetch those bytes and cut the quotation again, with `bron blob` or with any tool that hashes.
+- The life of one article. `bron law history` answers every text it has had, each with the window it applied in and the act that produced it, from the renditions the corpus holds.
+- What the register states around a law. `bron law about` says how much of it is held, `bron law relations` what rests on it and what cites it, and `bron law amendments` what the act that established it did elsewhere.
 - Amendment diffs. `bron law changes` compares a law between two dates unit by unit, its bijlagen and aanhef beside its articles, and matches them on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
 - An appeal answer that is never a boolean. `no_published_successor` is dated to the moment bron read the decision, because 'nothing published' is a claim about what the register held then and not about whether an appeal was brought.
 - Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers rather than each pacing itself perfectly and together going three times too fast.
