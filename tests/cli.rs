@@ -1929,3 +1929,99 @@ async fn a_lid_answer_says_which_lid_even_without_a_label() {
     assert!(output.status.success(), "{output:?}");
     assert!(text.lines().any(|l| l == "3 lid 2"), "{text}");
 }
+
+/// A rendition whose text the service does not hold has no article to answer,
+/// and the rendition resolved: saying 'no stored articles' would have a caller
+/// stop looking, where the publisher still serves that rendition.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_names_the_rendition_whose_text_is_not_held() {
+    let unheld = serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": "2015-01-01",
+        "data": {
+            "regulation_id": "BWBR0008691",
+            "expression": {
+                "regulation_id": "BWBR0008691",
+                "label": "2014-07-01_0",
+                "in_force": {"from": "2014-07-01"},
+                "withdrawn": false,
+                "held": false,
+                "upstream_hash_check": "unchecked",
+            },
+            "articles": [],
+        },
+    });
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0008691/articles",
+        &unheld.to_string(),
+    )
+    .await;
+
+    let output = bron(&server, &["law", "show", "BWBR0008691"]).await;
+    let said = String::from_utf8(output.stderr.clone()).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(said.contains("2014-07-01_0"), "{said}");
+    assert!(said.contains("text held for"), "{said}");
+}
+
+/// A rendition the service holds and could not parse has no article to answer
+/// either, and says which rendition and why rather than reading as a law with
+/// no articles in it.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_says_why_a_held_rendition_answered_no_article() {
+    let unread = serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": "2019-01-01",
+        "data": {
+            "regulation_id": "BWBR0008691",
+            "expression": {
+                "regulation_id": "BWBR0008691",
+                "label": "2019-01-01_0",
+                "in_force": {"from": "2019-01-01"},
+                "withdrawn": false,
+                "held": true,
+                "unread_because": "too_large",
+                "upstream_hash_check": "matches",
+                "blob": EARLIER_BLOB,
+            },
+            "articles": [],
+        },
+    });
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0008691/articles",
+        &unread.to_string(),
+    )
+    .await;
+
+    let output = bron(&server, &["law", "show", "BWBR0008691"]).await;
+    let said = String::from_utf8(output.stderr.clone()).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(said.contains("2019-01-01_0"), "{said}");
+    assert!(said.contains("too_large"), "{said}");
+}
+
+/// The address printed under a span is built from what the service called the
+/// document. A digest that is no digest names no document, and a URL made of
+/// it would send a reader somewhere that answers nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_prints_no_address_for_a_digest_that_is_no_digest() {
+    let nonsense = ARTICLE.replace(
+        "35e29887c98339a23c835cd45fa22c0569f2db6e7d05fbca6c8de0d4fb15a0fb",
+        "../../etc/passwd",
+    );
+    assert_ne!(nonsense, ARTICLE);
+    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", &nonsense).await;
+
+    let output = bron(&server, &["law", "show", "BWBR0005289", "--article", "3"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("source: ../../etc/passwd"), "{text}");
+    assert!(!text.contains("/api/v1/blobs/"), "{text}");
+}

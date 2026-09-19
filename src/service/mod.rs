@@ -293,9 +293,13 @@ impl Service {
         self.read(client, client.get(&url).query(&query))
     }
 
-    /// Where a blob is readable, which is the address a provenance names.
-    pub fn blob_url(&self, digest: &str) -> String {
-        format!("{}/api/v1/blobs/{digest}", self.base)
+    /// Where a blob is readable, for a digest that names one.
+    ///
+    /// The digest is the service's own word and is checked before it reaches a
+    /// URL, so an address bron prints for a reader to fetch is one that can
+    /// name a document rather than whatever arrived in that field.
+    pub fn blob_url(&self, digest: &str) -> Option<String> {
+        is_sha256_hex(digest).then(|| format!("{}/api/v1/blobs/{digest}", self.base))
     }
 }
 
@@ -312,6 +316,12 @@ fn normalise(base: &str) -> String {
         .unwrap_or(base)
         .trim_end_matches('/')
         .to_string()
+}
+
+/// Checked before the digest reaches a URL, so a value the service controls
+/// cannot walk out of the blobs path.
+fn is_sha256_hex(digest: &str) -> bool {
+    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -390,6 +400,23 @@ mod tests {
             let service = with_env(Some(named), Service::resolve);
             assert!(service.is_ok(), "[{named}] names a service");
         }
+    }
+
+    #[test]
+    fn only_a_sha256_digest_can_name_a_document() {
+        let service = Service::at("https://bron.test");
+
+        assert_eq!(
+            service.blob_url(&"a".repeat(64)),
+            Some(format!("https://bron.test/api/v1/blobs/{}", "a".repeat(64)))
+        );
+
+        // A value the service controls must not be able to walk out of the
+        // path, or send a reader to an address that names no document.
+        assert_eq!(service.blob_url("../../etc/passwd"), None);
+        assert_eq!(service.blob_url(&"a".repeat(63)), None);
+        assert_eq!(service.blob_url(&"z".repeat(64)), None);
+        assert_eq!(service.blob_url(""), None);
     }
 
     #[test]

@@ -339,10 +339,23 @@ fn refusal(response: &reqwest::blocking::Response) -> Option<Refusal> {
         .headers()
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(Duration::from_secs);
+        .and_then(|v| asked_for(v.trim()));
 
     Some(retry_after.map_or(Refusal::Unstated, Refusal::After))
+}
+
+/// The delay a `Retry-After` names, written either way RFC 9110 allows: a
+/// count of seconds, or the date the wait ends. A date already past is no
+/// wait at all, and a header neither shape names nothing.
+fn asked_for(header: &str) -> Option<Duration> {
+    if let Ok(seconds) = header.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+
+    let until = chrono::DateTime::parse_from_rfc2822(header).ok()?;
+    let ahead = until.signed_duration_since(chrono::Utc::now());
+
+    Some(ahead.to_std().unwrap_or(Duration::ZERO))
 }
 
 fn build() -> Result<reqwest::blocking::Client> {
@@ -352,4 +365,42 @@ fn build() -> Result<reqwest::blocking::Client> {
         .connect_timeout(Duration::from_secs(15))
         .build()
         .context("cannot build HTTP client")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both shapes RFC 9110 allows, and neither read as silence: a host that
+    /// named a wait is told back as having named one.
+    #[test]
+    fn a_retry_after_is_read_as_seconds_or_as_the_date_the_wait_ends() {
+        assert_eq!(asked_for("60"), Some(Duration::from_secs(60)));
+
+        let at = chrono::Utc::now() + chrono::Duration::seconds(40);
+        let named = asked_for(&at.format("%a, %d %b %Y %H:%M:%S GMT").to_string())
+            .expect("a date names a delay");
+        assert!(
+            (30..=45).contains(&named.as_secs()),
+            "40s, got {}s",
+            named.as_secs()
+        );
+    }
+
+    /// A date already past asks for no wait, which is not the same as asking
+    /// for one that cannot be measured.
+    #[test]
+    fn a_date_already_past_asks_for_no_wait() {
+        let gone = chrono::Utc::now() - chrono::Duration::hours(1);
+        assert_eq!(
+            asked_for(&gone.format("%a, %d %b %Y %H:%M:%S GMT").to_string()),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn a_header_of_neither_shape_names_nothing() {
+        assert_eq!(asked_for("soon"), None);
+        assert_eq!(asked_for(""), None);
+    }
 }

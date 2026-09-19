@@ -317,13 +317,32 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 },
             )?;
 
+            // A rendition that resolved and answered nothing. The service
+            // raises no fault for text it does not hold or did not parse, and
+            // a bare 'no articles' would have a caller stop looking: the
+            // rendition is named, so it can still be fetched from the
+            // publisher, and why it answered nothing is said where the service
+            // said it.
+            let expression = &answered.data.expression;
             if answered.data.articles.is_empty() {
-                let what = match (wanted, not_commenced) {
-                    (Some(number), _) => format!("article {number} of {law}"),
-                    (None, true) => format!("provisions of {law} published and not in force"),
-                    (None, false) => format!("articles of {law}"),
-                };
-                return Err(Fault::not_found("stored", what));
+                let rendition = format!("{law} rendition {}", expression.label);
+
+                return Err(match (&expression.blob, &expression.unread_because) {
+                    (None, _) => Fault::not_found("text held for", rendition),
+                    (Some(_), Some(because)) => {
+                        Fault::not_found("articles parsed from", format!("{rendition} ({because})"))
+                    }
+                    (Some(_), None) => {
+                        let what = match (wanted, not_commenced) {
+                            (Some(number), _) => format!("article {number} of {rendition}"),
+                            (None, true) => {
+                                format!("provisions of {rendition} published and not in force")
+                            }
+                            (None, false) => format!("articles of {rendition}"),
+                        };
+                        Fault::not_found("stored", what)
+                    }
+                });
             }
 
             // Refused here whichever way the answer prints, so an item nobody
@@ -350,7 +369,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                     .expression
                     .blob
                     .as_deref()
-                    .map(|digest| service.blob_url(digest)),
+                    .and_then(|digest| service.blob_url(digest)),
                 answered: Box::new(answered),
                 paragraph: paragraph.clone(),
                 item: letter.clone(),

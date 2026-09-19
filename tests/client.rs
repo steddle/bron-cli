@@ -368,3 +368,29 @@ fn walk(root: &std::path::Path) -> Vec<PathBuf> {
 
     found
 }
+
+/// RFC 9110 lets `Retry-After` be a date as well as a count of seconds. Read
+/// as no delay it says 'named no delay', which is false of a host that named
+/// one, and the bucket falls back to the pacing interval instead of the wait
+/// the host asked for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_after_written_as_a_date_is_the_delay_it_names() {
+    let at = chrono::Utc::now() + chrono::Duration::seconds(40);
+    let server = refusing(429, &at.format("%a, %d %b %Y %H:%M:%S GMT").to_string()).await;
+    let home = Home::new();
+    let url = format!("{}/refused", server.uri());
+
+    let error = off_thread(&home, move |client| {
+        client.read_url(&url).err().map(|e| e.to_string())
+    })
+    .await
+    .expect("a 429 must not read as success");
+
+    assert!(!error.contains("named no delay"), "{error}");
+
+    let ahead = home.hold_off_ms(&server.address().ip().to_string());
+    assert!(
+        (30_000..=45_000).contains(&ahead),
+        "expected the header's 40s, got {ahead}ms"
+    );
+}
