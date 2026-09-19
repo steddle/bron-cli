@@ -2566,3 +2566,143 @@ async fn bron_blob_answers_what_it_checked_under_json() {
     assert!(envelope["data"].get("text").is_none(), "{envelope}");
     assert_eq!(envelope["data"]["provenance"]["byte_len"], 6, "{envelope}");
 }
+
+/// What one article has been, as the service answers it: two texts it had, and
+/// a window whose renditions the corpus does not hold.
+const HISTORY: &str = r#"{"bron":1,"grade":"authority",
+ "data":{"regulation_id":"BWBR0005289","number":"119a","as_known_on":"2026-09-19",
+  "articles":[{"kind":"artikel","stam_id":"3231133","number":"119a","label":"Artikel 119a","path":"/Boek6/Artikel119a","later_field":1,
+   "entries":[
+    {"state":"text","in_force":{"from":"2022-07-01"},"number":"119a","label":"Artikel 119a","content_hash":"e53c","amended_by":"stb-2022-146","commenced_by":"stb-2022-175","effect":"wijziging","status":"goed","text_in_force_from":"2022-07-01","renditions":{"first":"2022-07-01_0","last":"2026-07-16_0","count":13}},
+    {"state":"text","in_force":{"from":"2017-07-01","until":"2022-06-30"},"number":"119a","label":"Artikel 119a","content_hash":"cc5e","amended_by":"stb-2017-170","effect":"wijziging","status":"goed","renditions":{"first":"2017-07-01_0","last":"2022-05-28_0","count":12}},
+    {"state":"unknown","in_force":{"from":"2002-11-07","until":"2017-06-30"},"renditions":{"first":"2002-11-07_0","last":"2017-03-10_0","count":9}}]}]},
+ "caveats":[{"kind":"renditions_not_held","count":9,"renditions":34}]}"#;
+
+/// `law history` is one call to the service, so `--json` is the envelope as
+/// sent, and the narrowing reaches the service as asked.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_history_prints_the_envelope_the_service_sent() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/regulations/BWBR0005289/articles/119a/history",
+        ))
+        .and(query_param("as_known_on", "2024-01-01"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(HISTORY, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "history",
+            "BWBR0005289",
+            "--article",
+            "119a",
+            "--as-known-on",
+            "2024-01-01",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{HISTORY}\n"));
+}
+
+/// One row per text the article has had: the window it applied in, whether the
+/// corpus holds it, the act that produced it, and which renditions carry it.
+/// The rows are stdout and every note on them stderr.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_history_prints_one_row_per_text_the_article_had() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0005289/articles/119a/history",
+        HISTORY,
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &["law", "history", "BWBR0005289", "--article", "119a"],
+    )
+    .await;
+    let text = stdout(&output);
+    let said = String::from_utf8_lossy(&output.stderr);
+    let rows: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(rows.len(), 3, "{text}");
+    assert!(rows[0].contains("2022-07-01 onwards"), "{text}");
+    assert!(rows[0].contains("stb-2022-146 (wijziging)"), "{text}");
+    assert!(
+        rows[0].contains("13 renditions, 2022-07-01_0 to 2026-07-16_0"),
+        "{text}"
+    );
+    // One is one, and a row that says otherwise reads as a count nobody checked.
+    assert!(rows[2].contains("9 renditions,"), "{text}");
+    // A window whose renditions are not held says so rather than reading as a
+    // window in which the article said nothing.
+    assert!(rows[2].contains("not held"), "{text}");
+    assert!(!text.contains("note:"), "{text}");
+    assert!(
+        said.contains("note: the service does not hold the text of 9"),
+        "{said}"
+    );
+}
+
+/// A unit with no number of its own is asked for by the kind it is printed
+/// under, and a number the regulation never printed is the service's
+/// not-found.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_history_asks_for_a_bijlage_by_kind_and_reports_a_number_that_is_not_there() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/articles/I/history"))
+        .and(query_param("kind", "bijlage"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(HISTORY, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/articles/9999/history"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"article_not_found","message":"no article [9999]","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let bijlage = bron(
+        &server,
+        &[
+            "law",
+            "history",
+            "BWBR0001941",
+            "--article",
+            "I",
+            "--kind",
+            "bijlage",
+        ],
+    )
+    .await;
+    assert!(bijlage.status.success(), "{bijlage:?}");
+
+    let missing = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "history",
+            "BWBR0001941",
+            "--article",
+            "9999",
+        ],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&missing)).unwrap();
+    assert_eq!(missing.status.code(), Some(2), "{missing:?}");
+    assert_eq!(envelope["error"]["code"], "article_not_found");
+}

@@ -129,6 +129,58 @@ pub struct Parts {
     pub parts: Vec<Article>,
 }
 
+/// The texts one unit has had, from held renditions only.
+#[derive(Debug, Deserialize)]
+pub struct History {
+    pub regulation_id: String,
+    /// The number asked for, as the register prints it.
+    pub number: String,
+    pub as_known_on: NaiveDate,
+    /// One entry per unit the number names, which is more than one where the
+    /// register prints it more than once.
+    pub articles: Vec<Lineage>,
+}
+
+/// One unit the number names, and every text it has had.
+#[derive(Debug, Deserialize)]
+pub struct Lineage {
+    pub kind: String,
+    pub stam_id: String,
+    pub number: Option<String>,
+    pub label: Option<String>,
+    pub path: Option<String>,
+    pub entries: Vec<Had>,
+}
+
+/// One text the unit had, and the renditions that carry it.
+#[derive(Debug, Deserialize)]
+pub struct Had {
+    /// `text` where the corpus holds it, `unknown` where the renditions are
+    /// not held, `absent` where they are and do not carry it.
+    pub state: String,
+    pub in_force: Window,
+    pub number: Option<String>,
+    pub label: Option<String>,
+    pub title: Option<String>,
+    pub content_hash: Option<String>,
+    pub amended_by: Option<String>,
+    pub commenced_by: Option<String>,
+    pub effect: Option<String>,
+    pub status: Option<String>,
+    /// The day this text applies from, which is not the window's first day
+    /// where the register states it apart.
+    pub text_in_force_from: Option<NaiveDate>,
+    pub renditions: Carried,
+}
+
+/// Which renditions carry one text, and how many.
+#[derive(Debug, Deserialize)]
+pub struct Carried {
+    pub first: String,
+    pub last: String,
+    pub count: u32,
+}
+
 /// A regulation compared between two days, unit by unit on the publisher's
 /// own identity.
 #[derive(Debug, Deserialize)]

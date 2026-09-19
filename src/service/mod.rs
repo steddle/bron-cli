@@ -23,14 +23,17 @@ pub mod client;
 pub mod model;
 pub mod search;
 
+use chrono::NaiveDate;
+
 use crate::error::{Fault, Outcome};
 use crate::ids::BwbId;
 use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, Change, Changes, Compare, Expression, Feed, Image, Paragraph, Parts,
-    Published, RegisterEvent, Regulation, Span, Summary, Units, Window, name,
+    Article, Articles, Ask, Carried, Change, Changes, Compare, Expression, Feed, Had, History,
+    Image, Lineage, Paragraph, Parts, Published, RegisterEvent, Regulation, Span, Summary, Units,
+    Window, name,
 };
 pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -255,6 +258,40 @@ impl Service {
         }
         if ask.raw {
             query.push(("raw", "1".to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// Every text one unit has had, from the renditions the corpus holds.
+    pub fn history(
+        &self,
+        client: &Client,
+        law: &BwbId,
+        number: &str,
+        kind: Option<&str>,
+        as_known_on: Option<NaiveDate>,
+    ) -> Outcome<Answered<History>> {
+        // The number is the register's and stands in the path, so it is
+        // encoded as a path segment rather than pasted into one: `3:305a` is
+        // a number this register prints.
+        let mut url =
+            reqwest::Url::parse(&format!("{}/api/v1/regulations/{law}/articles", self.base))
+                .map_err(|e| Fault::Upstream {
+                    service: client::SERVICE,
+                    source: anyhow::anyhow!("{} is not an address: {e}", self.base),
+                })?;
+        if let Ok(mut path) = url.path_segments_mut() {
+            path.push(number).push("history");
+        }
+        let url = url.to_string();
+
+        let mut query = Vec::new();
+        if let Some(kind) = kind {
+            query.push(("kind", kind.to_string()));
+        }
+        if let Some(day) = as_known_on {
+            query.push(("as_known_on", day.to_string()));
         }
 
         self.read(client, client.get(&url).query(&query))

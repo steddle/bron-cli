@@ -225,6 +225,30 @@ pub enum Law {
         moment: Moment,
     },
 
+    /// Every text one article, or one other unit, has had.
+    ///
+    /// Read from the renditions the corpus holds, so a window whose renditions
+    /// it does not hold is a window whose text nobody here can state. Each
+    /// text is named by the act that produced it and by the renditions that
+    /// carry it.
+    History {
+        /// BWB identifier, e.g. BWBR0005289.
+        id: String,
+
+        /// The number as printed, e.g. 119a, or a bijlage's with --kind.
+        #[arg(long)]
+        article: String,
+
+        /// The kind of unit the number is printed under, where it is no
+        /// article: bijlage.
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// The day whose view of the register counts (zicht).
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        as_known_on: Option<NaiveDate>,
+    },
+
     /// Every published version of a law, with its validity windows.
     Versions { id: String },
 

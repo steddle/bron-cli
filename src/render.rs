@@ -11,7 +11,7 @@ use std::io::{self, Write};
 
 use chrono::NaiveDate;
 
-use bron::service::{Article, Expression, Regulation, SearchData, SearchLid, name};
+use bron::service::{Article, Expression, Had, Lineage, Regulation, SearchData, SearchLid, name};
 use bron::wire::{AppealStatus, Body, Caveat, Envelope};
 
 use crate::run::Answer;
@@ -269,6 +269,69 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 "next {}  head {}  origin {}",
                 a.data.next, a.data.head, a.data.origin
             )?;
+
+            caveats(&a.caveats, err)
+        }
+
+        // One row per text, because a history is a list: what the unit said,
+        // for how long, on whose act, and in which renditions.
+        Answer::History(a) => {
+            let units = &a.data.articles;
+            let rows: Vec<(&Lineage, &Had)> = units
+                .iter()
+                .flat_map(|unit| unit.entries.iter().map(move |entry| (unit, entry)))
+                .collect();
+
+            let width = |of: &dyn Fn(&(&Lineage, &Had)) -> String| {
+                rows.iter()
+                    .map(|row| of(row).chars().count())
+                    .max()
+                    .unwrap_or(0)
+            };
+            // A number can name more than one unit, so every row says which.
+            let named = |(unit, entry): &(&Lineage, &Had)| {
+                name(
+                    entry.label.as_deref().or(unit.label.as_deref()),
+                    entry.number.as_deref().or(unit.number.as_deref()),
+                    &unit.kind,
+                    None,
+                )
+            };
+            let act = |(_, entry): &(&Lineage, &Had)| match (&entry.amended_by, &entry.effect) {
+                (Some(act), Some(effect)) => format!("{act} ({effect})"),
+                (Some(act), None) => act.clone(),
+                (None, _) => String::new(),
+            };
+            let (name_width, act_width) = (width(&named), width(&act));
+
+            for row in &rows {
+                let (_, entry) = row;
+                // `text` is the corpus holding the words; the other two are
+                // the register's renditions not held, or held and carrying no
+                // such unit. Silence would read as a window it said nothing in.
+                let state = match entry.state.as_str() {
+                    "text" => "",
+                    "unknown" => "not held",
+                    "absent" => "not carried",
+                    other => other,
+                };
+                writeln!(
+                    out,
+                    "{:<name_width$}  {:<WINDOW$}  {:<11} {:<act_width$}  {} {}, {} to {}",
+                    named(row),
+                    window(entry.in_force.from, entry.in_force.until),
+                    state,
+                    act(row),
+                    entry.renditions.count,
+                    if entry.renditions.count == 1 {
+                        "rendition"
+                    } else {
+                        "renditions"
+                    },
+                    entry.renditions.first,
+                    entry.renditions.last,
+                )?;
+            }
 
             caveats(&a.caveats, err)
         }

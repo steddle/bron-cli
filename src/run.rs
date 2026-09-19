@@ -27,6 +27,7 @@ pub enum Answer {
     LawHits(Answered<Vec<service::Regulation>>),
     Found(Answered<service::SearchData>),
     Versions(Answered<Vec<service::Expression>>),
+    History(Box<Answered<service::History>>),
     Parts {
         answered: Box<Answered<service::Parts>>,
         /// See `Articles::blob_url`.
@@ -84,6 +85,7 @@ impl Answer {
             Self::LawHits(a) => sent(out, &a.envelope),
             Self::Found(a) => sent(out, &a.envelope),
             Self::Versions(a) => sent(out, &a.envelope),
+            Self::History(a) => sent(out, &a.envelope),
             Self::Parts { answered, .. } => sent(out, &answered.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
@@ -225,6 +227,21 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
         Law::Search { query, limit } => service
             .regulations(&client, &query.join(" "), *limit)
             .map(Answer::LawHits),
+
+        Law::History {
+            id,
+            article,
+            kind,
+            as_known_on,
+        } => service
+            .history(
+                &client,
+                &parse_id(id)?,
+                article,
+                kind.as_deref(),
+                *as_known_on,
+            )
+            .map(|answered| Answer::History(Box::new(answered))),
 
         Law::Versions { id } => service
             .expressions(&client, &parse_id(id)?)
