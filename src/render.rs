@@ -10,7 +10,7 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::SearchData;
-use bron::wire::{AppealStatus, Article, Body, Caveat, Envelope};
+use bron::wire::{AppealStatus, Body, Caveat, Envelope};
 
 use crate::run::Answer;
 
@@ -257,14 +257,19 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&a.caveats, out)
         }
 
-        Answer::Articles(e) => {
-            let articles = data(e);
+        Answer::Articles {
+            answered: a,
+            blob_url,
+            paragraph,
+            item,
+        } => {
+            let articles = &a.data.articles;
 
             // An answer holding only provisions not yet applied is bound to
             // the rendition that publishes them, and 'as in force on' would
             // say they apply.
             if !articles.is_empty() && articles.iter().all(not_commenced) {
-                match e.as_of {
+                match a.as_of {
                     Some(day) => writeln!(
                         out,
                         "published in the rendition current on {day}, and not yet applied\n"
@@ -272,11 +277,17 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     None => writeln!(out, "published and not yet applied\n")?,
                 }
             } else {
-                bound(e.as_of, e.as_known_on, out)?;
+                bound(a.as_of, a.as_known_on, out)?;
             }
 
             for article in articles {
-                write!(out, "{}", article.name())?;
+                // The service names a lid answer for the article's own label
+                // where it has one. Where it has none, the name says which lid
+                // the answer is about, because nothing else on the line does.
+                match (&article.label, paragraph) {
+                    (None, Some(lid)) => write!(out, "{} lid {lid}", article.name())?,
+                    _ => write!(out, "{}", article.name())?,
+                }
                 if let Some(title) = &article.title {
                     write!(out, "  {title}")?;
                 }
@@ -284,26 +295,37 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 if let Some(path) = &article.path {
                     writeln!(out, "{path}")?;
                 }
+
+                let text = article.text();
+                let text = match item {
+                    Some(letter) => crate::run::item(&text, letter)
+                        .unwrap_or_default()
+                        .to_string(),
+                    None => text,
+                };
+
                 // A repealed provision reads as one word, so the day it went is
                 // the only thing on the line that answers anything. wetten.nl
                 // prints the same date for the same reason.
                 match (article.effect.as_deref(), article.in_force_from) {
-                    (Some("vervallen"), Some(day)) => {
-                        writeln!(out, "\n{} per {day}\n", article.content)?
-                    }
-                    _ => writeln!(out, "\n{}\n", article.content)?,
+                    (Some("vervallen"), Some(day)) => writeln!(out, "\n{text} per {day}\n")?,
+                    _ => writeln!(out, "\n{text}\n")?,
                 }
-                writeln!(
-                    out,
-                    "source: {} ({}..{})",
-                    article.provenance.blob, article.excerpt.start, article.excerpt.end
-                )?;
-                writeln!(out, "{}", article.provenance.url)?;
+
+                if let Some(blob) = &a.data.expression.blob {
+                    writeln!(
+                        out,
+                        "source: {blob} ({}..{})",
+                        article.span.start, article.span.end
+                    )?;
+                }
+                if let Some(url) = blob_url {
+                    writeln!(out, "{url}")?;
+                }
                 // The register's own citation string for exactly what is
                 // printed above, carrying this rendition's zicht and geldigheid
                 // dates. It is what Dutch practice already cites with, so a
-                // reader needs no mapping from ours, and it was being stored
-                // and thrown away at the last step.
+                // reader needs no mapping from ours.
                 if let Some(jci) = &article.jci {
                     writeln!(out, "{jci}")?;
                 }
@@ -323,7 +345,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 }
                 writeln!(out)?;
             }
-            caveats(&e.caveats, out)
+            caveats(&a.caveats, out)
         }
 
         Answer::Changes {
@@ -563,7 +585,7 @@ fn first_line(text: &str) -> String {
 }
 
 /// Whether the register publishes this provision and does not yet apply it.
-fn not_commenced(article: &Article) -> bool {
+fn not_commenced(article: &bron::service::Article) -> bool {
     article.status.as_deref() == Some("nogniet")
 }
 
@@ -774,12 +796,6 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: the register has since revised what it shows for this date; this text \
                  was what it showed until {visible_until}"
         ),
-        Caveat::UnverifiedSlice => {
-            "note: the text beside each span is the service's word for what stands there. \
-                 bron did not cut it out of bytes it hashed, so it is a report and not a \
-                 proof; fetch the blob and slice it at those offsets to check it."
-                .to_string()
-        }
         // Said because the counts above cannot say it. A unit left out of a
         // comparison is left out of its totals too, so silence here reads as
         // 'nothing changed'.

@@ -56,6 +56,7 @@ fn asking() -> Ask<'static> {
         as_of: "2018-01-01".parse().unwrap(),
         as_known_on: None,
         number: Some("1"),
+        paragraph: None,
         raw: false,
         not_commenced: false,
     }

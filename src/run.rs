@@ -36,7 +36,18 @@ pub enum Answer {
         /// summary does not follow.
         narrowed: bool,
     },
-    Articles(Envelope<Vec<wire::Article>>),
+    Articles {
+        answered: Box<Answered<service::Articles>>,
+        /// Where the rendition's document is served, for the source line a
+        /// reader fetches. Absent where the service holds no text for it.
+        blob_url: Option<String>,
+        /// The lid the question named, which the service narrowed the answer
+        /// to. Carried so a heading says which lid where the service's label
+        /// for the article is absent and cannot.
+        paragraph: Option<String>,
+        /// The item a person asked to read. See [`item`].
+        item: Option<String>,
+    },
     CaseHits(Envelope<Vec<wire::CaseHit>>),
     Case(Envelope<Box<wire::Case>>),
     Appeal(Envelope<wire::AppealStatus>),
@@ -64,7 +75,7 @@ impl Answer {
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
             Self::Changes { answered, .. } => sent(out, &answered.envelope),
-            Self::Articles(e) => write(out, e),
+            Self::Articles { answered, .. } => sent(out, &answered.envelope),
             Self::CaseHits(e) => write(out, e),
             Self::Case(e) => write(out, e),
             Self::Appeal(e) => write(out, e),
@@ -97,85 +108,23 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
     }
 }
 
-/// Cuts an answer down to one lid, and one item of it.
+/// Cuts the text of a lid down to the one item a letter opens.
 ///
-/// A filter over stored text rather than a level of its own. The letter opens
-/// the line because the parser puts it there, so asking for `sub b` costs no
-/// schema and no second address space.
+/// A filter over the text the service answered, for a person reading a
+/// terminal. No route answers an item: offsets are held per article and per
+/// lid, so an item's would be an offset nobody measured, and the answer stays
+/// the lid's. `--json` prints the envelope as sent for the same reason.
 ///
-/// Narrowing to a lid narrows what the answer points at with it: the excerpt,
-/// the Juriconnect reference and the label all become the lid's, because an
-/// answer about lid 2 that cites the article's bytes is coarser than the claim
-/// it supports.
-///
-/// An item is where that stops. It has no byte range in this corpus: offsets
-/// are held per article and per lid, and inventing one for an item would be an
-/// offset nobody measured. So `--item` leaves the excerpt at the lid's, which
-/// is a concession the answer makes plainly rather than quietly.
-fn narrow(
-    articles: Vec<wire::Article>,
-    paragraph: Option<&str>,
-    item: Option<&str>,
-) -> Outcome<Vec<wire::Article>> {
-    let Some(number) = paragraph else {
-        return Ok(articles);
-    };
+/// The letter opens the line because the parser puts it there, so asking for
+/// `sub b` costs no schema and no second address space.
+pub fn item<'a>(text: &'a str, letter: &str) -> Option<&'a str> {
+    let wanted = letter.trim_end_matches('.');
 
-    let mut narrowed = Vec::new();
-
-    for mut article in articles {
-        let Some(mut lid) = article
-            .leden
-            .iter()
-            .find(|l| l.number.as_deref() == Some(number))
-            .cloned()
-        else {
-            continue;
-        };
-
-        if let Some(letter) = item {
-            let wanted = letter.trim_end_matches('.');
-            let line = lid
-                .content
-                .lines()
-                .find(|line| {
-                    line.split_whitespace()
-                        .next()
-                        .is_some_and(|first| first.trim_end_matches('.') == wanted)
-                })
-                .ok_or_else(|| {
-                    Fault::not_found(
-                        "item",
-                        format!(
-                            "{letter} of {} {} lid {number}",
-                            article.law_id,
-                            article.name()
-                        ),
-                    )
-                })?;
-
-            lid.content = line.to_string();
-        }
-
-        // The answer is about a lid, so everything that says what it points at
-        // has to be the lid's: 'art. 6:162 lid 2 BW' is not supported by the
-        // article's byte range.
-        article.content = lid.content.clone();
-        article.excerpt = lid.excerpt.clone();
-        article.jci = lid.jci.clone();
-        article.label = Some(match article.label.take() {
-            Some(label) => format!("{label} lid {number}"),
-            None => format!("{} lid {number}", article.name()),
-        });
-        article.leden = vec![lid];
-        narrowed.push(article);
-    }
-
-    if narrowed.is_empty() {
-        return Err(Fault::not_found("lid", number));
-    }
-
-    Ok(narrowed)
+    text.lines().find(|line| {
+        line.split_whitespace()
+            .next()
+            .is_some_and(|first| first.trim_end_matches('.') == wanted)
+    })
 }
 
 /// Answers which article, from a question or from a citation, by identifier.
@@ -213,83 +162,6 @@ fn run_find(
             },
         )
         .map(Answer::Found)
-}
-
-/// Where the document a rendition's spans point into came from.
-///
-/// One lookup per rendition, never one per article: a rendition names one blob
-/// and every span in the answer points into those bytes.
-fn provenance(
-    client: &Client,
-    service: &Service,
-    law: &BwbId,
-    expression: &service::Expression,
-) -> Outcome<wire::Provenance> {
-    // The rendition exists and its dates resolved; what is missing is its text.
-    // Reporting that as no such rendition would have a caller stop looking, and
-    // the publisher still serves it.
-    let digest = expression.blob.as_deref().ok_or_else(|| {
-        Fault::not_found(
-            "text held for",
-            format!("{law} rendition {}", expression.label),
-        )
-    })?;
-
-    let blob = digest.parse().map_err(|e| Fault::Upstream {
-        service: "bron",
-        source: anyhow::anyhow!("{e}"),
-    })?;
-    let answered = service.blob_at(client, digest)?;
-
-    Ok(wire::Provenance::served(
-        blob,
-        service.blob_url(digest),
-        answered.data.size,
-    ))
-}
-
-/// One article, in the shape a consumer parses.
-fn article(
-    article: &service::Article,
-    law: &BwbId,
-    version: &str,
-    provenance: &wire::Provenance,
-) -> wire::Article {
-    wire::Article {
-        law_id: law.to_string(),
-        version: version.to_string(),
-        kind: article.kind.clone(),
-        position: article.position,
-        number: article.number.clone(),
-        label: article.label.clone(),
-        title: article.title.clone(),
-        path: article.path.clone(),
-        content: article.text(),
-        excerpt: excerpt(article.span, article.raw.as_deref()),
-        leden: article
-            .leden()
-            .map(|paragraph| wire::Lid {
-                number: paragraph.number.clone(),
-                content: paragraph.cited(),
-                excerpt: excerpt(paragraph.span, paragraph.raw.as_deref()),
-                jci: paragraph.jci.clone(),
-            })
-            .collect(),
-        amended_by: article.amended_by.clone(),
-        effect: article.effect.clone(),
-        status: article.status.clone(),
-        in_force_from: article.in_force_from,
-        jci: article.jci.clone(),
-        provenance: provenance.clone(),
-    }
-}
-
-fn excerpt(span: service::Span, raw: Option<&str>) -> wire::Excerpt {
-    wire::Excerpt {
-        start: span.start,
-        end: span.end,
-        text: raw.map(str::to_string),
-    }
 }
 
 // -- wetgeving -----------------------------------------------------------
@@ -424,7 +296,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             id,
             article: wanted,
             paragraph,
-            item,
+            item: letter,
             moment,
             raw,
             not_commenced,
@@ -439,22 +311,13 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                     as_of,
                     as_known_on,
                     number: wanted.as_deref(),
+                    paragraph: paragraph.as_deref(),
                     raw: *raw,
                     not_commenced: *not_commenced,
                 },
             )?;
 
-            let mut caveats = answered.caveats;
-            let found = answered.data;
-            let provenance = provenance(&client, service, &law, &found.expression)?;
-
-            let articles: Vec<wire::Article> = found
-                .articles
-                .iter()
-                .map(|a| article(a, &law, &found.expression.label, &provenance))
-                .collect();
-
-            if articles.is_empty() {
+            if answered.data.articles.is_empty() {
                 let what = match (wanted, not_commenced) {
                     (Some(number), _) => format!("article {number} of {law}"),
                     (None, true) => format!("provisions of {law} published and not in force"),
@@ -463,20 +326,35 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 return Err(Fault::not_found("stored", what));
             }
 
-            let articles = narrow(articles, paragraph.as_deref(), item.as_deref())?;
-
-            // Read off what the answer carries rather than off the flag that
-            // asked for it. Narrowing to a lid changes which excerpts travel,
-            // and a caveat about the request cannot see that.
-            if articles.iter().any(wire::Article::reports_a_slice) {
-                caveats.push(Caveat::UnverifiedSlice);
+            // Refused here whichever way the answer prints, so an item nobody
+            // prints is one exit code rather than two.
+            if let Some(letter) = letter
+                && let Some(article) = answered
+                    .data
+                    .articles
+                    .iter()
+                    .find(|article| item(&article.text(), letter).is_none())
+            {
+                return Err(Fault::not_found(
+                    "item",
+                    format!("{letter} of {law} {}", article.name()),
+                ));
             }
 
-            Ok(Answer::Articles(
-                Envelope::ok(articles)
-                    .bound_to(as_of, as_known_on)
-                    .with_caveats(caveats),
-            ))
+            Ok(Answer::Articles {
+                // Where the blob is served, which is the address a reader
+                // fetches to check a span. Built here because the service this
+                // run reads is resolved here and nowhere below.
+                blob_url: answered
+                    .data
+                    .expression
+                    .blob
+                    .as_deref()
+                    .map(|digest| service.blob_url(digest)),
+                answered: Box::new(answered),
+                paragraph: paragraph.clone(),
+                item: letter.clone(),
+            })
         }
     }
 }
@@ -673,130 +551,19 @@ fn client(quiet: bool) -> Outcome<Client> {
 }
 
 #[cfg(test)]
-mod narrow_tests {
-    use super::narrow;
-    use bron::wire::{Article, Excerpt, Lid, Provenance};
+mod item_tests {
+    use super::item;
 
-    fn article(leden: &[(&str, &str)]) -> Article {
-        Article {
-            law_id: "BWBR0005289".into(),
-            version: "2024-01-01_0".into(),
-            kind: "artikel".into(),
-            position: None,
-            number: Some("3".into()),
-            label: Some("Artikel 3".into()),
-            title: None,
-            path: None,
-            content: leden.iter().map(|(_, c)| *c).collect::<Vec<_>>().join("\n"),
-            excerpt: Excerpt {
-                start: 1000,
-                end: 2000,
-                text: None,
-            },
-            // Distinct spans per lid, because the whole point of narrowing is
-            // that the answer stops pointing at the article's range.
-            leden: leden
-                .iter()
-                .enumerate()
-                .map(|(i, (number, content))| Lid {
-                    number: Some((*number).into()),
-                    content: (*content).to_string(),
-                    excerpt: Excerpt {
-                        start: 1100 + i as u32 * 100,
-                        end: 1150 + i as u32 * 100,
-                        text: None,
-                    },
-                    jci: Some(format!("jci1.3:c:BWBR0005289&artikel=3&lid={number}")),
-                })
-                .collect(),
-            amended_by: None,
-            effect: None,
-            in_force_from: None,
-            jci: None,
-            status: None,
-            provenance: Provenance::served(
-                bron::blob::BlobId::of(b"<toestand/>"),
-                "https://example.invalid".into(),
-                1,
-            ),
-        }
-    }
+    const LID: &str = "2. Een natuurlijke verbintenis bestaat:\n\
+                       a. wanneer de wet dat bepaalt;\n\
+                       b. wanneer een morele plicht bestaat.";
 
-    fn items() -> Article {
-        article(&[
-            ("1", "1. Een natuurlijke verbintenis is niet afdwingbaar."),
-            (
-                "2",
-                "2. Een natuurlijke verbintenis bestaat:\na. wanneer de wet dat bepaalt;\nb. wanneer een morele plicht bestaat.",
-            ),
-        ])
-    }
-
-    /// Dutch practice cites 'art. 6:162 lid 2 BW'. An answer to that which
-    /// reports the article's byte range is one level coarser than the claim it
-    /// supports, and the lid's range was measured and stored all along.
     #[test]
-    fn a_lid_answer_points_at_the_lid_and_not_at_the_article() {
-        let narrowed = narrow(vec![items()], Some("2"), None).unwrap();
-        let answer = &narrowed[0];
-
-        assert_eq!(answer.excerpt.start, 1200);
-        assert_eq!(answer.excerpt.end, 1250);
+    fn an_item_is_the_line_its_letter_opens() {
         assert_eq!(
-            answer.jci.as_deref(),
-            Some("jci1.3:c:BWBR0005289&artikel=3&lid=2")
+            item(LID, "b"),
+            Some("b. wanneer een morele plicht bestaat.")
         );
-        assert_eq!(answer.label.as_deref(), Some("Artikel 3 lid 2"));
-    }
-
-    /// An item has no byte range in this corpus, so the answer stays at the
-    /// lid's rather than inventing one nobody measured.
-    /// An article without a label is named by its number, and the name of a
-    /// lid answer still says which lid it is.
-    #[test]
-    fn a_lid_answer_without_a_label_still_names_the_lid() {
-        let mut unlabelled = items();
-        unlabelled.label = None;
-
-        let narrowed = narrow(vec![unlabelled], Some("2"), None).unwrap();
-
-        assert_eq!(narrowed[0].label.as_deref(), Some("3 lid 2"));
-    }
-
-    #[test]
-    fn an_item_answer_points_at_the_lid_that_holds_it() {
-        let narrowed = narrow(vec![items()], Some("2"), Some("b")).unwrap();
-
-        assert_eq!(narrowed[0].excerpt.start, 1200);
-        assert_eq!(narrowed[0].excerpt.end, 1250);
-    }
-
-    #[test]
-    fn an_article_answered_whole_still_points_at_the_article() {
-        let narrowed = narrow(vec![items()], None, None).unwrap();
-
-        assert_eq!(narrowed[0].excerpt.start, 1000);
-        assert_eq!(narrowed[0].label.as_deref(), Some("Artikel 3"));
-    }
-
-    #[test]
-    fn without_a_lid_the_article_is_answered_whole() {
-        assert_eq!(narrow(vec![items()], None, None).unwrap()[0].leden.len(), 2);
-    }
-
-    #[test]
-    fn a_lid_narrows_to_that_lid_alone() {
-        let narrowed = narrow(vec![items()], Some("1"), None).unwrap();
-
-        assert_eq!(narrowed[0].leden.len(), 1);
-        assert!(narrowed[0].content.starts_with("1. Een natuurlijke"));
-    }
-
-    #[test]
-    fn an_item_narrows_to_the_line_it_letters() {
-        let narrowed = narrow(vec![items()], Some("2"), Some("b")).unwrap();
-
-        assert_eq!(narrowed[0].content, "b. wanneer een morele plicht bestaat.");
     }
 
     /// The register writes `a.` and practice cites `sub a`, so both spellings
@@ -804,32 +571,13 @@ mod narrow_tests {
     #[test]
     fn the_letter_is_matched_with_or_without_its_full_stop() {
         for spelling in ["a", "a."] {
-            let narrowed = narrow(vec![items()], Some("2"), Some(spelling)).unwrap();
-            assert_eq!(narrowed[0].content, "a. wanneer de wet dat bepaalt;");
+            assert_eq!(item(LID, spelling), Some("a. wanneer de wet dat bepaalt;"));
         }
     }
 
-    /// A lid or an item that is not there is a failure rather than an empty
-    /// success: an empty answer cannot say whether nothing matched or no such
-    /// thing was ever asked for.
     #[test]
-    fn a_lid_that_does_not_exist_is_not_found() {
-        assert!(narrow(vec![items()], Some("9"), None).is_err());
-    }
-
-    #[test]
-    fn an_item_that_does_not_exist_is_not_found() {
-        assert!(narrow(vec![items()], Some("2"), Some("z")).is_err());
-    }
-
-    /// The span stays the lid's. An item has no byte range in this corpus, and
-    /// reporting a narrower one would be an offset nobody measured.
-    #[test]
-    fn narrowing_to_an_item_does_not_narrow_the_span() {
-        let before = items().leden[1].excerpt.end;
-        let narrowed = narrow(vec![items()], Some("2"), Some("b")).unwrap();
-
-        assert_eq!(narrowed[0].leden[0].excerpt.end, before);
+    fn an_item_nothing_opens_is_not_there() {
+        assert_eq!(item(LID, "z"), None);
     }
 }
 

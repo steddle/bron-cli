@@ -47,7 +47,10 @@ pub struct Expression {
     /// state added later crosses.
     pub upstream_hash_check: String,
     /// The size the manifest states, which is not the length of the document
-    /// the spans point into. See [`BlobProvenance`].
+    /// the spans point into: for a large share of renditions the manifest
+    /// describes a gzip of the manifestation rather than what its own URL
+    /// serves, and BWBR0008691 2016-07-01_0 is one, 49.606 bytes stated
+    /// against 547.732 held.
     pub size: Option<u64>,
     /// True where the service holds this rendition's text.
     pub held: bool,
@@ -294,22 +297,6 @@ pub struct Span {
     pub end: u32,
 }
 
-/// How long a blob is.
-///
-/// The publisher's own address travels too and is not read: what a provenance
-/// names is where these bytes can be fetched and hashed, and only one of the
-/// two addresses answers under the digest.
-///
-/// The length is the one thing an answer cannot do without: every span in it
-/// points inside that document, and the size the manifest states is not it. For
-/// a large share of renditions the manifest describes a gzip of the
-/// manifestation rather than what its own URL serves, and BWBR0008691
-/// 2016-07-01_0 is one: 49.606 bytes stated against 547.732 held.
-#[derive(Debug, Deserialize)]
-pub struct BlobProvenance {
-    pub size: usize,
-}
-
 /// Which window of the register to ask about, and how to narrow it.
 ///
 /// A window on either axis, or both. Geldigheid is what applied to conduct and
@@ -342,6 +329,9 @@ pub struct Ask<'a> {
     /// register had it that day.
     pub as_known_on: Option<NaiveDate>,
     pub number: Option<&'a str>,
+    /// One lid number as printed. The service narrows the span, the text, the
+    /// label and the Juriconnect reference to that lid.
+    pub paragraph: Option<&'a str>,
     /// Ask for the publisher's own bytes at every span. Off by default, so no
     /// markup travels for an answer nobody will read it in.
     pub raw: bool,

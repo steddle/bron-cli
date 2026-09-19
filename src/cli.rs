@@ -115,28 +115,34 @@ pub enum Law {
         /// One lid of that article, as the register numbers it.
         ///
         /// Needs --article: a lid number alone is not an address, since every
-        /// article has a lid 1.
+        /// article has a lid 1. The service answers the lid, so the span, the
+        /// Juriconnect reference and the label are the lid's: an answer about
+        /// lid 2 that cites the article's bytes is coarser than the claim it
+        /// supports.
         #[arg(long, requires = "article")]
         paragraph: Option<String>,
 
         /// One item of that lid, as the register letters it: `a`, `b`, `2°`.
         ///
-        /// The span reported stays the lid's. An item has no span of its own
-        /// in this corpus, and naming the lid's is the honest reading rather
-        /// than an offset nobody measured.
+        /// A cut of what a person reads, and the one narrowing no route
+        /// answers: an item has no span of its own in this corpus, so the
+        /// answer stays the lid's rather than naming an offset nobody
+        /// measured. With --json the envelope is the lid as the service sent
+        /// it. An item nothing opens is refused either way.
         #[arg(long, requires = "paragraph")]
         item: Option<String>,
 
         /// Also carry the publisher's own bytes at every span.
         ///
-        /// Without it an answer carries the offsets and bron's reading, and no
-        /// markup travels. With it each excerpt also carries the slice itself,
-        /// on the service's word: checking it means fetching the blob it was
-        /// cut from, and not having to is the reason it is offered at all.
+        /// Without it an answer carries the offsets and the service's reading,
+        /// and no markup travels. With it each span also carries the slice
+        /// itself, on the service's word: it is what the service says stands
+        /// at those offsets rather than a cut bron made from bytes it hashed,
+        /// and fetching the blob and cutting it again is how that is checked.
         ///
-        /// Only --json carries the slice. A person reads bron's reading either
-        /// way, so without --json the bytes are fetched and only the note
-        /// about them prints.
+        /// Only --json carries the slice. A person reads the service's reading
+        /// either way, so without --json the bytes are fetched and nothing
+        /// prints them.
         #[arg(long)]
         raw: bool,
 

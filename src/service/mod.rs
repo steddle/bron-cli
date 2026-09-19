@@ -29,12 +29,10 @@ use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, BlobProvenance, Change, Changes, Compare, Expression, Feed, Image,
-    Paragraph, Parts, Published, RegisterEvent, Regulation, Span, Summary, Units, Window, name,
+    Article, Articles, Ask, Change, Changes, Compare, Expression, Feed, Image, Paragraph, Parts,
+    Published, RegisterEvent, Regulation, Span, Summary, Units, Window, name,
 };
 pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
-
-use client::SERVICE;
 
 /// Where the service lives. Overrides [`DEFAULT`].
 const ENV: &str = "BRON_MIRROR";
@@ -217,6 +215,9 @@ impl Service {
         if let Some(number) = ask.number {
             query.push(("number", number.to_string()));
         }
+        if let Some(paragraph) = ask.paragraph {
+            query.push(("paragraph", paragraph.to_string()));
+        }
         if ask.raw {
             query.push(("raw", "1".to_string()));
         }
@@ -292,22 +293,6 @@ impl Service {
         self.read(client, client.get(&url).query(&query))
     }
 
-    /// How long a blob is. See [`BlobProvenance`].
-    pub fn blob_at(&self, client: &Client, digest: &str) -> Outcome<Answered<BlobProvenance>> {
-        if !is_sha256_hex(digest) {
-            return Err(Fault::Upstream {
-                service: SERVICE,
-                source: anyhow::anyhow!(
-                    "the service named a blob that is not a sha-256 digest: {digest}"
-                ),
-            });
-        }
-
-        let url = format!("{}/api/v1/blobs/{digest}/provenance", self.base);
-
-        self.read(client, client.get(&url))
-    }
-
     /// Where a blob is readable, which is the address a provenance names.
     pub fn blob_url(&self, digest: &str) -> String {
         format!("{}/api/v1/blobs/{digest}", self.base)
@@ -327,12 +312,6 @@ fn normalise(base: &str) -> String {
         .unwrap_or(base)
         .trim_end_matches('/')
         .to_string()
-}
-
-/// Checked before the digest reaches a URL, so a value the service controls
-/// cannot walk out of the blobs path.
-fn is_sha256_hex(digest: &str) -> bool {
-    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -470,19 +449,5 @@ mod tests {
                 "the refusal must quote what was set: {refused}"
             );
         }
-    }
-
-    #[test]
-    fn only_a_sha256_digest_can_reach_the_blobs_path() {
-        assert!(is_sha256_hex(&"a".repeat(64)));
-        assert!(is_sha256_hex(
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        ));
-
-        // A value the service controls must not be able to walk out of the path.
-        assert!(!is_sha256_hex("../../etc/passwd"));
-        assert!(!is_sha256_hex(&"a".repeat(63)));
-        assert!(!is_sha256_hex(&"z".repeat(64)));
-        assert!(!is_sha256_hex(""));
     }
 }

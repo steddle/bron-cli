@@ -308,14 +308,6 @@ pub enum Caveat {
     /// what was believed then rather than what is believed now.
     SupersededKnowledge { visible_until: NaiveDate },
 
-    /// The bytes beside each span are the service's word for what stands there.
-    ///
-    /// bron does not hold the document they were cut from: checking this text
-    /// means fetching the blob it came out of, and not having to is the whole
-    /// reason it travels. Being handed a slice and having cut one are different
-    /// facts, and only one of them is a proof.
-    UnverifiedSlice,
-
     /// Units a comparison left out because the register used their stam-id
     /// more than once inside one rendition, where a match would have to pick
     /// one and calling that an identity would be a guess.
@@ -569,22 +561,6 @@ pub enum Frozen {
     /// bron. It fetched these bytes, filed them under the digest of themselves,
     /// and knows when it did because it did it.
     Bron { fetched_at: DateTime<Utc> },
-    /// The service. bron has the digest and the address and has not read a
-    /// byte: checking one means fetching the blob, and not having to is what
-    /// this shape buys.
-    ///
-    /// No moment travels with it, and none should. The service does not say
-    /// when it froze a document, deliberately: a reader who can see when
-    /// something was fetched can see what is being worked on.
-    Service,
-}
-
-impl Frozen {
-    /// Whether a slice cut from this document is a report rather than a cut
-    /// bron made. See [`Caveat::UnverifiedSlice`].
-    pub fn reports(&self) -> bool {
-        matches!(self, Self::Service)
-    }
 }
 
 /// Where a value came from, in the form a consumer can verify.
@@ -599,17 +575,6 @@ pub struct Provenance {
 }
 
 impl Provenance {
-    /// Provenance for a document the service froze and serves, named by its
-    /// digest.
-    pub fn served(blob: BlobId, url: String, byte_len: usize) -> Self {
-        Self {
-            blob,
-            url,
-            byte_len,
-            frozen: Frozen::Service,
-        }
-    }
-
     /// Provenance for a document bron fetched and froze itself, stamped with
     /// the moment it did.
     pub fn frozen(source: &sources::Provenance, fetched_at: DateTime<Utc>) -> Self {
@@ -622,124 +587,7 @@ impl Provenance {
     }
 }
 
-/// Where a value sits in the frozen document, and optionally what stands there.
-///
-/// The offsets are the answer. `blob` in the same provenance names a document
-/// whose address is the hash of its own content, so a consumer that wants to
-/// prove a quotation fetches those bytes and slices them at `start..end`.
-///
-/// `text` is that slice, sent only when `--raw` asks for it, and it is the
-/// service's word for what stands there rather than a cut bron made.
-/// [`Caveat::UnverifiedSlice`] says so on any answer that carries one.
-#[derive(Debug, Clone, Serialize)]
-pub struct Excerpt {
-    pub start: u32,
-    pub end: u32,
-    /// The publisher's own bytes at this range, markup included. Absent unless
-    /// `--raw`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-}
-
-impl Excerpt {
-    /// Whether this excerpt carries the bytes at its range, rather than only
-    /// pointing at them.
-    pub fn quotes(&self) -> bool {
-        self.text.is_some()
-    }
-}
-
 // -- laws ----------------------------------------------------------------
-
-#[derive(Debug, Serialize)]
-pub struct Article {
-    pub law_id: String,
-    pub version: String,
-    /// `artikel`, or `enig-artikel` for a regulation's one article.
-    pub kind: String,
-    /// The article's place among the articles of the rendition, from 1.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub position: Option<u32>,
-    /// As printed. Absent where the register prints none.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub number: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    /// Structural path. Disambiguates a number an annex repeats.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    pub content: String,
-    pub excerpt: Excerpt,
-    pub leden: Vec<Lid>,
-    /// The publication that produced this text, e.g. `stb-2023-41`, which is
-    /// where the transitional provisions are. `bron publication show` names its
-    /// document and where those bytes are served.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub amended_by: Option<String>,
-    /// What that publication did, in upstream's own words.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effect: Option<String>,
-    /// `nogniet` where the register publishes this provision and it has not
-    /// commenced. Absent where the provision is ordinary.
-    ///
-    /// Carried because 'this provision applies' and 'this provision has not
-    /// started' are different answers, and the text reads the same either way
-    /// to anyone not looking for it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    /// The day this article took the form it has here.
-    ///
-    /// For a repealed provision it is the day it went, which is the difference
-    /// between knowing a provision is gone and knowing when. Read from the
-    /// register's own `inwerking`, never derived from the rendition's window.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub in_force_from: Option<NaiveDate>,
-    /// The Juriconnect reference the register states for this article.
-    ///
-    /// The publisher's own citation string, taken rather than constructed, and
-    /// carrying this rendition's zicht and geldigheid dates. It is what Dutch
-    /// practice already cites with, so a consumer that speaks Juriconnect needs
-    /// no mapping from ours.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub jci: Option<String>,
-    pub provenance: Provenance,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Lid {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub number: Option<String>,
-    pub content: String,
-    pub excerpt: Excerpt,
-    /// The Juriconnect reference the register states for this lid.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub jci: Option<String>,
-}
-
-impl Article {
-    /// What a reader calls this article. See [`crate::service::Article::name`].
-    pub fn name(&self) -> String {
-        crate::service::name(
-            self.label.as_deref(),
-            self.number.as_deref(),
-            &self.kind,
-            self.position,
-        )
-    }
-
-    /// Whether this answer carries bytes bron did not cut out of a document it
-    /// hashed. See [`Caveat::UnverifiedSlice`].
-    ///
-    /// Read off the answer rather than off the flag that asked for it: a caveat
-    /// raised from `--raw` says something about the request, and only this says
-    /// something about what is in the envelope.
-    pub fn reports_a_slice(&self) -> bool {
-        self.provenance.frozen.reports()
-            && (self.excerpt.quotes() || self.leden.iter().any(|lid| lid.excerpt.quotes()))
-    }
-}
 
 // -- decisions -----------------------------------------------------------
 
@@ -960,32 +808,6 @@ mod tests {
             !json.contains("caveats"),
             "an empty caveat list is not shipped: {json}"
         );
-    }
-
-    /// Offsets alone by default. The slice is markup, it is megabytes over a
-    /// whole law, and a consumer that wants it asks.
-    #[test]
-    fn an_excerpt_carries_its_offsets_and_nothing_else_unasked() {
-        let excerpt = Excerpt {
-            start: 7108,
-            end: 15301,
-            text: None,
-        };
-        let json = serde_json::to_string(&excerpt).unwrap();
-
-        assert_eq!(json, r#"{"start":7108,"end":15301}"#);
-    }
-
-    #[test]
-    fn a_slice_that_was_asked_for_travels_beside_its_offsets() {
-        let excerpt = Excerpt {
-            start: 0,
-            end: 46,
-            text: Some("<lid><lidnr>1</lidnr><al>Eerste lid.</al></lid>".into()),
-        };
-        let json = serde_json::to_string(&excerpt).unwrap();
-
-        assert!(json.contains(r#""text":"<lid>"#), "{json}");
     }
 
     /// A limit the service knows about and this crate does not is carried
@@ -1249,23 +1071,10 @@ mod tests {
         assert!(!json.contains("provenance"), "{json}");
     }
 
-    /// Provenance names who froze the bytes. A slice cut from a document bron
-    /// holds is bron's own reading of bytes it hashed; one beside a span the
-    /// service serves is the service's word for what stands there. Those are
-    /// different claims, and the envelope says which one an answer is making.
+    /// Provenance names who froze the bytes: bron fetched them itself and
+    /// stamps when, which is what a reader checks a quotation against.
     #[test]
     fn provenance_says_who_froze_the_bytes() {
-        let served = Provenance::served(
-            BlobId::of(b"<toestand/>"),
-            "https://example.invalid/x.xml".into(),
-            11,
-        );
-        let json = serde_json::to_string(&served).unwrap();
-
-        assert!(json.contains(r#""frozen_by":"service""#), "{json}");
-        assert!(!json.contains("fetched_at"), "{json}");
-        assert!(served.frozen.reports());
-
         let ours = Provenance::frozen(
             &sources::Provenance {
                 blob: BlobId::of(b"<toestand/>"),
@@ -1281,6 +1090,5 @@ mod tests {
             json.contains(r#""fetched_at":"2026-08-20T09:00:00Z""#),
             "{json}"
         );
-        assert!(!ours.frozen.reports());
     }
 }

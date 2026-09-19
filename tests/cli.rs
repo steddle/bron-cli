@@ -612,21 +612,27 @@ async fn holding_two_articles_numbered_one() -> MockServer {
         "caveats": [two_articles_numbered_one()],
     });
 
+    // Asked for lid 2 the service answers the one article that carries it,
+    // and states the same caveat about the number.
+    let mut narrowed = answer.clone();
+    narrowed["data"]["articles"] = serde_json::json!([article("/Bijlage2/Artikel1", &["2"])]);
+
     let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0008691/articles"))
+        .and(query_param("number", "1"))
+        .and(query_param("paragraph", "2"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(narrowed.to_string(), "application/json"),
+        )
+        .mount(&server)
+        .await;
     Mock::given(method("GET"))
         .and(path("/api/v1/regulations/BWBR0008691/articles"))
         .and(query_param("number", "1"))
         .respond_with(
             ResponseTemplate::new(200).set_body_raw(answer.to_string(), "application/json"),
         )
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(format!("/api/v1/blobs/{EARLIER_BLOB}/provenance")))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
-            "application/json",
-        ))
         .mount(&server)
         .await;
     server
@@ -647,7 +653,10 @@ async fn a_number_naming_two_articles_is_said_once() {
     let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
 
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(envelope["data"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        envelope["data"]["articles"].as_array().map(Vec::len),
+        Some(2)
+    );
     assert_eq!(
         envelope["caveats"],
         serde_json::json!([two_articles_numbered_one()])
@@ -1122,7 +1131,7 @@ async fn an_article_without_a_number_does_not_break_the_answer() {
     let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
     let envelope: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
     assert!(json.status.success(), "{json:?}");
-    let articles = envelope["data"].as_array().unwrap();
+    let articles = envelope["data"]["articles"].as_array().unwrap();
     assert_eq!(articles.len(), 3, "{envelope}");
     assert_eq!(articles[0]["number"], "3:280", "{envelope}");
     assert!(articles[1].get("number").is_none(), "{envelope}");
@@ -1717,4 +1726,206 @@ async fn law_parts_prints_no_source_where_the_rendition_names_no_blob() {
 
     assert!(output.status.success(), "{output:?}");
     assert!(!text.contains("source:"), "{text}");
+}
+
+/// One article of BWBR0005289 with two leden, as the service answers it. A
+/// field and a caveat this build has no name for ride along.
+const ARTICLE: &str = r#"{"bron":1,"grade":"authority","as_of":"2019-06-01","as_known_on":"2026-09-19",
+ "data":{"regulation_id":"BWBR0005289",
+  "expression":{"regulation_id":"BWBR0005289","label":"2019-04-01_0","in_force":{"from":"2019-04-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches","blob":"35e29887c98339a23c835cd45fa22c0569f2db6e7d05fbca6c8de0d4fb15a0fb","later_field":7},
+  "articles":[{"kind":"artikel","position":3,"number":"3","label":"Artikel 3","path":"/Boek6/Artikel3","stam_id":"2760033","versie_id":"1","content_hash":"a61a",
+   "jci":"jci1.3:c:BWBR0005289&artikel=3","span":{"start":1000,"end":2000},
+   "rendered":"Een natuurlijke verbintenis is niet afdwingbaar.\nEen natuurlijke verbintenis bestaat:",
+   "paragraphs":[
+    {"number":"1","content_hash":"b1","rendered":"Een natuurlijke verbintenis is niet afdwingbaar.","jci":"jci1.3:c:BWBR0005289&artikel=3&lid=1","span":{"start":1100,"end":1150}},
+    {"number":"2","content_hash":"b2","rendered":"Een natuurlijke verbintenis bestaat:\na. wanneer de wet dat bepaalt;\nb. wanneer een morele plicht bestaat.","jci":"jci1.3:c:BWBR0005289&artikel=3&lid=2","span":{"start":1200,"end":1250}}]}]},
+ "caveats":[{"kind":"something_later","count":3}]}"#;
+
+/// `law show` is one call to the service, so `--json` is the envelope as sent,
+/// and a caveat this build has no name for keeps the name the service gave it.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_prints_the_envelope_the_service_sent() {
+    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", ARTICLE).await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "show",
+            "BWBR0005289",
+            "--article",
+            "3",
+            "--as-of",
+            "2019-06-01",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{ARTICLE}\n"));
+}
+
+/// Narrowing to a lid is the service's own: it answers the lid's span, its
+/// Juriconnect reference and its label, and a second implementation here would
+/// be a second rule.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_asks_the_service_for_one_lid() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0005289/articles"))
+        .and(query_param("number", "3"))
+        .and(query_param("paragraph", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(ARTICLE, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "BWBR0005289",
+            "--article",
+            "3",
+            "--paragraph",
+            "2",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// A lid the article does not carry is the service's not-found, with its code.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_for_a_lid_the_article_does_not_carry_is_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0005289/articles"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"paragraph_not_found","message":"no lid 9 of BWBR0005289 artikel 3","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "show",
+            "BWBR0005289",
+            "--article",
+            "3",
+            "--paragraph",
+            "9",
+        ],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "paragraph_not_found");
+}
+
+/// `--item` is a cut of the text the service answered, for a person reading a
+/// terminal: no route answers an item, and the span stays the lid's. `--json`
+/// is the envelope as sent, lid and all.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_item_cuts_what_a_person_reads_and_not_the_envelope() {
+    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", ARTICLE).await;
+    let args = [
+        "law",
+        "show",
+        "BWBR0005289",
+        "--article",
+        "3",
+        "--paragraph",
+        "2",
+        "--item",
+        "b",
+    ];
+
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+    assert!(human.status.success(), "{human:?}");
+    assert!(
+        text.contains("b. wanneer een morele plicht bestaat."),
+        "{text}"
+    );
+    assert!(!text.contains("a. wanneer de wet dat bepaalt;"), "{text}");
+
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    assert_eq!(stdout(&json), format!("{ARTICLE}\n"));
+}
+
+/// An item that is not there is exit 2, as a lid that is not there is, and it
+/// is refused whichever way the answer is printed.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_item_that_does_not_exist_is_not_found() {
+    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", ARTICLE).await;
+
+    for args in [
+        &[
+            "law",
+            "show",
+            "BWBR0005289",
+            "--article",
+            "3",
+            "--paragraph",
+            "2",
+            "--item",
+            "z",
+        ][..],
+        &[
+            "--json",
+            "law",
+            "show",
+            "BWBR0005289",
+            "--article",
+            "3",
+            "--paragraph",
+            "2",
+            "--item",
+            "z",
+        ][..],
+    ] {
+        let output = bron(&server, args).await;
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+    }
+}
+
+/// The heading of a lid answer says which lid, whether or not the service's
+/// own label for the article is there to carry it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lid_answer_says_which_lid_even_without_a_label() {
+    let unlabelled = ARTICLE.replace(r#""label":"Artikel 3","#, "");
+    assert_ne!(unlabelled, ARTICLE);
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0005289/articles",
+        &unlabelled,
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "BWBR0005289",
+            "--article",
+            "3",
+            "--paragraph",
+            "2",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.lines().any(|l| l == "3 lid 2"), "{text}");
 }
