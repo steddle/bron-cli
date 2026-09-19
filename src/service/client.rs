@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::error::{Fault, Outcome, from_source};
-use crate::sources::Client;
+use crate::sources::{Client, Refused};
 use crate::wire;
 
 use super::Service;
@@ -123,12 +123,9 @@ impl Stated {
         let fault = match self.kind.as_str() {
             "usage" => Fault::Usage(message),
             "not_found" => Fault::NotFound(message),
-            // Throttled and corpus are both the service failing to answer a
-            // question it understood, which is what upstream means from here.
-            _ => Fault::Upstream {
-                service: SERVICE,
-                source: anyhow::anyhow!("{message}"),
-            },
+            // Throttled, corpus and source are the service failing to answer
+            // a question it understood, which is what upstream means from here.
+            _ => Fault::Unanswered(message),
         };
 
         match self.code {
@@ -147,7 +144,7 @@ impl Service {
     ) -> Outcome<Answered<T>> {
         let fetched = client
             .fetch_answered(request)
-            .map_err(|e| from_source(SERVICE, e))?;
+            .map_err(|e| refused(e).unwrap_or_else(|e| from_source(SERVICE, e)))?;
 
         // An unknown variant is this build being behind rather than the
         // service being broken, and the two want different things done about
@@ -178,6 +175,24 @@ impl Service {
             Answer::Failed(stated) => Err(stated.into_fault()),
         }
     }
+}
+
+/// A 429 or a 503 whose body states the failure, as that failure with the
+/// delay the service named beside its words. Anything else is handed back.
+fn refused(error: anyhow::Error) -> Result<Fault, anyhow::Error> {
+    let Some(refusal) = error.downcast_ref::<Refused>() else {
+        return Err(error);
+    };
+    let Ok(Envelope::<serde::de::IgnoredAny> {
+        error: Some(mut stated),
+        ..
+    }) = serde_json::from_str(&refusal.body)
+    else {
+        return Err(error);
+    };
+
+    stated.message = format!("{} ({})", stated.message, refusal.sentence);
+    Ok(stated.into_fault())
 }
 
 #[cfg(test)]

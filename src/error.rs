@@ -18,7 +18,7 @@ use std::process::ExitCode;
 /// | 1 | usage: the command line was wrong |
 /// | 2 | not found: well-formed request, no such thing |
 /// | 3 | network: unreachable, timed out, refused |
-/// | 4 | upstream: reachable, but the answer could not be read |
+/// | 4 | upstream: reachable, but no answer came of it |
 /// | 5 | local: this machine could not do its part |
 pub mod exit {
     pub const OK: u8 = 0;
@@ -56,6 +56,13 @@ pub enum Fault {
         source: anyhow::Error,
     },
 
+    /// The service read the question and stated why it could not answer it:
+    /// its `throttled`, `corpus` or `source`. Exit 4 like [`Fault::Upstream`],
+    /// and not called unusable, because the answer was read. A stated `corpus`
+    /// such as `rendition_too_large` is not transient.
+    #[error("the service could not answer: {0}")]
+    Unanswered(String),
+
     /// bron could not do its own part on this machine.
     ///
     /// Not the network and not what came back over it: an HTTP client that
@@ -83,7 +90,7 @@ impl Fault {
             Self::Usage(_) => exit::USAGE,
             Self::NotFound(_) => exit::NOT_FOUND,
             Self::Network { .. } => exit::NETWORK,
-            Self::Upstream { .. } => exit::UPSTREAM,
+            Self::Upstream { .. } | Self::Unanswered(_) => exit::UPSTREAM,
             Self::Local(_) => exit::LOCAL,
             Self::Stated { fault, .. } => fault.exit_byte(),
         }
@@ -96,7 +103,7 @@ impl Fault {
             Self::Usage(_) => "usage",
             Self::NotFound(_) => "not_found",
             Self::Network { .. } => "network",
-            Self::Upstream { .. } => "upstream",
+            Self::Upstream { .. } | Self::Unanswered(_) => "upstream",
             Self::Local(_) => "local",
             Self::Stated { fault, .. } => fault.kind(),
         }

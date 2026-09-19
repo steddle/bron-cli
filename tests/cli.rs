@@ -899,27 +899,77 @@ async fn a_provision_not_yet_applied_is_not_said_to_be_in_force() {
     assert!(text.contains("stb-2026-219"), "{text}");
 }
 
-/// A 503 is read off the status: `upstream`, with the delay the service named.
-/// The body is not read, so its `code` stays the service's, as the contract
-/// states for every 429 and 503.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_service_unable_to_fetch_is_upstream_with_its_delay() {
+/// Runs one failing command against a service answering `status` with `body`,
+/// and a `Retry-After` where one is given. Returns the envelope and stderr.
+async fn failing(
+    status: u16,
+    retry_after: Option<&str>,
+    body: &str,
+) -> (Output, serde_json::Value, String) {
     let server = MockServer::start().await;
+    let mut response = ResponseTemplate::new(status).set_body_raw(body, "application/json");
+    if let Some(seconds) = retry_after {
+        response = response.insert_header("Retry-After", seconds);
+    }
     Mock::given(method("GET"))
         .and(path("/api/v1/regulations/BWBR0008691/articles"))
-        .respond_with(
-            ResponseTemplate::new(503)
-                .insert_header("Retry-After", "60")
-                .set_body_raw(
-                    r#"{"bron":1,"grade":"authority","error":{"kind":"source","code":"source_unavailable","message":"the register did not serve 2016-07-01_0","detail":[]}}"#,
-                    "application/json",
-                ),
-        )
+        .respond_with(response)
         .mount(&server)
         .await;
 
-    let output = bron(&server, &["--json", "law", "show", "BWBR0008691"]).await;
-    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let json = bron(&server, &["--json", "law", "show", "BWBR0008691"]).await;
+    let envelope = serde_json::from_str(&stdout(&json)).unwrap();
+    let human = bron(&server, &["law", "show", "BWBR0008691"]).await;
+    let said = String::from_utf8(human.stderr).unwrap();
+
+    (json, envelope, said)
+}
+
+/// A 503 carries the delay the service named and, where its body is the
+/// envelope, the code and the sentence the service stated.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_service_unable_to_fetch_says_so_with_its_code_and_its_delay() {
+    let (output, envelope, said) = failing(
+        503,
+        Some("60"),
+        r#"{"bron":1,"grade":"authority","error":{"kind":"source","code":"source_unavailable","message":"the register did not serve 2016-07-01_0","detail":[]}}"#,
+    )
+    .await;
+    let message = envelope["error"]["message"].as_str().unwrap();
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "upstream");
+    assert_eq!(envelope["error"]["code"], "source_unavailable");
+    assert!(
+        message.contains("the register did not serve 2016-07-01_0"),
+        "{envelope}"
+    );
+    assert!(message.contains("60s"), "{envelope}");
+    assert!(said.contains("the service could not answer: "), "{said}");
+}
+
+/// 'You were too fast' and 'everyone was' are two refusals under one status,
+/// and a person told the wrong one changes the wrong thing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spent_shared_budget_is_not_told_as_the_callers_own_limit() {
+    let (output, envelope, said) = failing(
+        429,
+        Some("30"),
+        r#"{"bron":1,"grade":"authority","error":{"kind":"throttled","code":"fetch_budget_spent","message":"the fetch budget every caller shares is spent","detail":[]}}"#,
+    )
+    .await;
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "fetch_budget_spent");
+    assert!(said.contains("every caller shares"), "{said}");
+    assert!(said.contains("30s"), "{said}");
+}
+
+/// A refusal whose body is no envelope, as an edge page is, is still the
+/// refusal with its delay, and carries no code nobody stated.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refusal_without_an_envelope_still_names_its_delay() {
+    let (output, envelope, _) = failing(503, Some("60"), "<html>Service Unavailable</html>").await;
 
     assert_eq!(output.status.code(), Some(4), "{output:?}");
     assert_eq!(envelope["error"]["kind"], "upstream");
@@ -931,6 +981,27 @@ async fn the_service_unable_to_fetch_is_upstream_with_its_delay() {
             .contains("60s"),
         "{envelope}"
     );
+}
+
+/// The service read the question and stated why it could not answer it. That
+/// is not an unusable response, and saying so reads to a pipeline as 'retry'.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_the_service_states_is_not_called_unusable() {
+    let (output, envelope, said) = failing(
+        500,
+        None,
+        r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"rendition_too_large","message":"BWBR0008691 rendition 2016-07-01_0 is longer than bron reads","detail":[]}}"#,
+    )
+    .await;
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "upstream");
+    assert_eq!(envelope["error"]["code"], "rendition_too_large");
+    assert!(
+        said.contains("the service could not answer: BWBR0008691 rendition 2016-07-01_0 is longer than bron reads"),
+        "{said}"
+    );
+    assert!(!said.contains("unusable"), "{said}");
 }
 
 /// A held rendition that was not parsed into articles has none to answer, and

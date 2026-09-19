@@ -130,11 +130,13 @@ Human output is rendered from the same answer the JSON came out of, so the two c
 1  usage
 2  not found      well-formed query, nothing of that name exists
 3  network        unreachable, timed out, refused
-4  upstream       reachable, but the answer could not be read
+4  upstream       reachable, but no answer came of it
 5  local          bron could not do its own part on this machine
 ```
 
 A 404 from upstream is a 2, not a 3. It's the service answering, and reporting it as transport has a pipeline retry something that will never exist.
+
+Exit 4 is not always worth retrying. Where the service stated why it could not answer, `error.code` says which: `rate_limited` is your own limit and `fetch_budget_spent` a budget every caller shares, both with the delay the service named, and a `corpus` code such as `rendition_too_large` or `rendition_unreadable` is a fact about that rendition that no retry changes.
 
 `grade` says where an answer's authority comes from. Every source bron reads speaks with its own force, so it is always `authority`; it's stated rather than left implicit because a claim's grade is the one field a consumer should never infer.
 

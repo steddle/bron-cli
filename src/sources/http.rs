@@ -223,15 +223,23 @@ impl Client {
                         .context(BUDGET)?
                         .as_secs()
                 ),
-                None => match backoff {
-                    Refusal::After(wait) => anyhow::bail!(
-                        "{host} refused the request and asked for {}s",
-                        wait.as_secs()
-                    ),
-                    Refusal::Unstated => {
-                        anyhow::bail!("{host} refused the request and named no delay")
-                    }
-                },
+                None => {
+                    let sentence = match backoff {
+                        Refusal::After(wait) => {
+                            format!(
+                                "{host} refused the request and asked for {}s",
+                                wait.as_secs()
+                            )
+                        }
+                        Refusal::Unstated => {
+                            format!("{host} refused the request and named no delay")
+                        }
+                    };
+                    // The body may be the envelope stating which refusal this
+                    // is. A body that cannot be read leaves the sentence alone.
+                    let body = response.text().unwrap_or_default();
+                    return Err(Refused { sentence, body }.into());
+                }
             }
         }
 
@@ -285,6 +293,17 @@ fn decoded(raw: FetchedBytes) -> Result<Fetched> {
         text,
         url: raw.url,
     })
+}
+
+/// A 429 or a 503 from a host that speaks the bron envelope, and the body it
+/// came with. The status and the delay are the refusal; the body, where it
+/// is the envelope, says which one it was.
+#[derive(Debug, thiserror::Error)]
+#[error("{sentence}")]
+pub struct Refused {
+    /// The refusal in words, with the delay the host named.
+    pub sentence: String,
+    pub body: String,
 }
 
 /// How a host qualified its refusal: it either asked for a delay or named

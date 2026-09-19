@@ -11,7 +11,7 @@ pub mod rechtspraak;
 mod http;
 mod xml;
 
-pub use http::{Client, Fetched, FetchedBytes};
+pub use http::{Client, Fetched, FetchedBytes, Refused};
 
 use chrono::NaiveDate;
 
