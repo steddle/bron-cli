@@ -22,6 +22,12 @@ const READING: usize = 8;
 const SOURCE: usize = 11;
 const NOT_HELD: &str = "not held";
 
+/// Column widths for a list of renditions: the longest window, `from` and
+/// `until`; the longest hash state, `unchecked`; and an image count.
+const WINDOW: usize = 24;
+const HASH_CHECK: usize = 9;
+const IMAGES: usize = 10;
+
 /// Writes one answer for a person.
 ///
 /// Where stdout carries rows, one per thing listed, every note on them goes to
@@ -176,18 +182,33 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
         Answer::Versions(a) => {
             for version in &a.data {
                 let held = if version.held { "*" } else { " " };
-                write!(
-                    out,
-                    "{held} {}  {}",
+                // The service states images for held text only, so of a
+                // rendition it does not hold the count is unknown, not zero.
+                let images = if version.held {
+                    format!("{} images", version.images.len())
+                } else {
+                    String::new()
+                };
+                let mut row = format!(
+                    "{held} {}  {:<WINDOW$}  {:<HASH_CHECK$}  {images:<IMAGES$}",
                     version.label,
-                    window(version.in_force.from, version.in_force.until)
-                )?;
-                match &version.unread_because {
-                    Some(because) => writeln!(out, "  unread: {because}")?,
-                    None => writeln!(out)?,
+                    window(version.in_force.from, version.in_force.until),
+                    version.upstream_hash_check,
+                );
+                if let Some(because) = &version.unread_because {
+                    row.push_str(&format!("  unread: {because}"));
                 }
+                if let Some(title) = &version.regulation_title {
+                    row.push_str(&format!("  {title}"));
+                }
+                writeln!(out, "{}", row.trim_end())?;
             }
             writeln!(err, "* = the service holds this text")?;
+            writeln!(
+                err,
+                "matches, differs, rewritten, absent, unchecked = what the publisher's hash says \
+                 of the held bytes"
+            )?;
             if a.data
                 .iter()
                 .any(|version| version.unread_because.is_some())

@@ -1439,3 +1439,51 @@ async fn law_changes_for_a_unit_in_neither_rendition_is_not_found() {
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     assert_eq!(envelope["error"]["code"], "article_not_found");
 }
+
+/// What the service states per rendition reaches a person on that rendition's
+/// row: the name the register gave the regulation that day, what the
+/// publisher's hash says of the held bytes, and how many images it prints.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_versions_carries_the_title_the_hash_and_the_images() {
+    const VERSIONS: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"regulation_id":"BWBR0001941","label":"2026-09-17_0","regulation_title":"Opiumwet","in_force":{"from":"2026-09-17"},"withdrawn":false,"held":true,"upstream_hash_check":"matches",
+          "images":[{"name":"272866.png","blob":"225d1cedd0e062c153a163b13180192af4d7f541b9ac7e2ecefb971a27ff4721"},{"name":"272867.png","blob":"89282172ef556d917c6a4c120136c4559574accad09f9e97559a028973973266"}]},
+         {"regulation_id":"BWBR0001941","label":"1928-12-12_0","regulation_title":"Opiumwet 1928","in_force":{"from":"1928-12-12","until":"1976-10-31"},"withdrawn":false,"held":true,"upstream_hash_check":"differs"},
+         {"regulation_id":"BWBR0001941","label":"1976-11-01_0","in_force":{"from":"1976-11-01","until":"1985-01-01"},"withdrawn":false,"held":false,"upstream_hash_check":"unchecked"}]}"#;
+
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0001941/expressions",
+        VERSIONS,
+    )
+    .await;
+
+    let output = bron(&server, &["law", "versions", "BWBR0001941"]).await;
+    let text = stdout(&output);
+    let err = String::from_utf8_lossy(&output.stderr);
+    let row = |label: &str| text.lines().find(|l| l.contains(label)).unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(text.lines().count(), 3, "{text}");
+
+    assert!(row("2026-09-17_0").contains("matches"), "{text}");
+    assert!(row("2026-09-17_0").contains("2 images"), "{text}");
+    assert!(row("2026-09-17_0").ends_with("Opiumwet"), "{text}");
+
+    assert!(row("1928-12-12_0").contains("differs"), "{text}");
+    assert!(row("1928-12-12_0").contains("0 images"), "{text}");
+    assert!(row("1928-12-12_0").ends_with("Opiumwet 1928"), "{text}");
+
+    // Nothing held, so nothing is known about its images.
+    assert!(!row("1976-11-01_0").contains("images"), "{text}");
+    assert!(row("1976-11-01_0").contains("unchecked"), "{text}");
+
+    // Each state starts in the same place, whatever the window before it.
+    assert_eq!(
+        row("2026-09-17_0").find("matches"),
+        row("1928-12-12_0").find("differs"),
+        "{text}"
+    );
+
+    assert!(err.contains("publisher's hash"), "{err}");
+}
