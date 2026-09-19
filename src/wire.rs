@@ -181,6 +181,20 @@ pub enum Caveat {
     /// by identifier, which is the route that does not go through a vector.
     UnrankableTexts { scope: String, count: u32 },
 
+    /// Words of the question full text did not search: too common to fit its
+    /// bound, or past the words it considers, as the lexemes the `dutch`
+    /// configuration makes of them. The vector list read the whole question.
+    WordsUnsearched { words: Vec<String> },
+
+    /// A treaty prints `number` in its authentic text and in a translation,
+    /// and the authentic text is what answered. `lang` names the languages the
+    /// translations stand in and `paths` where each is printed.
+    TranslationLeftOut {
+        number: String,
+        lang: Vec<String>,
+        paths: Vec<String>,
+    },
+
     /// Texts too long to index for full text, held whole and found by no word
     /// in them. `scope` is `corpus`, as on [`Caveat::UnrankableTexts`]. They
     /// stay answerable by identifier.
@@ -420,6 +434,14 @@ impl Caveat {
                 scope: String,
                 count: u32,
             },
+            WordsUnsearched {
+                words: Vec<String>,
+            },
+            TranslationLeftOut {
+                number: String,
+                lang: Vec<String>,
+                paths: Vec<String>,
+            },
             SeveralReadings {
                 readings: Vec<String>,
                 #[serde(default)]
@@ -486,6 +508,16 @@ impl Caveat {
             }
             Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
             Ok(Stated::TextsUnindexed { scope, count }) => Self::TextsUnindexed { scope, count },
+            Ok(Stated::WordsUnsearched { words }) => Self::WordsUnsearched { words },
+            Ok(Stated::TranslationLeftOut {
+                number,
+                lang,
+                paths,
+            }) => Self::TranslationLeftOut {
+                number,
+                lang,
+                paths,
+            },
             Ok(Stated::TableFlattened {
                 articles,
                 cell_separator,
@@ -895,6 +927,44 @@ mod tests {
         );
     }
 
+    /// The words full text did not search are the answer's to state: a reader
+    /// who does not know which words were dropped cannot tell a thin ranking
+    /// from a thin corpus.
+    #[test]
+    fn the_words_full_text_did_not_search_are_read_by_name() {
+        assert_eq!(
+            Caveat::stated(&serde_json::json!({
+                "kind": "words_unsearched",
+                "words": ["van", "de"]
+            })),
+            Caveat::WordsUnsearched {
+                words: vec!["van".into(), "de".into()],
+            }
+        );
+    }
+
+    /// A treaty prints one number twice, in its authentic text and in a
+    /// translation, and which was answered is a fact about the answer.
+    #[test]
+    fn a_translation_left_out_is_read_with_its_languages_and_paths() {
+        assert_eq!(
+            Caveat::stated(&serde_json::json!({
+                "kind": "translation_left_out",
+                "number": "3",
+                "lang": ["nl", "fr"],
+                "paths": ["/Verdragtekst2/Artikel3", "/Verdragtekst3/Artikel3"]
+            })),
+            Caveat::TranslationLeftOut {
+                number: "3".into(),
+                lang: vec!["nl".into(), "fr".into()],
+                paths: vec![
+                    "/Verdragtekst2/Artikel3".into(),
+                    "/Verdragtekst3/Artikel3".into()
+                ],
+            }
+        );
+    }
+
     /// Where the register gives one name to several regulations, the service
     /// names them, and the reading keeps them.
     #[test]
@@ -993,6 +1063,13 @@ mod tests {
             serde_json::json!({"kind": "lanes_unsearched", "lanes": ["rechtspraak"]}),
             serde_json::json!({"kind": "unrankable_texts", "scope": "corpus", "count": 64}),
             serde_json::json!({"kind": "texts_unindexed", "scope": "corpus", "count": 3}),
+            serde_json::json!({"kind": "words_unsearched", "words": ["van", "de"]}),
+            serde_json::json!({
+                "kind": "translation_left_out",
+                "number": "3",
+                "lang": ["nl"],
+                "paths": ["/Verdragtekst2/Artikel3"],
+            }),
             serde_json::json!({"kind": "several_readings", "readings": ["book", "literal"]}),
             serde_json::json!({
                 "kind": "several_readings",

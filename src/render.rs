@@ -751,6 +751,25 @@ fn caveat_line(caveat: &Caveat) -> String {
              take them in one input, so no ranking reaches them. They are answered by \
              identifier.",
         ),
+        // The words rather than a count: which words went unsearched is what
+        // says whether to ask again in other words.
+        Caveat::WordsUnsearched { words } => format!(
+            "note: full text did not search {}: too common, or past the words it takes. The \
+             ranking read the whole question, so a hit found only by words may be missing.",
+            words.join(", "),
+        ),
+        // The text answered is the authentic one, which is the text that binds.
+        // The translation is named rather than silently passed over.
+        Caveat::TranslationLeftOut {
+            number,
+            lang,
+            paths,
+        } => format!(
+            "note: the treaty prints {number} in its authentic text and in a translation ({}). \
+             The authentic text is answered; the translation stands at {}.",
+            lang.join(", "),
+            paths.join(", "),
+        ),
         Caveat::TextsUnindexed { scope, count } => format!(
             "note: {count} text(s) in the {scope} are too long to index for full text, so no \
              word in them finds them. They are answered by identifier.",
@@ -972,6 +991,34 @@ mod tests {
         assert!(note.contains("do not apply yet"), "{note}");
         assert!(note.contains("as the rendition prints"), "{note}");
         assert!(!note.contains("will have"), "{note}");
+    }
+
+    /// The words are named, because which of them went unsearched is what
+    /// tells a reader whether to ask again in other words.
+    #[test]
+    fn the_words_full_text_did_not_search_are_named() {
+        let note = caveat_line(&Caveat::WordsUnsearched {
+            words: vec!["van".into(), "de".into()],
+        });
+
+        assert!(note.contains("van, de"), "{note}");
+        assert!(note.contains("ranking read the whole question"), "{note}");
+    }
+
+    /// The text answered is the authentic one, and the note says a translation
+    /// stands beside it rather than leaving a reader to find out.
+    #[test]
+    fn a_translation_left_out_names_the_number_and_the_languages() {
+        let note = caveat_line(&Caveat::TranslationLeftOut {
+            number: "3".into(),
+            lang: vec!["nl".into()],
+            paths: vec!["/Verdragtekst2/Artikel3".into()],
+        });
+
+        assert!(note.contains("3"), "{note}");
+        assert!(note.contains("nl"), "{note}");
+        assert!(note.contains("authentic"), "{note}");
+        assert!(note.contains("/Verdragtekst2/Artikel3"), "{note}");
     }
 
     /// Texts no word finds are named apart from texts no vector ranks: a reader
