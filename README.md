@@ -144,7 +144,7 @@ Exit 4 is not always worth retrying. Where the service stated why it could not a
 
 `bron law` reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. Fetch those bytes, hash them, slice them, and either they say what bron said or they do not. `provenance.frozen_by` says who froze them: `bron`, for a decision or a publication it fetched itself, or `service`.
+Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. Fetch those bytes, hash them, slice them, and either they say what bron said or they do not. In the wetgeving lane the service froze them and names the digest; a decision or a publication is one bron fetched and hashed itself, and `provenance.frozen_by` on those answers says so and states when.
 
 ```
 bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
