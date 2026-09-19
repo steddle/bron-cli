@@ -94,7 +94,6 @@ pub struct Cited {
     /// What limits this reading in particular, as against the answer as a
     /// whole. The rendition it resolved to may be one the publisher does not
     /// vouch for, or one of several covering the date.
-    #[serde(default)]
     pub caveats: Vec<serde_json::Value>,
 }
 
@@ -106,7 +105,10 @@ pub struct SearchHit {
     pub unit: String,
     pub regulation_id: String,
     pub expression: String,
-    pub number: String,
+    /// The element the unit was read from: `artikel`, `bijlage`, `aanhef`.
+    pub kind: String,
+    /// Absent where the register prints none.
+    pub number: Option<String>,
     pub label: Option<String>,
     pub path: Option<String>,
     pub content_hash: String,

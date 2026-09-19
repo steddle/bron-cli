@@ -67,7 +67,12 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                             hit.source,
                             unit,
                             hit.regulation_id,
-                            hit.label.as_deref().unwrap_or(&hit.number),
+                            bron::service::name(
+                                hit.label.as_deref(),
+                                hit.number.as_deref(),
+                                &hit.kind,
+                                None,
+                            ),
                         )?;
                     }
                 }
@@ -128,7 +133,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 writeln!(
                     out,
                     "{held} {}  {}  {}",
-                    rendition.regulation_id.as_deref().unwrap_or(""),
+                    rendition.regulation_id,
                     rendition.label,
                     window(rendition.in_force.from, rendition.in_force.until)
                 )?;
@@ -214,8 +219,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             }
 
             for article in articles {
-                let label = article.label.as_deref().unwrap_or(&article.number);
-                write!(out, "{label}")?;
+                write!(out, "{}", article.name())?;
                 if let Some(title) = &article.title {
                     write!(out, "  {title}")?;
                 }
@@ -288,7 +292,11 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             )?;
 
             for article in &changes.articles {
-                let label = article.label.as_deref().unwrap_or(&article.number);
+                let label = article
+                    .label
+                    .as_deref()
+                    .or(article.number.as_deref())
+                    .unwrap_or_default();
                 writeln!(out, "{:<10} {label}", article.change.to_uppercase())?;
 
                 if let Some(after) = &article.after

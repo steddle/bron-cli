@@ -2,7 +2,9 @@
 //!
 //! Received shapes and nothing else: no rendering, no policy, no decisions.
 //! Only the fields bron reads are named, so a field the service adds later does
-//! not break a build here.
+//! not break a build here. A named field is required exactly where
+//! `public/openapi.json` requires it: the service leaves a null out, so a field
+//! the document does not require is absent on some row of some answer.
 
 use chrono::NaiveDate;
 use serde::Deserialize;
@@ -31,14 +33,19 @@ pub struct Regulation {
 pub struct Expression {
     /// Stated on every rendition, so a row lifted out of a corpus-wide answer
     /// keeps saying which regulation it belongs to.
-    #[serde(default)]
-    pub regulation_id: Option<String>,
+    pub regulation_id: String,
     pub label: String,
+    /// What the register calls the regulation, stated on a list of renditions.
+    pub regulation_title: Option<String>,
     pub in_force: Window,
     /// Absent where the manifest carried no zicht dates, and never filled in
     /// from `in_force`.
     pub as_known: Option<Window>,
     pub upstream_hash: Option<String>,
+    /// What the publisher's hash says about the held bytes: `matches`,
+    /// `differs`, `rewritten`, `absent` or `unchecked`, read as a string so a
+    /// state added later crosses.
+    pub upstream_hash_check: String,
     /// The size the manifest states, which is not the length of the document
     /// the spans point into. See [`BlobProvenance`].
     pub size: Option<u64>,
@@ -50,6 +57,16 @@ pub struct Expression {
     #[serde(default)]
     pub unread_because: Option<String>,
     pub blob: Option<String>,
+    /// The images the rendition prints beside its text.
+    #[serde(default)]
+    pub images: Vec<Image>,
+}
+
+/// One image a rendition prints, named as the manifest lists it.
+#[derive(Debug, Deserialize)]
+pub struct Image {
+    pub name: String,
+    pub blob: String,
 }
 
 /// One thing the register did, in the order the corpus saw it.
@@ -91,16 +108,24 @@ pub struct Articles {
     pub articles: Vec<Article>,
 }
 
-/// One article, where it sits in the frozen bytes, and what stands there.
+/// One unit of text, where it sits in the frozen bytes, and what stands there.
+///
+/// On `/articles` an article; on `/parts` and `/changes` a unit of any kind.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Article {
-    pub number: String,
+    /// The element the text was read from: `artikel`, `bijlage`, `aanhef`.
+    pub kind: String,
+    /// Its place among the units of its kind in the rendition, from 1.
+    pub position: Option<u32>,
+    /// Absent where the register prints none, as on an aanhef and on some
+    /// articles: BWBR0020368 on 2015-01-01 holds one.
+    pub number: Option<String>,
     pub label: Option<String>,
     pub title: Option<String>,
     pub path: Option<String>,
     /// The publisher's stable identity for this article across renditions,
     /// which is what makes a comparison an identity match rather than a guess.
-    pub stam_id: Option<String>,
+    pub stam_id: String,
     pub amended_by: Option<String>,
     pub effect: Option<String>,
     pub status: Option<String>,
@@ -113,7 +138,39 @@ pub struct Article {
     /// for them. On the service's word: checking it means fetching the blob it
     /// was cut from, and not having to is why it is here.
     pub raw: Option<String>,
+    /// The file each image the unit prints is named by, in the order printed.
+    #[serde(default)]
+    pub images: Vec<String>,
+    #[serde(default)]
     pub paragraphs: Vec<Paragraph>,
+}
+
+impl Article {
+    /// What a reader calls this unit: its label, else its number, else its
+    /// kind and place, so a unit that prints neither is still named.
+    pub fn name(&self) -> String {
+        name(
+            self.label.as_deref(),
+            self.number.as_deref(),
+            &self.kind,
+            self.position,
+        )
+    }
+}
+
+/// See [`Article::name`].
+pub fn name(
+    label: Option<&str>,
+    number: Option<&str>,
+    kind: &str,
+    position: Option<u32>,
+) -> String {
+    match (label, number, position) {
+        (Some(label), _, _) => label.to_string(),
+        (None, Some(number), _) => number.to_string(),
+        (None, None, Some(position)) => format!("{kind} {position}"),
+        (None, None, None) => kind.to_string(),
+    }
 }
 
 /// One lid, as the register numbers it.

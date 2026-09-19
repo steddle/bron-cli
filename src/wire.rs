@@ -656,7 +656,14 @@ impl From<crate::service::Window> for Window {
 pub struct Article {
     pub law_id: String,
     pub version: String,
-    pub number: String,
+    /// `artikel`, or `enig-artikel` for a regulation's one article.
+    pub kind: String,
+    /// The article's place among the articles of the rendition, from 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<u32>,
+    /// As printed. Absent where the register prints none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -726,7 +733,8 @@ pub struct ArticleChange {
     /// the earlier side to `goed` on the later, and the day is the later side's
     /// `in_force_from` where the register states one.
     pub change: &'static str,
-    pub number: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -760,6 +768,16 @@ pub struct Side {
 }
 
 impl Article {
+    /// What a reader calls this article. See [`crate::service::Article::name`].
+    pub fn name(&self) -> String {
+        crate::service::name(
+            self.label.as_deref(),
+            self.number.as_deref(),
+            &self.kind,
+            self.position,
+        )
+    }
+
     /// Whether this answer carries bytes bron did not cut out of a document it
     /// hashed. See [`Caveat::UnverifiedSlice`].
     ///

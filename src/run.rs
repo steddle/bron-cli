@@ -142,8 +142,9 @@ fn narrow(
                     Fault::not_found(
                         "item",
                         format!(
-                            "{letter} of {} article {} lid {number}",
-                            article.law_id, article.number
+                            "{letter} of {} {} lid {number}",
+                            article.law_id,
+                            article.name()
                         ),
                     )
                 })?;
@@ -273,7 +274,7 @@ fn lid(lid: &service::Paragraph) -> String {
 /// One article in the terms a comparison is made in.
 fn compared_article(article: &service::Article) -> diff::Article {
     diff::Article {
-        stam_id: article.stam_id.clone(),
+        stam_id: Some(article.stam_id.clone()),
         number: article.number.clone(),
         label: article.label.clone(),
         path: article.path.clone(),
@@ -299,6 +300,8 @@ fn article(
     wire::Article {
         law_id: law.to_string(),
         version: version.to_string(),
+        kind: article.kind.clone(),
+        position: article.position,
         number: article.number.clone(),
         label: article.label.clone(),
         title: article.title.clone(),
@@ -436,7 +439,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                     .articles
                     .iter()
                     .chain(&after.articles)
-                    .any(|article| article.number == number)
+                    .any(|article| article.number.as_deref() == Some(number))
             {
                 return Err(Fault::not_found(
                     "article",
@@ -469,7 +472,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 // about and not of the whole regulation.
                 if wanted
                     .as_deref()
-                    .is_some_and(|number| change.number != number)
+                    .is_some_and(|number| change.number.as_deref() != Some(number))
                 {
                     continue;
                 }
@@ -824,11 +827,13 @@ mod reading_tests {
 
     fn article(leden: Vec<Paragraph>) -> Article {
         Article {
-            number: "162".into(),
+            kind: "artikel".into(),
+            position: None,
+            number: Some("162".into()),
             label: None,
             title: None,
             path: None,
-            stam_id: Some("1".into()),
+            stam_id: "1".into(),
             amended_by: None,
             effect: None,
             status: None,
@@ -836,6 +841,7 @@ mod reading_tests {
             jci: None,
             span: Span { start: 0, end: 1 },
             raw: None,
+            images: Vec::new(),
             paragraphs: leden,
         }
     }
@@ -905,7 +911,9 @@ mod narrow_tests {
         Article {
             law_id: "BWBR0005289".into(),
             version: "2024-01-01_0".into(),
-            number: "3".into(),
+            kind: "artikel".into(),
+            position: None,
+            number: Some("3".into()),
             label: Some("Artikel 3".into()),
             title: None,
             path: None,

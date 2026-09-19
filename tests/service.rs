@@ -70,6 +70,7 @@ const ANSWER: &str = r#"{
   "data": {
     "regulation_id": "BWBR0008691",
     "expression": {
+      "regulation_id": "BWBR0008691",
       "label": "2016-07-01_0",
       "in_force": {"from": "2016-07-01", "until": "2018-12-31"},
       "as_known": {"from": "2016-07-01"},
@@ -81,6 +82,7 @@ const ANSWER: &str = r#"{
       "blob": "35e29887c98339a23c835cd45fa22c0569f2db6e7d05fbca6c8de0d4fb15a0fb"
     },
     "articles": [{
+      "kind": "artikel",
       "number": "1",
       "label": "Artikel 1",
       "stam_id": "2760033",
@@ -211,7 +213,7 @@ fn asking_for(term: &str) -> SearchRequest {
 
 const RANKING: &str = r#"{"bron":1,"grade":"authority","data":{"kind":"ranking",
     "searched":["wetgeving"],
-    "hits":[{"source":"wetgeving","unit":"article","regulation_id":"BWBR0005289",
+    "hits":[{"source":"wetgeving","unit":"article","kind":"artikel","regulation_id":"BWBR0005289",
              "expression":"2026-07-16_0","number":"162","label":"Artikel 162","path":null,
              "content_hash":"a61a","distance":0.21}]},
   "caveats":[{"kind":"truncated","window":20}]}"#;
@@ -426,7 +428,7 @@ async fn a_question_is_still_ranked() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hit_only_the_words_found_may_carry_no_distance() {
     const WORDS_ONLY: &str = r#"{"bron":1,"grade":"authority","data":{"kind":"ranking",
-        "searched":["wetgeving"],"hits":[{"source":"wetgeving","unit":"article",
+        "searched":["wetgeving"],"hits":[{"source":"wetgeving","unit":"article","kind":"artikel",
         "regulation_id":"BWBR0005290","expression":"2026-07-01_0","number":"18",
         "label":"Artikel 18","content_hash":"b7c2","places":1,"found_by":["text"]}]}}"#;
 
@@ -504,7 +506,7 @@ async fn a_broken_ranking_is_reported_against_the_ranking() {
         .expect("a broken ranking must not read as success")
     }
 
-    let hit = r#"{"source":"wetgeving","unit":"article","regulation_id":"BWBR0005289",
+    let hit = r#"{"source":"wetgeving","unit":"article","kind":"artikel","regulation_id":"BWBR0005289",
                   "expression":"2026-07-16_0","number":"162","label":"Artikel 162","path":null,
                   "content_hash":"a61a""#;
 

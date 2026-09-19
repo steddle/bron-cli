@@ -29,8 +29,8 @@ use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Article, Articles, Ask, BlobProvenance, Expression, Feed, Paragraph, Published, RegisterEvent,
-    Regulation, Span, Window,
+    Article, Articles, Ask, BlobProvenance, Expression, Feed, Image, Paragraph, Published,
+    RegisterEvent, Regulation, Span, Window, name,
 };
 pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -140,7 +140,11 @@ impl Service {
     /// A window is required and both axes may be named at once. The service
     /// defaults nothing to today, so a window that has not happened answers
     /// empty rather than silently becoming a question about now.
-    pub fn published(&self, client: &Client, ask: &Published<'_>) -> Outcome<Answered<Vec<Expression>>> {
+    pub fn published(
+        &self,
+        client: &Client,
+        ask: &Published<'_>,
+    ) -> Outcome<Answered<Vec<Expression>>> {
         let url = format!("{}/api/v1/expressions", self.base);
 
         let mut query = vec![("limit", ask.limit.to_string())];
@@ -177,10 +181,7 @@ impl Service {
     ) -> Outcome<Answered<Feed>> {
         let url = format!("{}/api/v1/feed", self.base);
 
-        let mut query = vec![
-            ("since", since.to_string()),
-            ("limit", limit.to_string()),
-        ];
+        let mut query = vec![("since", since.to_string()), ("limit", limit.to_string())];
 
         if let Some(law) = regulation {
             query.push(("regulation", law.to_string()));

@@ -27,7 +27,8 @@ use std::collections::{HashMap, HashSet};
 pub struct Article {
     /// Upstream's identity for this article across renditions.
     pub stam_id: Option<String>,
-    pub number: String,
+    /// Absent where the register prints none.
+    pub number: Option<String>,
     pub label: Option<String>,
     pub path: Option<String>,
     pub title: Option<String>,
@@ -105,7 +106,7 @@ impl Change {
 #[derive(Debug, Clone)]
 pub struct ArticleChange {
     pub change: Change,
-    pub number: String,
+    pub number: Option<String>,
     pub label: Option<String>,
     pub path: Option<String>,
     /// Where it sits in the earlier rendition. Absent when it did not exist yet.
@@ -282,7 +283,7 @@ mod tests {
     fn article(stam: &str, number: &str, text: &str, effect: &str) -> Article {
         Article {
             stam_id: Some(stam.into()),
-            number: number.into(),
+            number: Some(number.into()),
             label: Some(format!("Artikel {number}")),
             path: Some(format!("/Boek6/Artikel{number}")),
             title: None,
@@ -346,7 +347,7 @@ mod tests {
         comparison
             .changes
             .iter()
-            .find(|c| c.number == number)
+            .find(|c| c.number.as_deref() == Some(number))
             .unwrap()
             .change
     }
@@ -473,7 +474,7 @@ mod tests {
 
         assert_eq!(comparison.changes.len(), 1);
         assert_eq!(comparison.changes[0].change, Change::Unchanged);
-        assert_eq!(comparison.changes[0].number, "196c");
+        assert_eq!(comparison.changes[0].number.as_deref(), Some("196c"));
     }
 
     /// Nothing says whether an article with no identity on one side is the same

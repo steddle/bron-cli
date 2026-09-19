@@ -41,14 +41,14 @@ fn stdout(output: &Output) -> String {
 /// it is the service's, and re-serialising would lose every one of them.
 const LOOKUP: &str = r#"{"bron":1,  "grade":"authority","as_of":"2019-06-01","as_known_on":"2020-01-01",
  "data":{"kind":"lookup","citation":"6:162","later_field":{"x":1},
-  "resolved":[{"reading":"book","source":"wetgeving","regulation_id":"BWBR0005289","expression":"2019-04-01_0","held":true,"number":"162","label":"Artikel 162","content_hash":"f8125445"}]},
+  "resolved":[{"reading":"book","source":"wetgeving","regulation_id":"BWBR0005289","expression":"2019-04-01_0","held":true,"upstream_hash_check":"matches","number":"162","label":"Artikel 162","content_hash":"f8125445","caveats":[]}]},
  "caveats":[{"kind":"something_later","count":3,"labels":["a","b"]}]}"#;
 
 const REGULATIONS: &str = r#"{"bron":1,"grade":"authority",
  "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","later_field":true}]}"#;
 
 const EXPRESSIONS: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"size":49606,"withdrawn":false,"held":true,"upstream_hash_check":"matches","blob":"35e2"}]}"#;
+ "data":[{"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"size":49606,"withdrawn":false,"held":true,"upstream_hash_check":"matches","blob":"35e2"}]}"#;
 
 async fn answering(verb: &str, route: &str, body: &str) -> MockServer {
     let server = MockServer::start().await;
@@ -227,11 +227,11 @@ async fn a_person_reads_both_coordinates_the_service_bound_the_answer_to() {
 /// A field and a caveat this build has no name for, on both new routes, so the
 /// pass-through is proved by what survives rather than by what is read.
 const PUBLISHED: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true,"later_field":9}],
+ "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true,"upstream_hash_check":"matches","later_field":9}],
  "caveats":[{"kind":"something_later","window":50}]}"#;
 
 const PUBLISHED_CUT: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true}],
+ "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true,"upstream_hash_check":"matches"}],
  "caveats":[{"kind":"truncated","window":1}]}"#;
 
 const FEED: &str = r#"{"bron":1,"grade":"authority",
@@ -456,6 +456,7 @@ fn articles_of(as_of: &str, label: &str, blob: &str, text: &str) -> String {
         "data": {
             "regulation_id": "BWBR0008691",
             "expression": {
+                "regulation_id": "BWBR0008691",
                 "label": label,
                 "in_force": {"from": &label[..10]},
                 "held": true,
@@ -463,6 +464,7 @@ fn articles_of(as_of: &str, label: &str, blob: &str, text: &str) -> String {
                 "blob": blob,
             },
             "articles": [{
+                "kind": "artikel",
                 "number": "1",
                 "label": "Artikel 1",
                 "stam_id": "2760033",
@@ -616,6 +618,7 @@ fn two_articles_numbered_one() -> serde_json::Value {
 async fn holding_two_articles_numbered_one() -> MockServer {
     let article = |path: &str, leden: &[&str]| {
         serde_json::json!({
+            "kind": "artikel",
             "number": "1",
             "path": path,
             "stam_id": path,
@@ -638,9 +641,11 @@ async fn holding_two_articles_numbered_one() -> MockServer {
         "data": {
             "regulation_id": "BWBR0008691",
             "expression": {
+                "regulation_id": "BWBR0008691",
                 "label": "2016-07-01_0",
                 "in_force": {"from": "2016-07-01"},
                 "held": true,
+                "upstream_hash_check": "matches",
                 "blob": EARLIER_BLOB,
             },
             "articles": [
@@ -738,8 +743,8 @@ async fn the_note_names_an_article_a_narrowed_answer_leaves_out() {
 
 /// Two renditions as the service lists them, newest first.
 const NEWEST_FIRST: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true},
-         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true}]}"#;
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"upstream_hash_check":"matches"},
+         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true,"upstream_hash_check":"matches"}]}"#;
 
 /// The order of a list of renditions is the service's, and every channel shows
 /// the one it sends. bron prints rows as they arrive and sorts nothing.
@@ -829,6 +834,7 @@ async fn help_asked_for_under_json_is_still_help() {
 fn two_articles_of(as_of: &str, label: &str, blob: &str, first: &str) -> String {
     let article = |number: &str, stam: &str, text: &str| {
         serde_json::json!({
+            "kind": "artikel",
             "number": number,
             "label": format!("Artikel {number}"),
             "stam_id": stam,
@@ -844,9 +850,11 @@ fn two_articles_of(as_of: &str, label: &str, blob: &str, first: &str) -> String 
         "data": {
             "regulation_id": "BWBR0008691",
             "expression": {
+                "regulation_id": "BWBR0008691",
                 "label": label,
                 "in_force": {"from": &label[..10]},
                 "held": true,
+                "upstream_hash_check": "matches",
                 "blob": blob,
             },
             "articles": [
@@ -1013,7 +1021,7 @@ async fn a_list_of_rows_keeps_its_caveats_off_stdout() {
  "caveats":[{"kind":"truncated","window":1}]}"#;
 
     const VERSIONS: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"unread_because":"too_large"}],
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"upstream_hash_check":"matches","unread_because":"too_large"}],
  "caveats":[{"kind":"truncated","window":1}]}"#;
 
     for (route, body, args) in [
@@ -1052,6 +1060,7 @@ async fn a_list_of_rows_keeps_its_caveats_off_stdout() {
 async fn a_provision_not_yet_applied_is_not_said_to_be_in_force() {
     let article = |number: &str, in_force_from: Option<&str>| {
         let mut article = serde_json::json!({
+            "kind": "artikel",
             "number": number,
             "label": format!("Artikel {number}"),
             "stam_id": number,
@@ -1073,9 +1082,11 @@ async fn a_provision_not_yet_applied_is_not_said_to_be_in_force() {
         "data": {
             "regulation_id": "BWBR0020368",
             "expression": {
+                "regulation_id": "BWBR0020368",
                 "label": "2026-09-01_0",
                 "in_force": {"from": "2026-09-01"},
                 "held": true,
+                "upstream_hash_check": "matches",
                 "blob": EARLIER_BLOB,
             },
             "articles": [article("1:54d", None), article("1:76e", Some("2027-01-01"))],
@@ -1154,8 +1165,8 @@ async fn the_service_unable_to_fetch_is_upstream_with_its_delay() {
 #[tokio::test(flavor = "multi_thread")]
 async fn law_versions_says_which_held_renditions_were_not_read() {
     const UNREAD: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"unread_because":"too_large"},
-         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true}]}"#;
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"upstream_hash_check":"matches","unread_because":"too_large"},
+         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true,"upstream_hash_check":"matches"}]}"#;
 
     let server = answering("GET", "/api/v1/regulations/BWBR0008691/expressions", UNREAD).await;
 
@@ -1180,6 +1191,7 @@ fn waiting_or_applying(
     in_force_from: Option<&str>,
 ) -> String {
     let mut article = serde_json::json!({
+        "kind": "artikel",
         "number": "119b",
         "label": "Artikel 119b",
         "stam_id": "2760119",
@@ -1197,9 +1209,11 @@ fn waiting_or_applying(
         "data": {
             "regulation_id": "BWBR0005289",
             "expression": {
+                "regulation_id": "BWBR0005289",
                 "label": label,
                 "in_force": {"from": &label[..10]},
                 "held": true,
+                "upstream_hash_check": "matches",
                 "blob": blob,
             },
             "articles": [article],
@@ -1270,4 +1284,133 @@ async fn law_changes_says_a_provision_commenced_and_on_which_day() {
     assert!(human.status.success(), "{human:?}");
     assert!(text.contains("commenced on 2027-01-01"), "{text}");
     assert!(text.contains("1 commenced"), "{text}");
+}
+
+/// A rendition of BWBR0020368 as the service answers it on 2015-01-01: one of
+/// its articles prints no number, so the service leaves `number` out, and one
+/// unit prints neither a number nor a label.
+fn a_rendition_with_an_article_that_prints_no_number() -> String {
+    serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": "2015-01-01",
+        "as_known_on": "2026-09-19",
+        "data": {
+            "regulation_id": "BWBR0020368",
+            "expression": {
+                "regulation_id": "BWBR0020368",
+                "label": "2014-07-01_0",
+                "in_force": {"from": "2014-07-01", "until": "2015-06-30"},
+                "withdrawn": false,
+                "held": true,
+                "upstream_hash_check": "matches",
+                "blob": EARLIER_BLOB,
+            },
+            "articles": [
+                {
+                    "kind": "artikel",
+                    "position": 759,
+                    "number": "3:280",
+                    "label": "Artikel 3:280",
+                    "stam_id": "2760280",
+                    "versie_id": "1",
+                    "content_hash": EARLIER_BLOB,
+                    "span": {"start": 10, "end": 90},
+                    "paragraphs": [{"content_hash": EARLIER_BLOB, "rendered": "Gewoon.", "span": {"start": 20, "end": 80}}],
+                },
+                {
+                    "kind": "artikel",
+                    "position": 760,
+                    "label": "Artikel 3:281",
+                    "stam_id": "2760281",
+                    "versie_id": "2",
+                    "content_hash": EARLIER_BLOB,
+                    "status": "vervallen",
+                    "span": {"start": 90, "end": 120},
+                },
+                {
+                    "kind": "artikel",
+                    "position": 761,
+                    "stam_id": "2760282",
+                    "versie_id": "3",
+                    "content_hash": EARLIER_BLOB,
+                    "span": {"start": 120, "end": 150},
+                    "paragraphs": [{"content_hash": EARLIER_BLOB, "rendered": "Naamloos.", "span": {"start": 120, "end": 150}}],
+                },
+            ],
+        },
+    })
+    .to_string()
+}
+
+/// The schema does not require `number`, and the service leaves a null out. One
+/// row without it is a row like any other, and never the reason a whole answer
+/// is unusable.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_article_without_a_number_does_not_break_the_answer() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0020368/articles"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            a_rendition_with_an_article_that_prints_no_number(),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{EARLIER_BLOB}/provenance")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let args = ["law", "show", "BWBR0020368", "--as-of", "2015-01-01"];
+
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+    assert!(human.status.success(), "{human:?}");
+    assert!(text.lines().any(|l| l == "Artikel 3:280"), "{text}");
+    assert!(text.lines().any(|l| l == "Artikel 3:281"), "{text}");
+    // Neither a number nor a label: named by what it is and where it stands.
+    assert!(text.lines().any(|l| l == "artikel 761"), "{text}");
+    assert!(text.contains("Naamloos."), "{text}");
+
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+    assert!(json.status.success(), "{json:?}");
+    let articles = envelope["data"].as_array().unwrap();
+    assert_eq!(articles.len(), 3, "{envelope}");
+    assert_eq!(articles[0]["number"], "3:280", "{envelope}");
+    assert!(articles[1].get("number").is_none(), "{envelope}");
+    assert_eq!(articles[1]["kind"], "artikel", "{envelope}");
+    assert_eq!(articles[2]["position"], 761, "{envelope}");
+}
+
+/// A hit on a unit that prints no number is ranked like any other, and named
+/// by its label, or by its kind where it has none.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hit_without_a_number_is_ranked_like_any_other() {
+    const NUMBERLESS: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-19","data":{"kind":"ranking",
+    "searched":["wetgeving"],
+    "hits":[{"source":"wetgeving","unit":"article","regulation_id":"BWBR0001941","expression":"2026-09-17_0",
+             "kind":"aanhef","content_hash":"a61a","distance":0.21,"places":[],"found_by":["vector"]},
+            {"source":"wetgeving","unit":"article","regulation_id":"BWBR0001941","expression":"2026-09-17_0",
+             "kind":"bijlage","label":"Lijst I","content_hash":"b72b","distance":0.25,"places":[],"found_by":["vector"]}]}}"#;
+
+    let server = answering("POST", "/api/v1/search", NUMBERLESS).await;
+
+    let output = bron(&server, &["find", "opium"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.lines().any(|l| l.ends_with("BWBR0001941  aanhef")),
+        "{text}"
+    );
+    assert!(
+        text.lines().any(|l| l.ends_with("BWBR0001941  Lijst I")),
+        "{text}"
+    );
 }
