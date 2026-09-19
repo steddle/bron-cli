@@ -62,6 +62,11 @@ pub enum SearchData {
         /// The citation as the service read it, which is not always as it was
         /// typed: `6:162 BW` pins the book and is read as `6:162`.
         citation: String,
+        /// The lid the citation names, where it names one. Read and not looked
+        /// up: `law show --paragraph` answers it.
+        paragraph: Option<String>,
+        /// The law's name as typed, where the citation names its law by one.
+        name: Option<String>,
         resolved: Vec<Cited>,
     },
 }
@@ -118,6 +123,29 @@ pub struct SearchHit {
     pub distance: Option<f64>,
     #[serde(default)]
     pub lid: Option<SearchLid>,
+    /// In how many places the text sits, inside what the search was narrowed
+    /// to: the same words in another rendition or another regulation.
+    pub places: u32,
+    /// Which lists found it: `vector`, `text`, or both.
+    pub found_by: Vec<String>,
+    /// The other places, up to 20 in all.
+    #[serde(default)]
+    pub also: Vec<Place>,
+}
+
+/// Another place a hit's text sits.
+#[derive(Debug, Deserialize)]
+pub struct Place {
+    /// `article` or `lid`: the same words can stand as a whole article and as
+    /// its one lid, which are two places.
+    pub unit: String,
+    #[serde(default)]
+    pub lid: Option<SearchLid>,
+    pub regulation_id: String,
+    pub expression: String,
+    pub kind: String,
+    pub number: Option<String>,
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

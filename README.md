@@ -29,13 +29,14 @@ Find the act, then read an article as it stood on a date:
 
 ```
 $ bron law search burgerlijk wetboek boek 6
-BWBR0005289  Burgerlijk Wetboek Boek 6
-BWBR0017013  Vaststellingsbesluit tijdelijke AMvB ex artikel 110, Burgerlijk Wetboek Boek 6 [...]
-BWBR0039501  Wijzigingswet Burgerlijk Wetboek Boek 6 (tegengaan onredelijk lange betaaltermijnen)
-BWBR0046553  Wijzigingswet Burgerlijk Wetboek Boek 6 en Overgangswet nieuw Burgerlijk Wetboek [...]
+BWBR0005289  wet   history  63 of 63 held  Burgerlijk Wetboek Boek 6
+BWBR0017013  AMvB  history  1 of 1 held    Vaststellingsbesluit tijdelijke AMvB ex artikel 110, Burgerlijk Wetboek Boek 6 [...]
+BWBR0039501  wet   current  1 of 1 held    Wijzigingswet Burgerlijk Wetboek Boek 6 (tegengaan onredelijk lange betaaltermijnen)
+BWBR0046553  wet   current  1 of 1 held    Wijzigingswet Burgerlijk Wetboek Boek 6 en Overgangswet nieuw Burgerlijk Wetboek [...]
 
 $ bron law show BWBR0005289 --article 119a --as-of 2019-06-01
-as in force on 2019-06-01
+as in force on 2019-06-01, as the register showed on 2026-09-19
+from rendition 2019-04-01_0, in force 2019-04-01 to 2019-07-20
 
 Artikel 119a
 /Boek6/Titeldeel1/Afdeling11/Artikel119a
@@ -56,12 +57,17 @@ Every answer ends with the digest of the document it was read from, where those 
 ```
 $ bron law changes BWBR0005289 --from 2019-01-01 --article 119a
 BWBR0005289
-2019-01-01_0 (2019-01-01 to 2019-03-31) -> 2026-07-16_0 (2026-07-16 onwards)
+from  2019-01-01_0  2019-01-01 to 2019-03-31, hash matches
+      https://bron.steddle.com/api/v1/blobs/2d6cc2a355c0686602054e747abdc3aee775bdbff251ec28a9930969643f40d2
+to    2026-07-16_0  2026-07-16 onwards, hash matches
+      https://bron.steddle.com/api/v1/blobs/091f3702115565abb5061a2fccdc751c16debfed6614d92e0d3b2a186744bd87
 
 in the whole regulation: 29 amended, 0 commenced, 5 added, 1 repealed, 0 withdrawn, 305 unchanged
 
 AMENDED    Artikel 119a
-           through stb-2022-146
+           /Boek6/Titeldeel1/Afdeling11/Artikel119a
+           through stb-2022-146 (wijziging); was through stb-2017-170
+           spans 350651..362846 -> 348561..360752
   [...] uiterste dag van betaling overeenkomen van meer dan [-zestig-] {+30+} dagen indien de schuldenaar een rechtspersoon is die [...]
 ```
 
@@ -90,16 +96,17 @@ difference between them is why there are two:
 
 ```
 $ bron law published --from 2026-09-01 --type wet
-* BWBR0020368  2026-09-01_0  2026-09-01 onwards
-* BWBR0006622  2026-09-01_0  2026-09-01 onwards
-  BWBR0032573  2026-09-01_0  2026-09-01 onwards
-
+* BWBR0001941  2026-09-17_0  2026-09-17 onwards        2026-09-17 onwards        matches    11 images   Opiumwet
+* BWBR0052931  2026-09-11_0  2026-09-11 onwards        2026-09-11 onwards        matches    1 images    Wet herindeling gemeenten Hilversum en Wijdemeren
+* BWBR0052755  2026-09-01_0  2026-09-01 onwards        2026-09-01 onwards        matches    0 images    Verzamelwet gegevensbescherming
 * = the service holds this text
+first window = in force (geldigheid), second = shown by the register (zicht), - = the manifest states none
+matches, differs, rewritten, absent, unchecked = what the publisher's hash says of the held bytes
 
-$ bron law feed --since 40122
-   40123  published   BWBR0024282  2026-07-01_0
-   40124  rewritten   BWBR0005289  2002-04-12_0
-next 40124  head 40124  origin 8539df1d82a7060824be7ba17f500781
+$ bron law feed --since 10
+      11  rewritten   BWBR0052799  2026-07-08_0  2026-07-08 onwards        2026-07-08 onwards
+      12  rewritten   BWBR0051170  2026-07-11_0  2026-07-11 onwards        2026-07-11 onwards
+next 12  head 21513  origin 30fbc1f9317d7da9f25cee30711c1e4f
 ```
 
 `law published` names a window and answers what the register brought into force

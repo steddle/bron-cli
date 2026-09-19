@@ -9,7 +9,7 @@ use std::io::{self, Write};
 
 use chrono::NaiveDate;
 
-use bron::service::SearchData;
+use bron::service::{Article, Expression, Regulation, SearchData, SearchLid, name};
 use bron::wire::{AppealStatus, Body, Caveat, Envelope};
 
 use crate::run::Answer;
@@ -29,6 +29,9 @@ const WINDOW: usize = 24;
 const HASH_CHECK: usize = 9;
 const IMAGES: usize = 10;
 
+/// The widest a hit's `found_by` reads, `vector+text`.
+const FOUND_BY: usize = 11;
+
 /// Writes one answer for a person.
 ///
 /// Where stdout carries rows, one per thing listed, every note on them goes to
@@ -38,14 +41,36 @@ const IMAGES: usize = 10;
 pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io::Result<()> {
     match answer {
         Answer::LawHits(a) => {
+            // Widths read off the rows in this answer, so the title starts in
+            // one place on every row without padding for a type none of them
+            // has.
+            let held = |hit: &Regulation| match (hit.held_count, hit.expression_count) {
+                (Some(held), Some(count)) => format!("{held} of {count} held"),
+                _ => String::new(),
+            };
+            let kind = |hit: &Regulation| hit.regulation_type.clone().unwrap_or_default();
+            let kind_width = a.data.iter().map(|h| kind(h).len()).max().unwrap_or(0);
+            let coverage_width = a.data.iter().map(|h| h.coverage.len()).max().unwrap_or(0);
+            let held_width = a.data.iter().map(|h| held(h).len()).max().unwrap_or(0);
+
             for hit in &a.data {
-                writeln!(out, "{}  {}", hit.id, hit.title.as_deref().unwrap_or(""))?;
+                writeln!(
+                    out,
+                    "{}  {:<kind_width$}  {:<coverage_width$}  {:<held_width$}  {}",
+                    hit.id,
+                    kind(hit),
+                    hit.coverage,
+                    held(hit),
+                    hit.title.as_deref().unwrap_or(""),
+                )?;
             }
             caveats(&a.caveats, err)
         }
 
         Answer::Found(a) => {
-            bound(a.as_of, a.as_known_on, out)?;
+            if let Some(line) = bound(a.as_of, a.as_known_on) {
+                writeln!(out, "{line}\n")?;
+            }
 
             match &a.data {
                 SearchData::Ranking { hits, .. } => {
@@ -57,11 +82,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     }
 
                     for hit in hits {
-                        let unit = match hit.lid.as_ref().and_then(|lid| lid.number.as_ref()) {
-                            Some(number) => format!("lid {number}"),
-                            None if hit.unit == "lid" => "lid".to_string(),
-                            None => "article".to_string(),
-                        };
+                        let unit = unit_of(&hit.unit, hit.lid.as_ref());
 
                         let distance = hit
                             .distance
@@ -69,18 +90,38 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
                         writeln!(
                             out,
-                            "{}  {:<11} {:<8} {}  {}",
+                            "{}  {:<11} {:<8} {}  {}  {:<FOUND_BY$} {}",
                             distance,
                             hit.source,
                             unit,
                             hit.regulation_id,
-                            bron::service::name(
-                                hit.label.as_deref(),
-                                hit.number.as_deref(),
-                                &hit.kind,
-                                None,
-                            ),
+                            hit.expression,
+                            hit.found_by.join("+"),
+                            name(hit.label.as_deref(), hit.number.as_deref(), &hit.kind, None),
                         )?;
+
+                        // The same words in other places, each named as the
+                        // hit is, so a text sitting in two regulations is not
+                        // read as found once.
+                        for place in &hit.also {
+                            writeln!(
+                                out,
+                                "      also {}  {}  {:<8} {}",
+                                place.regulation_id,
+                                place.expression,
+                                unit_of(&place.unit, place.lid.as_ref()),
+                                name(
+                                    place.label.as_deref(),
+                                    place.number.as_deref(),
+                                    &place.kind,
+                                    None
+                                ),
+                            )?;
+                        }
+                        let unnamed = (hit.places as usize).saturating_sub(1 + hit.also.len());
+                        if unnamed > 0 {
+                            writeln!(out, "      and {unnamed} more place(s)")?;
+                        }
                     }
                 }
 
@@ -88,8 +129,20 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 // empty: a lookup is arithmetic and prints what it resolved.
                 // The reading leads every line, because with more than one it
                 // is the answer to which of them the reader meant.
-                SearchData::Lookup { citation, resolved } => {
-                    writeln!(out, "{citation}\n")?;
+                SearchData::Lookup {
+                    citation,
+                    paragraph,
+                    name: law,
+                    resolved,
+                } => {
+                    let mut read = citation.clone();
+                    if let Some(lid) = paragraph {
+                        let _ = write!(read, " lid {lid}");
+                    }
+                    if let Some(law) = law {
+                        let _ = write!(read, " {law}");
+                    }
+                    writeln!(out, "{read}\n")?;
 
                     for entry in resolved {
                         // Holding is its own column, so the name after it
@@ -109,6 +162,22 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                             source = SOURCE,
                             width = NOT_HELD.len(),
                         )?;
+                        // The service reads a lid and does not look it up, so
+                        // the answer above is the article's. Where the text is
+                        // held, the command that answers the lid is named.
+                        if let Some(lid) = paragraph
+                            && entry.held
+                        {
+                            writeln!(
+                                out,
+                                "{:indent$}the lid is not looked up here: law show {} --article {} \
+                                 --paragraph {lid} answers it",
+                                "",
+                                entry.regulation_id,
+                                entry.number,
+                                indent = READING + 1,
+                            )?;
+                        }
                         // A limit on one reading is not a limit on the answer,
                         // and the reader quoting that line is the one who needs
                         // it. Indented to the column the line starts in, read
@@ -136,33 +205,34 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             }
 
             for rendition in &a.data {
-                let held = if rendition.held { "*" } else { " " };
-                writeln!(
-                    out,
-                    "{held} {}  {}  {}",
-                    rendition.regulation_id,
-                    rendition.label,
-                    window(rendition.in_force.from, rendition.in_force.until)
-                )?;
+                writeln!(out, "{}", rendition_row(rendition, true))?;
             }
-
-            writeln!(err, "* = the service holds this text")?;
+            rendition_legend(&a.data, err)?;
             caveats(&a.caveats, err)
         }
 
         Answer::Feed(a) => {
             for event in &a.data.events {
-                // A regulation-level event names no rendition, so the line ends
-                // at the identifier rather than on the padding of an empty one.
-                let line = format!(
+                let mut row = format!(
                     "{:>8}  {:<12}{}",
                     event.seq, event.event, event.regulation_id
                 );
-
-                match &event.label {
-                    Some(label) => writeln!(out, "{line}  {label}")?,
-                    None => writeln!(out, "{line}")?,
+                // A regulation-level event names no rendition, so the row ends
+                // at the identifier rather than on the padding of an empty one.
+                if let Some(label) = &event.label {
+                    let _ = write!(
+                        row,
+                        "  {label}  {:<WINDOW$}  {:<WINDOW$}",
+                        event
+                            .in_force
+                            .map_or_else(String::new, |w| window(w.from, w.until)),
+                        shown(event.as_known),
+                    );
                 }
+                if event.withdrawn {
+                    let _ = write!(row, "  withdrawn");
+                }
+                writeln!(out, "{}", row.trim_end())?;
             }
 
             if a.data.events.is_empty() {
@@ -182,76 +252,33 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
         Answer::Versions(a) => {
             for version in &a.data {
-                let held = if version.held { "*" } else { " " };
-                // The service states images for held text only, so of a
-                // rendition it does not hold the count is unknown, not zero.
-                let images = if version.held {
-                    format!("{} images", version.images.len())
-                } else {
-                    String::new()
-                };
-                let mut row = format!(
-                    "{held} {}  {:<WINDOW$}  {:<HASH_CHECK$}  {images:<IMAGES$}",
-                    version.label,
-                    window(version.in_force.from, version.in_force.until),
-                    version.upstream_hash_check,
-                );
-                // Writing to a String cannot fail.
-                if let Some(because) = &version.unread_because {
-                    let _ = write!(row, "  unread: {because}");
-                }
-                if let Some(title) = &version.regulation_title {
-                    let _ = write!(row, "  {title}");
-                }
-                writeln!(out, "{}", row.trim_end())?;
+                writeln!(out, "{}", rendition_row(version, false))?;
             }
-            writeln!(err, "* = the service holds this text")?;
-            writeln!(
-                err,
-                "matches, differs, rewritten, absent, unchecked = what the publisher's hash says \
-                 of the held bytes"
-            )?;
-            if a.data
-                .iter()
-                .any(|version| version.unread_because.is_some())
-            {
-                writeln!(
-                    err,
-                    "unread = held and not parsed into articles, so it has none to answer"
-                )?;
-            }
+            rendition_legend(&a.data, err)?;
             caveats(&a.caveats, err)
         }
 
         // A document rather than a list: the text of each unit, and the notes
         // on the answer beneath it.
-        Answer::Parts(a) => {
-            bound(a.as_of, a.as_known_on, out)?;
+        Answer::Parts {
+            answered: a,
+            blob_url,
+        } => {
+            answered_by(
+                bound(a.as_of, a.as_known_on).as_deref(),
+                &a.data.expression,
+                out,
+            )?;
 
             for part in &a.data.parts {
-                write!(out, "{}", part.name())?;
-                if let Some(title) = &part.title {
-                    write!(out, "  {title}")?;
-                }
-                writeln!(out)?;
-                if let Some(path) = &part.path {
-                    writeln!(out, "{path}")?;
-                }
-                writeln!(out, "\n{}\n", part.text())?;
-                if let Some(blob) = &a.data.expression.blob {
-                    writeln!(
-                        out,
-                        "source: {blob} ({}..{})",
-                        part.span.start, part.span.end
-                    )?;
-                }
-                if let Some(jci) = &part.jci {
-                    writeln!(out, "{jci}")?;
-                }
-                if !part.images.is_empty() {
-                    writeln!(out, "images: {}", part.images.join(", "))?;
-                }
-                writeln!(out)?;
+                unit(
+                    out,
+                    part,
+                    &a.data.expression,
+                    blob_url.as_deref(),
+                    None,
+                    None,
+                )?;
             }
 
             caveats(&a.caveats, out)
@@ -268,82 +295,27 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             // An answer holding only provisions not yet applied is bound to
             // the rendition that publishes them, and 'as in force on' would
             // say they apply.
-            if !articles.is_empty() && articles.iter().all(not_commenced) {
-                match a.as_of {
-                    Some(day) => writeln!(
-                        out,
-                        "published in the rendition current on {day}, and not yet applied\n"
-                    )?,
-                    None => writeln!(out, "published and not yet applied\n")?,
-                }
+            let header = if !articles.is_empty() && articles.iter().all(not_commenced) {
+                Some(match a.as_of {
+                    Some(day) => {
+                        format!("published in the rendition current on {day}, and not yet applied")
+                    }
+                    None => "published and not yet applied".to_string(),
+                })
             } else {
-                bound(a.as_of, a.as_known_on, out)?;
-            }
+                bound(a.as_of, a.as_known_on)
+            };
+            answered_by(header.as_deref(), &a.data.expression, out)?;
 
             for article in articles {
-                // The service names a lid answer for the article's own label
-                // where it has one. Where it has none, the name says which lid
-                // the answer is about, because nothing else on the line does.
-                match (&article.label, paragraph) {
-                    (None, Some(lid)) => write!(out, "{} lid {lid}", article.name())?,
-                    _ => write!(out, "{}", article.name())?,
-                }
-                if let Some(title) = &article.title {
-                    write!(out, "  {title}")?;
-                }
-                writeln!(out)?;
-                if let Some(path) = &article.path {
-                    writeln!(out, "{path}")?;
-                }
-
-                let text = article.text();
-                let text = match item {
-                    Some(letter) => crate::run::item(&text, letter)
-                        .unwrap_or_default()
-                        .to_string(),
-                    None => text,
-                };
-
-                // A repealed provision reads as one word, so the day it went is
-                // the only thing on the line that answers anything. wetten.nl
-                // prints the same date for the same reason.
-                match (article.effect.as_deref(), article.in_force_from) {
-                    (Some("vervallen"), Some(day)) => writeln!(out, "\n{text} per {day}\n")?,
-                    _ => writeln!(out, "\n{text}\n")?,
-                }
-
-                if let Some(blob) = &a.data.expression.blob {
-                    writeln!(
-                        out,
-                        "source: {blob} ({}..{})",
-                        article.span.start, article.span.end
-                    )?;
-                }
-                if let Some(url) = blob_url {
-                    writeln!(out, "{url}")?;
-                }
-                // The register's own citation string for exactly what is
-                // printed above, carrying this rendition's zicht and geldigheid
-                // dates. It is what Dutch practice already cites with, so a
-                // reader needs no mapping from ours.
-                if let Some(jci) = &article.jci {
-                    writeln!(out, "{jci}")?;
-                }
-                if not_commenced(article) {
-                    match article.in_force_from {
-                        Some(day) => writeln!(out, "not yet applied, applies from {day}")?,
-                        None => writeln!(out, "not yet applied")?,
-                    }
-                }
-                if let Some(act) = &article.amended_by {
-                    let effect = article.effect.as_deref().unwrap_or("wijziging");
-                    if not_commenced(article) {
-                        writeln!(out, "published by {act} ({effect})")?;
-                    } else {
-                        writeln!(out, "in force through {act} ({effect})")?;
-                    }
-                }
-                writeln!(out)?;
+                unit(
+                    out,
+                    article,
+                    &a.data.expression,
+                    blob_url.as_deref(),
+                    paragraph.as_deref(),
+                    item.as_deref(),
+                )?;
             }
             caveats(&a.caveats, out)
         }
@@ -351,18 +323,28 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
         Answer::Changes {
             answered: a,
             narrowed,
+            from_url,
+            to_url,
         } => {
             let changes = &a.data;
 
             writeln!(out, "{}", changes.regulation_id)?;
-            writeln!(
-                out,
-                "{} ({}) -> {} ({})\n",
-                changes.from.label,
-                window(changes.from.in_force.from, changes.from.in_force.until),
-                changes.to.label,
-                window(changes.to.in_force.from, changes.to.in_force.until)
-            )?;
+            for (side, rendition, url) in [
+                ("from", &changes.from, from_url),
+                ("to", &changes.to, to_url),
+            ] {
+                writeln!(
+                    out,
+                    "{side:<4}  {}  {}, hash {}",
+                    rendition.label,
+                    window(rendition.in_force.from, rendition.in_force.until),
+                    rendition.upstream_hash_check,
+                )?;
+                if let Some(url) = url {
+                    writeln!(out, "      {url}")?;
+                }
+            }
+            writeln!(out)?;
 
             // The service counts every unit whatever narrowed the list, so
             // above a narrowed list the counts say whose they are. Kept rather
@@ -378,35 +360,63 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 s.amended, s.commenced, s.added, s.repealed, s.withdrawn, s.unchanged
             )?;
 
-            for unit in &changes.articles {
-                let side = unit.to.as_ref().or(unit.from.as_ref());
-                let name = bron::service::name(
-                    unit.label.as_deref(),
-                    unit.number.as_deref(),
-                    &unit.kind,
+            for change in &changes.articles {
+                let side = change.to.as_ref().or(change.from.as_ref());
+                let name = name(
+                    change.label.as_deref(),
+                    change.number.as_deref(),
+                    &change.kind,
                     side.and_then(|side| side.position),
                 );
-                writeln!(out, "{:<10} {name}", unit.change.to_uppercase())?;
+                writeln!(out, "{:<10} {name}", change.change.to_uppercase())?;
 
-                if let Some(act) = unit.to.as_ref().and_then(|to| to.amended_by.as_ref()) {
-                    writeln!(out, "           through {act}")?;
+                if let Some(path) = &change.path {
+                    writeln!(out, "           {path}")?;
                 }
 
-                if unit.change == "commenced"
-                    && let Some(day) = unit.to.as_ref().and_then(|to| to.in_force_from)
+                if let Some(to) = &change.to
+                    && let Some(act) = &to.amended_by
+                {
+                    let mut line = format!("           through {act}");
+                    if let Some(effect) = &to.effect {
+                        let _ = write!(line, " ({effect})");
+                    }
+                    // The act the earlier text stood through, where it is not
+                    // the same one: an amendment names what it replaced.
+                    if let Some(earlier) = change.from.as_ref().and_then(|f| f.amended_by.as_ref())
+                        && earlier != act
+                    {
+                        let _ = write!(line, "; was through {earlier}");
+                    }
+                    writeln!(out, "{line}")?;
+                }
+
+                if change.change == "commenced"
+                    && let Some(day) = change.to.as_ref().and_then(|to| to.in_force_from)
                 {
                     writeln!(out, "           commenced on {day}")?;
                 }
 
-                let text = bron::service::Article::text;
-                match (&unit.from, &unit.to) {
-                    (Some(from), Some(to)) if unit.change == "amended" => {
-                        for line in word_diff(&text(from), &text(to)) {
+                // Where the unit stands in each side's document, which the
+                // lines above name, so either text can be cut again.
+                let span = |side: &Article| format!("{}..{}", side.span.start, side.span.end);
+                match (&change.from, &change.to) {
+                    (Some(from), Some(to)) => {
+                        writeln!(out, "           spans {} -> {}", span(from), span(to))?
+                    }
+                    (Some(from), None) => writeln!(out, "           span {} (from)", span(from))?,
+                    (None, Some(to)) => writeln!(out, "           span {} (to)", span(to))?,
+                    (None, None) => {}
+                }
+
+                match (&change.from, &change.to) {
+                    (Some(from), Some(to)) if change.change == "amended" => {
+                        for line in word_diff(&from.text(), &to.text()) {
                             writeln!(out, "  {line}")?;
                         }
                     }
-                    (None, Some(to)) => writeln!(out, "  + {}", first_line(&text(to)))?,
-                    (Some(from), None) => writeln!(out, "  - {}", first_line(&text(from)))?,
+                    (None, Some(to)) => writeln!(out, "  + {}", first_line(&to.text()))?,
+                    (Some(from), None) => writeln!(out, "  - {}", first_line(&from.text()))?,
                     _ => {}
                 }
                 writeln!(out)?;
@@ -417,7 +427,14 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
         Answer::CaseHits(e) => {
             for hit in data(e) {
-                writeln!(out, "{}", hit.ecli)?;
+                let mut row = hit.ecli.clone();
+                if let Some(court) = &hit.court {
+                    let _ = write!(row, "  {court}");
+                }
+                if let Some(day) = hit.decided_on {
+                    let _ = write!(row, "  {day}");
+                }
+                writeln!(out, "{row}")?;
                 if let Some(title) = &hit.title {
                     writeln!(out, "  {title}")?;
                 }
@@ -434,11 +451,25 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             if let Some(court) = &case.court {
                 writeln!(out, "{court}")?;
             }
-            if let Some(decided) = case.decided_on {
-                writeln!(out, "decided {decided}")?;
+            let dates: Vec<String> = [
+                case.decided_on.map(|day| format!("decided {day}")),
+                case.published_on.map(|day| format!("published {day}")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            if !dates.is_empty() {
+                writeln!(out, "{}", dates.join(", "))?;
+            }
+            if let Some(procedure) = &case.procedure_type {
+                writeln!(out, "{procedure}")?;
             }
             if let Some(summary) = &case.summary {
                 writeln!(out, "\n{summary}")?;
+            }
+            // The decision itself, after the register's gloss on it.
+            if let Some(text) = &case.full_text {
+                writeln!(out, "\n{text}")?;
             }
             if !case.relations.is_empty() {
                 writeln!(out, "\nrelations")?;
@@ -449,6 +480,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             }
             writeln!(out, "\nappeal: {}", appeal(&case.appeal))?;
             writeln!(out, "source: {}", case.provenance.blob)?;
+            writeln!(out, "{}", case.provenance.url)?;
             caveats(&e.caveats, out)
         }
 
@@ -464,6 +496,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             writeln!(out, "{}  {}", doc.id, doc.title.as_deref().unwrap_or(""))?;
             if let Some(dossier) = &doc.dossier {
                 writeln!(out, "  dossier {dossier}")?;
+            }
+            if let Some(day) = doc.published_on {
+                writeln!(out, "  published {day}")?;
             }
 
             match &doc.body {
@@ -484,7 +519,11 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
         Answer::PublicationHits(e) => {
             for hit in data(e) {
-                writeln!(out, "{}  {}", hit.id, hit.title.as_deref().unwrap_or(""))?;
+                let mut row = hit.id.clone();
+                if let Some(day) = hit.published_on {
+                    let _ = write!(row, "  {day}");
+                }
+                writeln!(out, "{row}  {}", hit.title.as_deref().unwrap_or(""))?;
                 if let Some(dossier) = &hit.dossier {
                     writeln!(out, "  dossier {dossier}")?;
                 }
@@ -492,6 +531,194 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&e.caveats, err)
         }
     }
+}
+
+/// One unit of text, as `law show` and `law parts` both print it: what it is,
+/// its words, where those words stand in which document, and whether it
+/// applies.
+///
+/// `lid` is the lid the question named, so a heading says which lid where the
+/// service's label for the unit is absent and cannot. `item` cuts the words to
+/// the one item a letter opens; see [`crate::run::item`].
+fn unit(
+    out: &mut impl Write,
+    unit: &Article,
+    rendition: &Expression,
+    blob_url: Option<&str>,
+    lid: Option<&str>,
+    item: Option<&str>,
+) -> io::Result<()> {
+    match (&unit.label, lid) {
+        (None, Some(lid)) => write!(out, "{} lid {lid}", unit.name())?,
+        _ => write!(out, "{}", unit.name())?,
+    }
+    if let Some(title) = &unit.title {
+        write!(out, "  {title}")?;
+    }
+    // A treaty can print one number in several languages, and without this
+    // two of its units read as the same heading.
+    match (&unit.lang, &unit.text_status) {
+        (Some(lang), Some(status)) => write!(out, "  ({lang}, {status})")?,
+        (Some(lang), None) => write!(out, "  ({lang})")?,
+        _ => {}
+    }
+    writeln!(out)?;
+    if let Some(path) = &unit.path {
+        writeln!(out, "{path}")?;
+    }
+
+    let text = unit.text();
+    let text = match item {
+        Some(letter) => crate::run::item(&text, letter)
+            .unwrap_or_default()
+            .to_string(),
+        None => text,
+    };
+
+    // A repealed provision reads as one word, so the day it went is the only
+    // thing on the line that answers anything. wetten.nl prints the same date
+    // for the same reason.
+    match (unit.effect.as_deref(), unit.in_force_from) {
+        (Some("vervallen"), Some(day)) => writeln!(out, "\n{text} per {day}\n")?,
+        _ => writeln!(out, "\n{text}\n")?,
+    }
+
+    if let Some(blob) = &rendition.blob {
+        writeln!(
+            out,
+            "source: {blob} ({}..{})",
+            unit.span.start, unit.span.end
+        )?;
+    }
+    if let Some(url) = blob_url {
+        writeln!(out, "{url}")?;
+    }
+    // The register's own citation string for exactly what is printed above,
+    // carrying this rendition's zicht and geldigheid dates. It is what Dutch
+    // practice already cites with, so a reader needs no mapping from ours.
+    if let Some(jci) = &unit.jci {
+        writeln!(out, "{jci}")?;
+    }
+    if !unit.images.is_empty() {
+        writeln!(out, "images: {}", unit.images.join(", "))?;
+    }
+    if not_commenced(unit) {
+        match unit.in_force_from {
+            Some(day) => writeln!(out, "not yet applied, applies from {day}")?,
+            None => writeln!(out, "not yet applied")?,
+        }
+    }
+    if let Some(act) = &unit.amended_by {
+        let effect = unit.effect.as_deref().unwrap_or("wijziging");
+        if not_commenced(unit) {
+            writeln!(out, "published by {act} ({effect})")?;
+        } else {
+            writeln!(out, "in force through {act} ({effect})")?;
+        }
+    }
+    writeln!(out)
+}
+
+/// The line an answer about a rendition's text opens with, and under it which
+/// rendition that was: a date resolves to one, and a reader told only the date
+/// is not told which text answered.
+fn answered_by(
+    header: Option<&str>,
+    rendition: &Expression,
+    out: &mut impl Write,
+) -> io::Result<()> {
+    if let Some(header) = header {
+        writeln!(out, "{header}")?;
+    }
+    writeln!(
+        out,
+        "from rendition {}, in force {}\n",
+        rendition.label,
+        window(rendition.in_force.from, rendition.in_force.until)
+    )
+}
+
+/// One rendition as a row, the same whichever command lists it. `law published`
+/// lists renditions of many regulations and names each; `law versions` lists
+/// one regulation's and does not.
+///
+/// Both windows, because they diverge wherever something was published with
+/// retroactive effect; `-` where the manifest states no zicht dates.
+fn rendition_row(rendition: &Expression, with_regulation: bool) -> String {
+    let held = if rendition.held { "*" } else { " " };
+    // The service states images for held text only, so of a rendition it does
+    // not hold the count is unknown, not zero.
+    let images = if rendition.held {
+        format!("{} images", rendition.images.len())
+    } else {
+        String::new()
+    };
+
+    let mut row = format!("{held} ");
+    if with_regulation {
+        let _ = write!(row, "{}  ", rendition.regulation_id);
+    }
+    let _ = write!(
+        row,
+        "{}  {:<WINDOW$}  {:<WINDOW$}  {:<HASH_CHECK$}  {images:<IMAGES$}",
+        rendition.label,
+        window(rendition.in_force.from, rendition.in_force.until),
+        shown(rendition.as_known),
+        rendition.upstream_hash_check,
+    );
+    if rendition.withdrawn {
+        let _ = write!(row, "  withdrawn");
+    }
+    if let Some(because) = &rendition.unread_because {
+        let _ = write!(row, "  unread: {because}");
+    }
+    if let Some(title) = &rendition.regulation_title {
+        let _ = write!(row, "  {title}");
+    }
+    row.trim_end().to_string()
+}
+
+/// What the columns of [`rendition_row`] mean, on stderr beside the rows.
+fn rendition_legend(renditions: &[Expression], err: &mut impl Write) -> io::Result<()> {
+    writeln!(err, "* = the service holds this text")?;
+    writeln!(
+        err,
+        "first window = in force (geldigheid), second = shown by the register (zicht), \
+         - = the manifest states none"
+    )?;
+    writeln!(
+        err,
+        "matches, differs, rewritten, absent, unchecked = what the publisher's hash says \
+         of the held bytes"
+    )?;
+    if renditions.iter().any(|r| r.withdrawn) {
+        writeln!(
+            err,
+            "withdrawn = the publisher withdrew it, and no date resolves to it"
+        )?;
+    }
+    if renditions.iter().any(|r| r.unread_because.is_some()) {
+        writeln!(
+            err,
+            "unread = held and not parsed into articles, so it has none to answer"
+        )?;
+    }
+    Ok(())
+}
+
+/// Which unit a text was found as: a numbered lid, a lid the register numbers
+/// not, or the whole article.
+fn unit_of(unit: &str, lid: Option<&SearchLid>) -> String {
+    match lid.and_then(|lid| lid.number.as_ref()) {
+        Some(number) => format!("lid {number}"),
+        None if unit == "lid" => "lid".to_string(),
+        None => "article".to_string(),
+    }
+}
+
+/// A zicht window, or `-` where the manifest states none.
+fn shown(as_known: Option<bron::service::Window>) -> String {
+    as_known.map_or_else(|| "-".to_string(), |w| window(w.from, w.until))
 }
 
 /// Shows what changed inside an amended article.
@@ -585,7 +812,7 @@ fn first_line(text: &str) -> String {
 }
 
 /// Whether the register publishes this provision and does not yet apply it.
-fn not_commenced(article: &bron::service::Article) -> bool {
+fn not_commenced(article: &Article) -> bool {
     article.status.as_deref() == Some("nogniet")
 }
 
@@ -594,19 +821,14 @@ fn data<T>(envelope: &Envelope<Vec<T>>) -> &[T] {
 }
 
 /// The moment an answer is bound to, where it is bound to one.
-fn bound(
-    as_of: Option<NaiveDate>,
-    as_known_on: Option<NaiveDate>,
-    out: &mut impl Write,
-) -> io::Result<()> {
+fn bound(as_of: Option<NaiveDate>, as_known_on: Option<NaiveDate>) -> Option<String> {
     match (as_of, as_known_on) {
-        (Some(day), Some(read_on)) => writeln!(
-            out,
-            "as in force on {day}, as the register showed on {read_on}\n"
-        ),
-        (Some(day), None) => writeln!(out, "as in force on {day}\n"),
-        (None, Some(read_on)) => writeln!(out, "as the register showed on {read_on}\n"),
-        (None, None) => Ok(()),
+        (Some(day), Some(read_on)) => Some(format!(
+            "as in force on {day}, as the register showed on {read_on}"
+        )),
+        (Some(day), None) => Some(format!("as in force on {day}")),
+        (None, Some(read_on)) => Some(format!("as the register showed on {read_on}")),
+        (None, None) => None,
     }
 }
 
@@ -894,6 +1116,8 @@ mod tests {
         let answer = Answer::Found(Answered {
             data: SearchData::Lookup {
                 citation: "3:305a".into(),
+                paragraph: None,
+                name: None,
                 resolved,
             },
             caveats: Vec::new(),
@@ -1070,6 +1294,114 @@ mod tests {
         });
 
         assert!(note.contains("2 of the 41"), "{note}");
+    }
+
+    fn printed(answer: &Answer) -> String {
+        let mut out = Vec::new();
+        super::answer(answer, &mut out, &mut io::sink()).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    /// The decision itself is what `case show` is asked for; the summary is
+    /// the register's gloss on it. Printed after the summary, whole.
+    #[test]
+    fn case_show_prints_the_decision_and_when_it_was_published() {
+        use bron::wire::{AppealStatus, Case, Provenance};
+
+        let case = Answer::Case(Envelope::ok(Box::new(Case {
+            ecli: "ECLI:NL:HR:2019:1278".into(),
+            court: Some("Hoge Raad".into()),
+            decided_on: Some("2019-07-19".parse().unwrap()),
+            published_on: Some("2019-07-18".parse().unwrap()),
+            procedure_type: Some("Uitspraak".into()),
+            summary: Some("Prejudiciële beslissing.".into()),
+            full_text: Some("HOGE RAAD DER NEDERLANDEN\nCIVIELE KAMER".into()),
+            relations: Vec::new(),
+            appeal: AppealStatus::NoPublishedSuccessor {
+                as_of: "2026-09-19T20:05:34Z".parse().unwrap(),
+            },
+            provenance: Provenance::frozen(
+                &bron::sources::Provenance {
+                    blob: bron::blob::BlobId::of(b"<open-rechtspraak/>"),
+                    url: "https://data.rechtspraak.nl/uitspraken/content?id=ECLI%3ANL%3AHR%3A2019%3A1278".into(),
+                    byte_len: 19,
+                },
+                "2026-09-19T20:05:34Z".parse().unwrap(),
+            ),
+        })));
+
+        let text = printed(&case);
+
+        assert!(text.contains("published 2019-07-18"), "{text}");
+        assert!(text.contains("Uitspraak"), "{text}");
+        assert!(
+            text.contains("HOGE RAAD DER NEDERLANDEN\nCIVIELE KAMER"),
+            "{text}"
+        );
+        assert!(
+            text.find("Prejudiciële beslissing.") < text.find("HOGE RAAD DER NEDERLANDEN"),
+            "{text}"
+        );
+        assert!(
+            text.contains("https://data.rechtspraak.nl/uitspraken/content?id="),
+            "{text}"
+        );
+    }
+
+    /// A hit names its court and the day it was decided on its own row, where
+    /// rechtspraak's title may or may not carry them.
+    #[test]
+    fn a_case_hit_names_its_court_and_its_day() {
+        use bron::wire::CaseHit;
+
+        let hits = Answer::CaseHits(Envelope::ok(vec![CaseHit {
+            ecli: "ECLI:NL:RBLIM:2025:9073".into(),
+            court: Some("Rechtbank Limburg".into()),
+            title: None,
+            summary: None,
+            decided_on: Some("2025-09-17".parse().unwrap()),
+        }]));
+
+        assert!(
+            printed(&hits)
+                .lines()
+                .any(|l| l == "ECLI:NL:RBLIM:2025:9073  Rechtbank Limburg  2025-09-17"),
+            "{}",
+            printed(&hits)
+        );
+    }
+
+    /// When a publication appeared is on its row and on the record.
+    #[test]
+    fn a_publication_says_when_it_was_published() {
+        use bron::wire::{Body, Publication, PublicationHit};
+
+        let hits = Answer::PublicationHits(Envelope::ok(vec![PublicationHit {
+            id: "kst-33669-6".into(),
+            title: Some("Programmatische aanpak stikstof".into()),
+            dossier: Some("33669".into()),
+            published_on: Some("2013-10-01".parse().unwrap()),
+        }]));
+        let record = Answer::Publication(Envelope::ok(Box::new(Publication {
+            id: "kst-33669-6".into(),
+            title: Some("Programmatische aanpak stikstof".into()),
+            dossier: Some("33669".into()),
+            published_on: Some("2013-10-01".parse().unwrap()),
+            body: Body::Absent,
+        })));
+
+        assert!(
+            printed(&hits)
+                .lines()
+                .any(|l| l == "kst-33669-6  2013-10-01  Programmatische aanpak stikstof"),
+            "{}",
+            printed(&hits)
+        );
+        assert!(
+            printed(&record).contains("published 2013-10-01"),
+            "{}",
+            printed(&record)
+        );
     }
 
     /// Rows on stdout and every note on stderr, for the two lists read from a

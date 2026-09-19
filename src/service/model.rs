@@ -26,6 +26,13 @@ pub struct Regulation {
     pub title: Option<String>,
     #[serde(rename = "type")]
     pub regulation_type: Option<String>,
+    /// How much of the regulation the corpus means to hold: `manifest`,
+    /// `current` or `history`, read as a string so a state added later crosses.
+    pub coverage: String,
+    /// How many renditions the register publishes, and how many the corpus
+    /// holds the text of.
+    pub expression_count: Option<u32>,
+    pub held_count: Option<u32>,
 }
 
 /// One rendition, as the manifest describes it and the corpus holds it.
@@ -52,6 +59,8 @@ pub struct Expression {
     /// serves, and BWBR0008691 2016-07-01_0 is one, 49.606 bytes stated
     /// against 547.732 held.
     pub size: Option<u64>,
+    /// The publisher withdrew it, and no date resolves to it.
+    pub withdrawn: bool,
     /// True where the service holds this rendition's text.
     pub held: bool,
     /// Why held bytes were not parsed into articles: `too_large`,
@@ -179,6 +188,10 @@ pub struct Article {
     pub amended_by: Option<String>,
     pub effect: Option<String>,
     pub status: Option<String>,
+    /// The language of the treaty text the unit stands in, and whether that
+    /// text is `authentiek` or a `vertaling`. Both absent outside a treaty.
+    pub lang: Option<String>,
+    pub text_status: Option<String>,
     /// The day this article took the form it has here, as the register states
     /// it. A date and not a moment, and absent where the register named no day.
     pub in_force_from: Option<NaiveDate>,
@@ -389,6 +402,8 @@ mod tests {
             amended_by: None,
             effect: None,
             status: None,
+            lang: None,
+            text_status: None,
             in_force_from: None,
             jci: None,
             span: Span { start: 0, end: 1 },

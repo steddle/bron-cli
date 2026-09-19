@@ -41,11 +41,11 @@ fn stdout(output: &Output) -> String {
 /// it is the service's, and re-serialising would lose every one of them.
 const LOOKUP: &str = r#"{"bron":1,  "grade":"authority","as_of":"2019-06-01","as_known_on":"2020-01-01",
  "data":{"kind":"lookup","citation":"6:162","later_field":{"x":1},
-  "resolved":[{"reading":"book","source":"wetgeving","regulation_id":"BWBR0005289","expression":"2019-04-01_0","held":true,"upstream_hash_check":"matches","number":"162","label":"Artikel 162","content_hash":"f8125445","caveats":[]}]},
+  "resolved":[{"reading":"book","source":"wetgeving","regulation_id":"BWBR0005289","expression":"2019-04-01_0","withdrawn":false,"held":true,"upstream_hash_check":"matches","number":"162","label":"Artikel 162","content_hash":"f8125445","caveats":[]}]},
  "caveats":[{"kind":"something_later","count":3,"labels":["a","b"]}]}"#;
 
 const REGULATIONS: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","later_field":true}]}"#;
+ "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","coverage":"history","later_field":true}]}"#;
 
 const EXPRESSIONS: &str = r#"{"bron":1,"grade":"authority",
  "data":[{"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"size":49606,"withdrawn":false,"held":true,"upstream_hash_check":"matches","blob":"35e2"}]}"#;
@@ -227,11 +227,11 @@ async fn a_person_reads_both_coordinates_the_service_bound_the_answer_to() {
 /// A field and a caveat this build has no name for, on both new routes, so the
 /// pass-through is proved by what survives rather than by what is read.
 const PUBLISHED: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true,"upstream_hash_check":"matches","later_field":9}],
+ "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches","later_field":9}],
  "caveats":[{"kind":"something_later","window":50}]}"#;
 
 const PUBLISHED_CUT: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"held":true,"upstream_hash_check":"matches"}],
+ "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches"}],
  "caveats":[{"kind":"truncated","window":1}]}"#;
 
 const FEED: &str = r#"{"bron":1,"grade":"authority",
@@ -459,6 +459,7 @@ fn articles_of(as_of: &str, label: &str, blob: &str, text: &str) -> String {
                 "regulation_id": "BWBR0008691",
                 "label": label,
                 "in_force": {"from": &label[..10]},
+                "withdrawn": false,
                 "held": true,
                 "upstream_hash_check": "matches",
                 "blob": blob,
@@ -600,6 +601,7 @@ async fn holding_two_articles_numbered_one() -> MockServer {
                 "regulation_id": "BWBR0008691",
                 "label": "2016-07-01_0",
                 "in_force": {"from": "2016-07-01"},
+                "withdrawn": false,
                 "held": true,
                 "upstream_hash_check": "matches",
                 "blob": EARLIER_BLOB,
@@ -708,8 +710,8 @@ async fn the_note_names_an_article_a_narrowed_answer_leaves_out() {
 
 /// Two renditions as the service lists them, newest first.
 const NEWEST_FIRST: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"upstream_hash_check":"matches"},
-         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true,"upstream_hash_check":"matches"}]}"#;
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches"},
+         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"withdrawn":false,"held":true,"upstream_hash_check":"matches"}]}"#;
 
 /// The order of a list of renditions is the service's, and every channel shows
 /// the one it sends. bron prints rows as they arrive and sorts nothing.
@@ -800,11 +802,11 @@ async fn help_asked_for_under_json_is_still_help() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_list_of_rows_keeps_its_caveats_off_stdout() {
     const HITS: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet"}],
+ "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","coverage":"history"}],
  "caveats":[{"kind":"truncated","window":1}]}"#;
 
     const VERSIONS: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"upstream_hash_check":"matches","unread_because":"too_large"}],
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches","unread_because":"too_large"}],
  "caveats":[{"kind":"truncated","window":1}]}"#;
 
     for (route, body, args) in [
@@ -868,6 +870,7 @@ async fn a_provision_not_yet_applied_is_not_said_to_be_in_force() {
                 "regulation_id": "BWBR0020368",
                 "label": "2026-09-01_0",
                 "in_force": {"from": "2026-09-01"},
+                "withdrawn": false,
                 "held": true,
                 "upstream_hash_check": "matches",
                 "blob": EARLIER_BLOB,
@@ -1075,8 +1078,8 @@ async fn a_failure_the_service_states_is_not_called_unusable() {
 #[tokio::test(flavor = "multi_thread")]
 async fn law_versions_says_which_held_renditions_were_not_read() {
     const UNREAD: &str = r#"{"bron":1,"grade":"authority",
- "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"held":true,"upstream_hash_check":"matches","unread_because":"too_large"},
-         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"held":true,"upstream_hash_check":"matches"}]}"#;
+ "data":[{"regulation_id":"BWBR0008691","label":"2019-01-01_0","in_force":{"from":"2019-01-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches","unread_because":"too_large"},
+         {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"withdrawn":false,"held":true,"upstream_hash_check":"matches"}]}"#;
 
     let server = answering("GET", "/api/v1/regulations/BWBR0008691/expressions", UNREAD).await;
 
@@ -1202,9 +1205,9 @@ async fn a_hit_without_a_number_is_ranked_like_any_other() {
     const NUMBERLESS: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-19","data":{"kind":"ranking",
     "searched":["wetgeving"],
     "hits":[{"source":"wetgeving","unit":"article","regulation_id":"BWBR0001941","expression":"2026-09-17_0",
-             "kind":"aanhef","content_hash":"a61a","distance":0.21,"places":[],"found_by":["vector"]},
+             "kind":"aanhef","content_hash":"a61a","distance":0.21,"places":1,"found_by":["vector"]},
             {"source":"wetgeving","unit":"article","regulation_id":"BWBR0001941","expression":"2026-09-17_0",
-             "kind":"bijlage","label":"Lijst I","content_hash":"b72b","distance":0.25,"places":[],"found_by":["vector"]}]}}"#;
+             "kind":"bijlage","label":"Lijst I","content_hash":"b72b","distance":0.25,"places":1,"found_by":["vector"]}]}}"#;
 
     let server = answering("POST", "/api/v1/search", NUMBERLESS).await;
 
@@ -1213,11 +1216,13 @@ async fn a_hit_without_a_number_is_ranked_like_any_other() {
 
     assert!(output.status.success(), "{output:?}");
     assert!(
-        text.lines().any(|l| l.ends_with("BWBR0001941  aanhef")),
+        text.lines()
+            .any(|l| l.contains("BWBR0001941") && l.ends_with("  aanhef")),
         "{text}"
     );
     assert!(
-        text.lines().any(|l| l.ends_with("BWBR0001941  Lijst I")),
+        text.lines()
+            .any(|l| l.contains("BWBR0001941") && l.ends_with("  Lijst I")),
         "{text}"
     );
 }
@@ -1481,7 +1486,11 @@ async fn law_changes_prints_the_comparison_the_service_made() {
     let text = stdout(&human);
     assert!(human.status.success(), "{human:?}");
     assert!(
-        text.contains("2026-07-09_0 (2026-07-09 onwards) -> 2026-09-17_0 (2026-09-17 onwards)"),
+        text.contains("from  2026-07-09_0  2026-07-09 onwards, hash matches"),
+        "{text}"
+    );
+    assert!(
+        text.contains("to    2026-09-17_0  2026-09-17 onwards, hash matches"),
         "{text}"
     );
     assert!(
@@ -2080,4 +2089,247 @@ async fn law_show_prints_no_address_for_a_digest_that_is_no_digest() {
     assert!(output.status.success(), "{output:?}");
     assert!(text.contains("source: ../../etc/passwd"), "{text}");
     assert!(!text.contains("/api/v1/blobs/"), "{text}");
+}
+
+// -- slice 2: the rows a person reads -----------------------------------
+
+/// Which rendition answered is part of the answer: a person reading 'as in
+/// force on 2019-06-01' is otherwise not told which text that date resolved to.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_names_the_rendition_that_answered() {
+    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", ARTICLE).await;
+
+    let text = stdout(&bron(&server, &["law", "show", "BWBR0005289", "--article", "3"]).await);
+
+    assert!(
+        text.lines()
+            .any(|l| l == "from rendition 2019-04-01_0, in force 2019-04-01 onwards"),
+        "{text}"
+    );
+}
+
+/// `law parts` reads a unit the way `law show` reads an article: the rendition
+/// that answered, the address of its document, and whether the unit applies.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_reads_a_unit_the_way_law_show_reads_an_article() {
+    let waiting = PARTS.replace(
+        r#""kind":"bijlage","position":2,"#,
+        r#""kind":"bijlage","position":2,"status":"nogniet","in_force_from":"2027-01-01","amended_by":"stb-2026-300","effect":"wijziging","#,
+    );
+    assert_ne!(waiting, PARTS);
+    let server = answering("GET", "/api/v1/regulations/BWBR0001941/parts", &waiting).await;
+
+    let text = stdout(&bron(&server, &["law", "parts", "BWBR0001941"]).await);
+
+    assert!(text.contains("from rendition 2026-09-17_0"), "{text}");
+    assert!(
+        text.contains(
+            "/api/v1/blobs/1eb72c0011119cf2fdcbc0660f12e7a0cf0612a40cb602f3a30a42a1db5b8de9"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("not yet applied, applies from 2027-01-01"),
+        "{text}"
+    );
+    assert!(
+        text.contains("published by stb-2026-300 (wijziging)"),
+        "{text}"
+    );
+}
+
+/// A unit of a treaty says which language it stands in and whether that text
+/// is the authentic one, because a treaty can print one number twice.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_unit_of_a_treaty_says_its_language_and_whether_it_is_authentic() {
+    let treaty = ARTICLE.replace(
+        r#""kind":"artikel","position":3,"#,
+        r#""kind":"artikel","position":3,"lang":"en","text_status":"vertaling","#,
+    );
+    assert_ne!(treaty, ARTICLE);
+    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", &treaty).await;
+
+    let text = stdout(&bron(&server, &["law", "show", "BWBR0005289", "--article", "3"]).await);
+
+    assert!(
+        text.lines().any(|l| l == "Artikel 3  (en, vertaling)"),
+        "{text}"
+    );
+}
+
+/// Each side of a comparison is checkable: which document it came from, what
+/// the publisher's hash says of it, and where the unit stands in it.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_names_each_side_and_where_each_unit_stands() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0001941/changes",
+        &changes_of_the_opiumwet(),
+    )
+    .await;
+
+    let text = stdout(
+        &bron(
+            &server,
+            &[
+                "law",
+                "changes",
+                "BWBR0001941",
+                "--from",
+                "2026-09-16",
+                "--to",
+                "2026-09-17",
+            ],
+        )
+        .await,
+    );
+
+    assert!(
+        text.lines()
+            .any(|l| l == "from  2026-07-09_0  2026-07-09 onwards, hash matches"),
+        "{text}"
+    );
+    assert!(
+        text.lines().any(|l| l
+            == format!(
+                "      http://127.0.0.1:{}/api/v1/blobs/{EARLIER_BLOB}",
+                server.address().port()
+            )),
+        "{text}"
+    );
+    assert!(
+        text.contains("to    2026-09-17_0  2026-09-17 onwards, hash matches"),
+        "{text}"
+    );
+    assert!(text.contains("           spans 10..90 -> 10..90"), "{text}");
+}
+
+/// A rendition row reads the same whichever command lists it, and says what a
+/// person needs to tell renditions apart: both windows, and whether the
+/// publisher withdrew it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rendition_row_reads_the_same_in_law_versions_and_law_published() {
+    const ROWS: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"regulation_id":"BWBR0005537","label":"2018-07-01_0","regulation_title":"Algemene wet bestuursrecht","in_force":{"from":"2018-07-01","until":"2018-12-31"},"as_known":{"from":"2018-09-12"},"withdrawn":false,"held":true,"upstream_hash_check":"matches"},
+         {"regulation_id":"BWBR0005537","label":"2017-07-01_0","in_force":{"from":"2017-07-01"},"withdrawn":true,"held":false,"upstream_hash_check":"unchecked"}]}"#;
+
+    let versions = answering("GET", "/api/v1/regulations/BWBR0005537/expressions", ROWS).await;
+    let published = answering("GET", "/api/v1/expressions", ROWS).await;
+
+    let listed = stdout(&bron(&versions, &["law", "versions", "BWBR0005537"]).await);
+    let window = stdout(&bron(&published, &["law", "published", "--from", "2017-01-01"]).await);
+
+    let retro = listed.lines().find(|l| l.contains("2018-07-01_0")).unwrap();
+    assert!(retro.contains("2018-07-01 to 2018-12-31"), "{listed}");
+    assert!(retro.contains("2018-09-12 onwards"), "{listed}");
+
+    let withdrawn = listed.lines().find(|l| l.contains("2017-07-01_0")).unwrap();
+    assert!(withdrawn.contains("withdrawn"), "{listed}");
+    // The manifest states no zicht window for it, and the row says so.
+    assert!(withdrawn.contains("  -  "), "{listed}");
+
+    for (row, label) in listed.lines().zip(["2018-07-01_0", "2017-07-01_0"]) {
+        let beside = window.lines().find(|l| l.contains(label)).unwrap();
+        assert_eq!(
+            beside.replacen("BWBR0005537  ", "", 1),
+            row.to_string(),
+            "{listed}\n{window}"
+        );
+    }
+}
+
+/// An event that names a rendition says which windows it has, and whether it
+/// was withdrawn, so a poller reading rows need not ask again to know.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_feed_event_carries_its_rendition_windows() {
+    const EVENTS: &str = r#"{"bron":1,"grade":"authority",
+ "data":{"origin":"a","head":42,"next":42,"events":[
+  {"seq":41,"event":"withdrawn","regulation_id":"BWBR0024282","label":"2026-07-01_0","in_force":{"from":"2026-07-01"},"as_known":{"from":"2026-07-02"},"withdrawn":true},
+  {"seq":42,"event":"listed","regulation_id":"BWBR0024283","withdrawn":false}]}}"#;
+    let server = answering("GET", "/api/v1/feed", EVENTS).await;
+
+    let text = stdout(&bron(&server, &["law", "feed", "--since", "40"]).await);
+    let withdrawn = text.lines().find(|l| l.contains("BWBR0024282")).unwrap();
+    let listed = text.lines().find(|l| l.contains("BWBR0024283")).unwrap();
+
+    assert!(withdrawn.contains("2026-07-01 onwards"), "{text}");
+    assert!(withdrawn.contains("2026-07-02 onwards"), "{text}");
+    assert!(withdrawn.trim_end().ends_with("withdrawn"), "{text}");
+    assert!(listed.trim_end().ends_with("BWBR0024283"), "{text}");
+}
+
+/// A hit on `law search` says whether `law show` can answer it: the type,
+/// how much of it the corpus means to hold, and how many renditions it holds.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_law_search_row_says_how_much_of_the_law_is_held() {
+    const TWO: &str = r#"{"bron":1,"grade":"authority",
+ "data":[{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","coverage":"history","expression_count":236,"held_count":236},
+         {"id":"BWBR0035184","title":"Regeling Awb","type":"ministeriele-regeling","coverage":"current","expression_count":2,"held_count":1}]}"#;
+    let server = answering("GET", "/api/v1/regulations", TWO).await;
+
+    let text = stdout(&bron(&server, &["law", "search", "awb"]).await);
+    let awb = text.lines().find(|l| l.starts_with("BWBR0005537")).unwrap();
+    let regeling = text.lines().find(|l| l.starts_with("BWBR0035184")).unwrap();
+
+    assert!(awb.contains("236 of 236 held"), "{text}");
+    assert!(awb.contains("history"), "{text}");
+    assert!(regeling.contains("1 of 2 held"), "{text}");
+    assert!(regeling.contains("ministeriele-regeling"), "{text}");
+    // The title starts in one place on every row.
+    assert_eq!(
+        awb.find("Algemene wet"),
+        regeling.find("Regeling Awb"),
+        "{text}"
+    );
+}
+
+/// A hit names the rendition it was found in, how it was found, and the other
+/// places the same text sits.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hit_says_where_it_was_found_and_how() {
+    const RANKED: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-19","data":{"kind":"ranking","searched":["wetgeving"],
+ "hits":[{"source":"wetgeving","unit":"article","regulation_id":"BWBR0005289","expression":"2026-07-16_0","kind":"artikel","number":"162","label":"Artikel 162",
+          "content_hash":"f812","distance":0.313,"places":30,"found_by":["vector","text"],
+          "also":[{"unit":"article","regulation_id":"BWBR0028749","expression":"2010-10-10_0","kind":"artikel","number":"162","label":"Artikel 162"},
+                  {"unit":"lid","lid":{"ordinal":0},"regulation_id":"BWBR0005289","expression":"2026-07-16_0","kind":"artikel","number":"162","label":"Artikel 162"}]}]}}"#;
+    let server = answering("POST", "/api/v1/search", RANKED).await;
+
+    let text = stdout(&bron(&server, &["find", "onrechtmatige", "daad"]).await);
+    let hit = text.lines().find(|l| l.contains("BWBR0005289")).unwrap();
+
+    assert!(hit.contains("2026-07-16_0"), "{text}");
+    assert!(hit.contains("vector+text"), "{text}");
+    assert!(
+        text.lines()
+            .any(|l| l.trim() == "also BWBR0028749  2010-10-10_0  article  Artikel 162"),
+        "{text}"
+    );
+    // The same words as the article's own lid are another place, and read as
+    // one rather than as the hit printed twice.
+    assert!(
+        text.lines()
+            .any(|l| l.trim() == "also BWBR0005289  2026-07-16_0  lid      Artikel 162"),
+        "{text}"
+    );
+    assert!(
+        text.lines().any(|l| l.trim() == "and 27 more place(s)"),
+        "{text}"
+    );
+}
+
+/// A citation that names a lid, or its law by name, is read that way, and the
+/// line above the readings says so rather than printing the bare number.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lookup_says_the_lid_and_the_name_it_read() {
+    const LID: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-19","data":{"kind":"lookup","citation":"8:4","paragraph":"2","name":"Awb",
+ "resolved":[{"reading":"named","source":"wetgeving","regulation_id":"BWBR0005537","expression":"2026-08-15_0","withdrawn":false,"held":true,"number":"8:4","kind":"artikel","label":"Artikel 8:4","caveats":[]}]}}"#;
+    let server = answering("POST", "/api/v1/search", LID).await;
+
+    let text = stdout(&bron(&server, &["find", "8:4", "lid", "2", "Awb"]).await);
+
+    assert!(text.lines().any(|l| l == "8:4 lid 2 Awb"), "{text}");
+    assert!(
+        text.contains("law show BWBR0005537 --article 8:4 --paragraph 2"),
+        "{text}"
+    );
 }

@@ -32,7 +32,7 @@ pub use model::{
     Article, Articles, Ask, Change, Changes, Compare, Expression, Feed, Image, Paragraph, Parts,
     Published, RegisterEvent, Regulation, Span, Summary, Units, Window, name,
 };
-pub use search::{Cited, SearchData, SearchHit, SearchLid, SearchRequest};
+pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
 
 /// Where the service lives. Overrides [`DEFAULT`].
 const ENV: &str = "BRON_MIRROR";

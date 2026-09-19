@@ -27,7 +27,11 @@ pub enum Answer {
     LawHits(Answered<Vec<service::Regulation>>),
     Found(Answered<service::SearchData>),
     Versions(Answered<Vec<service::Expression>>),
-    Parts(Box<Answered<service::Parts>>),
+    Parts {
+        answered: Box<Answered<service::Parts>>,
+        /// See `Articles::blob_url`.
+        blob_url: Option<String>,
+    },
     Published(Answered<Vec<service::Expression>>),
     Feed(Answered<service::Feed>),
     Changes {
@@ -35,6 +39,9 @@ pub enum Answer {
         /// Whether --kind or --article narrowed the list, which the service's
         /// summary does not follow.
         narrowed: bool,
+        /// Where each side's document is served. See `Articles::blob_url`.
+        from_url: Option<String>,
+        to_url: Option<String>,
     },
     Articles {
         answered: Box<Answered<service::Articles>>,
@@ -71,7 +78,7 @@ impl Answer {
             Self::LawHits(a) => sent(out, &a.envelope),
             Self::Found(a) => sent(out, &a.envelope),
             Self::Versions(a) => sent(out, &a.envelope),
-            Self::Parts(a) => sent(out, &a.envelope),
+            Self::Parts { answered, .. } => sent(out, &answered.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
             Self::Changes { answered, .. } => sent(out, &answered.envelope),
@@ -205,7 +212,10 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         offset: *offset,
                     },
                 )
-                .map(|answered| Answer::Parts(Box::new(answered)))
+                .map(|answered| Answer::Parts {
+                    blob_url: served(service, &answered.data.expression),
+                    answered: Box::new(answered),
+                })
         }
 
         Law::Published {
@@ -287,6 +297,8 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                     },
                 )
                 .map(|answered| Answer::Changes {
+                    from_url: served(service, &answered.data.from),
+                    to_url: served(service, &answered.data.to),
                     answered: Box::new(answered),
                     narrowed: kind.is_some() || article.is_some(),
                 })
@@ -361,15 +373,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             }
 
             Ok(Answer::Articles {
-                // Where the blob is served, which is the address a reader
-                // fetches to check a span. Built here because the service this
-                // run reads is resolved here and nowhere below.
-                blob_url: answered
-                    .data
-                    .expression
-                    .blob
-                    .as_deref()
-                    .and_then(|digest| service.blob_url(digest)),
+                blob_url: served(service, &answered.data.expression),
                 answered: Box::new(answered),
                 paragraph: paragraph.clone(),
                 item: letter.clone(),
@@ -534,6 +538,16 @@ fn run_publication(cmd: &Publication, quiet: bool) -> Outcome<Answer> {
 }
 
 // -- shared --------------------------------------------------------------
+
+/// Where a rendition's document is served, which is the address a reader
+/// fetches to check a span. Built here because the service this run reads is
+/// resolved here and nowhere below.
+fn served(service: &Service, expression: &service::Expression) -> Option<String> {
+    expression
+        .blob
+        .as_deref()
+        .and_then(|digest| service.blob_url(digest))
+}
 
 /// A window that runs backwards is a request nobody meant to make.
 fn ordered(
