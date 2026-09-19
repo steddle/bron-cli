@@ -434,6 +434,8 @@ pub struct Span {
 /// effect falls in one and not the other, and asking one is not asking both.
 #[derive(Debug)]
 pub struct Published<'a> {
+    /// How many rows to skip, so a list cut at its window can be read past.
+    pub offset: u32,
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
     pub known_from: Option<NaiveDate>,
@@ -474,10 +476,26 @@ pub struct Ask<'a> {
 pub struct Units<'a> {
     pub as_of: NaiveDate,
     pub as_known_on: Option<NaiveDate>,
+    /// One lid number as printed, which narrows the span, the text and the
+    /// reference to that lid.
+    pub paragraph: Option<&'a str>,
     pub kind: Option<&'a str>,
     pub number: Option<&'a str>,
     pub position: Option<u32>,
     pub raw: bool,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+/// Which regulations to look for by name, and how to narrow the answer.
+#[derive(Debug)]
+pub struct Named<'a> {
+    pub query: &'a str,
+    /// The register's own word for a kind of regulation: wet, AMvB, zbo.
+    pub kind: Option<&'a str>,
+    /// The day a name is asked to stand on, on either axis.
+    pub as_of: Option<NaiveDate>,
+    pub as_known_on: Option<NaiveDate>,
     pub limit: u32,
     pub offset: u32,
 }
@@ -502,6 +520,8 @@ pub struct Relating<'a> {
 pub struct Compare<'a> {
     pub from: NaiveDate,
     pub to: NaiveDate,
+    /// The day the register is read on, which selects what it showed then.
+    pub as_known_on: Option<NaiveDate>,
     pub kind: Option<&'a str>,
     pub article: Option<&'a str>,
     pub all: bool,

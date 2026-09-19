@@ -206,6 +206,7 @@ async fn searching(body: &str, status: u16) -> MockServer {
 fn asking_for(term: &str) -> SearchRequest {
     SearchRequest {
         q: term.to_string(),
+        regulation: None,
         limit: 20,
         as_of: "2026-08-24".parse().unwrap(),
         as_known_on: None,

@@ -2918,3 +2918,129 @@ async fn law_relations_says_in_words_that_the_register_states_none() {
         "{numbered:?}"
     );
 }
+
+/// Every name a route declares that a command had no way to send. A list cut
+/// at its window is unreadable past it without `--offset`, a comparison cannot
+/// be asked what the register showed, a question cannot be put to one law, and
+/// a search cannot be narrowed or dated.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_name_the_routes_declare_can_be_sent() {
+    let server = MockServer::start().await;
+
+    for (route, params) in [
+        (
+            "/api/v1/expressions",
+            vec![("in_force_from", "2026-01-01"), ("offset", "50")],
+        ),
+        (
+            "/api/v1/regulations",
+            vec![
+                ("q", "awb"),
+                ("type", "wet"),
+                ("as_of", "2019-06-01"),
+                ("as_known_on", "2020-01-01"),
+                ("offset", "20"),
+            ],
+        ),
+        (
+            "/api/v1/regulations/BWBR0005289/changes",
+            vec![("from", "2019-01-01"), ("as_known_on", "2020-01-01")],
+        ),
+        (
+            "/api/v1/regulations/BWBR0001941/parts",
+            vec![("kind", "artikel"), ("number", "2"), ("paragraph", "1")],
+        ),
+    ] {
+        let mut mock = Mock::given(method("GET")).and(path(route));
+        for (name, value) in params {
+            mock = mock.and(query_param(name, value));
+        }
+        mock.respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"route_not_found","message":"asked","detail":[]}}"#,
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    }
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/search"))
+        .and(body_json(serde_json::json!({
+            "q": "onrechtmatige daad",
+            "regulation": "BWBR0005289,BWBR0005537",
+            "limit": 20,
+            "as_of": "2026-09-19",
+        })))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"citation_not_found","message":"asked","detail":[]}}"#,
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // Each mock answers only where every name arrived, and its answer is the
+    // not-found these assert on.
+    for args in [
+        &["law", "published", "--from", "2026-01-01", "--offset", "50"][..],
+        &[
+            "law",
+            "search",
+            "awb",
+            "--type",
+            "wet",
+            "--as-of",
+            "2019-06-01",
+            "--as-known-on",
+            "2020-01-01",
+            "--offset",
+            "20",
+        ][..],
+        &[
+            "law",
+            "changes",
+            "BWBR0005289",
+            "--from",
+            "2019-01-01",
+            "--as-known-on",
+            "2020-01-01",
+        ][..],
+        &[
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "artikel",
+            "--number",
+            "2",
+            "--paragraph",
+            "1",
+        ][..],
+        &[
+            "find",
+            "onrechtmatige daad",
+            "--regulation",
+            "BWBR0005289",
+            "--regulation",
+            "BWBR0005537",
+            "--as-of",
+            "2026-09-19",
+        ][..],
+    ] {
+        let output = bron(&server, args).await;
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+    }
+}
+
+/// A BWB identifier that is not one is the caller's to fix, and never reaches
+/// the service as a question about nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn find_refuses_a_regulation_that_is_no_identifier() {
+    let server = MockServer::start().await;
+
+    let output = bron(&server, &["find", "daad", "--regulation", "Awb"]).await;
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

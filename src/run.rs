@@ -129,9 +129,18 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
         Command::Publication(pub_) => run_publication(pub_, quiet),
         Command::Find {
             query,
+            regulation,
             limit,
             moment,
-        } => run_find(&query.join(" "), *limit, moment, today, quiet, &service),
+        } => run_find(
+            &query.join(" "),
+            regulation,
+            *limit,
+            moment,
+            today,
+            quiet,
+            &service,
+        ),
         Command::Blob { digest, span } => run_blob(digest, *span, quiet, &service),
     }
 }
@@ -204,6 +213,7 @@ pub fn item<'a>(text: &'a str, letter: &str) -> Option<&'a str> {
 /// service's own envelope like every other call here.
 fn run_find(
     query: &str,
+    regulation: &[String],
     limit: u32,
     moment: &Moment,
     today: NaiveDate,
@@ -216,11 +226,19 @@ fn run_find(
 
     let (as_of, as_known_on) = moment.coordinates(today);
 
+    // Checked here, because a question put to something that is no identifier
+    // is a question the service answers about nothing.
+    let inside = regulation
+        .iter()
+        .map(|law| parse_id::<BwbId>(law).map(|law| law.into_string()))
+        .collect::<Outcome<Vec<_>>>()?;
+
     service
         .search(
             &client(quiet)?,
             &service::SearchRequest {
                 q: query.to_string(),
+                regulation: (!inside.is_empty()).then(|| inside.join(",")),
                 limit,
                 as_of,
                 as_known_on,
@@ -235,8 +253,24 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
     let client = client(quiet)?;
 
     match law_cmd {
-        Law::Search { query, limit } => service
-            .regulations(&client, &query.join(" "), *limit)
+        Law::Search {
+            query,
+            kind,
+            limit,
+            offset,
+            moment,
+        } => service
+            .regulations(
+                &client,
+                &service::Named {
+                    query: &query.join(" "),
+                    kind: kind.as_deref(),
+                    as_of: moment.as_of,
+                    as_known_on: moment.as_known_on,
+                    limit: *limit,
+                    offset: *offset,
+                },
+            )
             .map(Answer::LawHits),
 
         Law::Amendments { id, limit, offset } => service
@@ -300,6 +334,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             kind,
             number,
             position,
+            paragraph,
             raw,
             limit,
             offset,
@@ -316,6 +351,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         as_known_on,
                         kind: kind.as_deref(),
                         number: number.as_deref(),
+                        paragraph: paragraph.as_deref(),
                         position: *position,
                         raw: *raw,
                         limit: *limit,
@@ -336,6 +372,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             kind,
             regulation,
             limit,
+            offset,
         } => {
             // Checked here rather than by clap, which can require a flag but
             // cannot say that one of four is enough.
@@ -361,6 +398,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         kind: kind.as_deref(),
                         regulation: law.as_ref(),
                         limit: *limit,
+                        offset: *offset,
                     },
                 )
                 .map(Answer::Published)
@@ -385,6 +423,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             all,
             kind,
             article,
+            as_known_on,
             raw,
         } => {
             let law: BwbId = parse_id(id)?;
@@ -400,6 +439,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                     &service::Compare {
                         from: *from,
                         to,
+                        as_known_on: *as_known_on,
                         kind: kind.as_deref(),
                         article: article.as_deref(),
                         all: *all,

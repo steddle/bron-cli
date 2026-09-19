@@ -32,8 +32,8 @@ use crate::sources::Client;
 pub use client::Answered;
 pub use model::{
     Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Expression, Feed, Had,
-    History, Image, Lineage, Paragraph, Parts, Produced, Published, RegisterEvent, Regulation,
-    Related, Relating, Relation, Relations, Span, Summary, Units, Window, name,
+    History, Image, Lineage, Named, Paragraph, Parts, Produced, Published, RegisterEvent,
+    Regulation, Related, Relating, Relation, Relations, Span, Summary, Units, Window, name,
 };
 pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -116,17 +116,29 @@ impl Service {
     pub fn regulations(
         &self,
         client: &Client,
-        query: &str,
-        limit: u32,
+        ask: &Named<'_>,
     ) -> Outcome<Answered<Vec<Regulation>>> {
         let url = format!("{}/api/v1/regulations", self.base);
 
-        self.read(
-            client,
-            client
-                .get(&url)
-                .query(&[("q", query), ("limit", &limit.to_string())]),
-        )
+        let mut query = vec![
+            ("q", ask.query.to_string()),
+            ("limit", ask.limit.to_string()),
+            ("offset", ask.offset.to_string()),
+        ];
+
+        if let Some(kind) = ask.kind {
+            query.push(("type", kind.to_string()));
+        }
+        // A name the register states is a name it states on a day: a
+        // citeertitel is given and taken away like any other text.
+        if let Some(day) = ask.as_of {
+            query.push(("as_of", day.to_string()));
+        }
+        if let Some(day) = ask.as_known_on {
+            query.push(("as_known_on", day.to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
     }
 
     /// What the index knows about one regulation.
@@ -155,7 +167,10 @@ impl Service {
     ) -> Outcome<Answered<Vec<Expression>>> {
         let url = format!("{}/api/v1/expressions", self.base);
 
-        let mut query = vec![("limit", ask.limit.to_string())];
+        let mut query = vec![
+            ("limit", ask.limit.to_string()),
+            ("offset", ask.offset.to_string()),
+        ];
 
         for (name, day) in [
             ("in_force_from", ask.from),
@@ -260,6 +275,9 @@ impl Service {
         if let Some(number) = ask.number {
             query.push(("number", number.to_string()));
         }
+        if let Some(paragraph) = ask.paragraph {
+            query.push(("paragraph", paragraph.to_string()));
+        }
         if let Some(position) = ask.position {
             query.push(("position", position.to_string()));
         }
@@ -363,6 +381,9 @@ impl Service {
             ("rendered", "1".to_string()),
         ];
 
+        if let Some(day) = ask.as_known_on {
+            query.push(("as_known_on", day.to_string()));
+        }
         if let Some(kind) = ask.kind {
             query.push(("kind", kind.to_string()));
         }

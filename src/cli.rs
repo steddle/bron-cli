@@ -73,6 +73,11 @@ pub enum Command {
         /// The question in words, or the citation.
         query: Vec<String>,
 
+        /// Search inside this law only, by its BWB identifier. Repeat it to
+        /// search inside several.
+        #[arg(long, value_name = "BWB")]
+        regulation: Vec<String>,
+
         #[arg(long, default_value_t = 20)]
         limit: u32,
 
@@ -120,10 +125,27 @@ fn byte_range(text: &str) -> Result<(usize, usize), String> {
 #[derive(Debug, Subcommand)]
 pub enum Law {
     /// Searches by citeertitel. Returns candidates, not text.
+    ///
+    /// The register gives a regulation its names on a day, so a moment narrows
+    /// which names count: a citeertitel is given and taken away like any other
+    /// text.
     Search {
         query: Vec<String>,
+
+        /// Only regulations of this type, as the register spells it: wet,
+        /// AMvB, zbo.
+        #[arg(long = "type", value_name = "TYPE")]
+        kind: Option<String>,
+
         #[arg(long, default_value_t = 20)]
         limit: u32,
+
+        /// How many rows to skip.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+
+        #[command(flatten)]
+        moment: Moment,
     },
 
     /// Shows a law's articles, or one of them.
@@ -209,6 +231,11 @@ pub enum Law {
         /// that prints no number is asked for.
         #[arg(long, requires = "kind", value_parser = clap::value_parser!(u32).range(1..))]
         position: Option<u32>,
+
+        /// One lid of that unit, as the register numbers it. The span, the
+        /// text and the reference become the lid's.
+        #[arg(long)]
+        paragraph: Option<String>,
 
         /// Also carry the publisher's own bytes at every span. See `law show`.
         #[arg(long)]
@@ -342,6 +369,10 @@ pub enum Law {
 
         #[arg(long, default_value_t = 50)]
         limit: u32,
+
+        /// How many rows to skip, to read past a list cut at its window.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
     },
 
     /// What the register has done since a cursor, in the order bron saw it.
@@ -400,6 +431,11 @@ pub enum Law {
         /// article's, or with --kind a bijlage's.
         #[arg(long)]
         article: Option<String>,
+
+        /// The day the register is read on (zicht), which selects what it
+        /// showed then. Both days of the comparison are resolved against it.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        as_known_on: Option<NaiveDate>,
 
         /// Also carry the publisher's own bytes at every span. See `law show`.
         #[arg(long)]

@@ -28,6 +28,9 @@ use super::client::Answered;
 #[derive(Debug, Serialize)]
 pub struct SearchRequest {
     pub q: String,
+    /// One or more BWB identifiers to search inside, separated by commas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regulation: Option<String>,
     pub limit: u32,
     pub as_of: NaiveDate,
     #[serde(skip_serializing_if = "Option::is_none")]
