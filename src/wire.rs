@@ -181,12 +181,24 @@ pub enum Caveat {
     /// by identifier, which is the route that does not go through a vector.
     UnrankableTexts { scope: String, count: u32 },
 
+    /// Texts too long to index for full text, held whole and found by no word
+    /// in them. `scope` is `corpus`, as on [`Caveat::UnrankableTexts`]. They
+    /// stay answerable by identifier.
+    TextsUnindexed { scope: String, count: u32 },
+
     /// The citation reads more than one way and every reading is answered.
     ///
     /// Not [`Caveat::AmbiguousRendition`]: nothing is discarded here. `3:305a`
     /// is Boek 3 artikel 305a and is also, in a law that prints the colon
     /// itself, artikel 3:305a, and which the reader meant is theirs to say.
-    SeveralReadings { readings: Vec<String> },
+    ///
+    /// `regulations` names them where the register gives one name to several
+    /// regulations, and is empty where it does not.
+    SeveralReadings {
+        readings: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        regulations: Vec<String>,
+    },
 
     /// A reading of a citation that came to nothing, and why.
     ///
@@ -412,8 +424,14 @@ impl Caveat {
                 scope: String,
                 count: u32,
             },
+            TextsUnindexed {
+                scope: String,
+                count: u32,
+            },
             SeveralReadings {
                 readings: Vec<String>,
+                #[serde(default)]
+                regulations: Vec<String>,
             },
             ReadingUnresolved {
                 reading: String,
@@ -475,6 +493,7 @@ impl Caveat {
                 Self::AmbiguousArticle { number, paths }
             }
             Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
+            Ok(Stated::TextsUnindexed { scope, count }) => Self::TextsUnindexed { scope, count },
             Ok(Stated::TableFlattened {
                 articles,
                 cell_separator,
@@ -485,7 +504,13 @@ impl Caveat {
             Ok(Stated::NotCommenced { articles }) => Self::NotCommenced { articles },
             Ok(Stated::IllustrationOmitted { articles }) => Self::IllustrationOmitted { articles },
             Ok(Stated::LanesUnsearched { lanes }) => Self::LanesUnsearched { lanes },
-            Ok(Stated::SeveralReadings { readings }) => Self::SeveralReadings { readings },
+            Ok(Stated::SeveralReadings {
+                readings,
+                regulations,
+            }) => Self::SeveralReadings {
+                readings,
+                regulations,
+            },
             Ok(Stated::ReadingUnresolved {
                 reading,
                 because,
@@ -1031,6 +1056,40 @@ mod tests {
         );
     }
 
+    /// The count of texts no word finds is read under its own name, the twin
+    /// of the texts no ranking reaches.
+    #[test]
+    fn texts_no_word_finds_are_read_with_their_scope() {
+        assert_eq!(
+            Caveat::stated(&serde_json::json!({
+                "kind": "texts_unindexed",
+                "scope": "corpus",
+                "count": 3
+            })),
+            Caveat::TextsUnindexed {
+                scope: "corpus".into(),
+                count: 3
+            }
+        );
+    }
+
+    /// Where the register gives one name to several regulations, the service
+    /// names them, and the reading keeps them.
+    #[test]
+    fn several_readings_keep_the_regulations_that_share_a_name() {
+        assert_eq!(
+            Caveat::stated(&serde_json::json!({
+                "kind": "several_readings",
+                "readings": ["literal"],
+                "regulations": ["BWBR0005537", "BWBR0005538"]
+            })),
+            Caveat::SeveralReadings {
+                readings: vec!["literal".into()],
+                regulations: vec!["BWBR0005537".into(), "BWBR0005538".into()],
+            }
+        );
+    }
+
     /// A rendition that lost articles says how many. Read as `unrecognised` it
     /// would tell a reader on a current build to upgrade.
     #[test]
@@ -1111,7 +1170,13 @@ mod tests {
             serde_json::json!({"kind": "illustration_omitted", "articles": ["3.2"]}),
             serde_json::json!({"kind": "lanes_unsearched", "lanes": ["rechtspraak"]}),
             serde_json::json!({"kind": "unrankable_texts", "scope": "corpus", "count": 64}),
+            serde_json::json!({"kind": "texts_unindexed", "scope": "corpus", "count": 3}),
             serde_json::json!({"kind": "several_readings", "readings": ["book", "literal"]}),
+            serde_json::json!({
+                "kind": "several_readings",
+                "readings": ["literal"],
+                "regulations": ["BWBR0005537", "BWBR0005538"],
+            }),
             serde_json::json!({
                 "kind": "reading_unresolved",
                 "reading": "literal",

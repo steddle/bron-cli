@@ -353,6 +353,7 @@ async fn a_citation_is_looked_up_rather_than_ranked() {
     assert!(
         answered.caveats.contains(&Caveat::SeveralReadings {
             readings: vec!["book".into(), "literal".into()],
+            regulations: Vec::new(),
         }),
         "{:?}",
         answered.caveats

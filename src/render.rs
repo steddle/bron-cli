@@ -674,11 +674,24 @@ fn caveat_line(caveat: &Caveat) -> String {
                  on bron's own capture alone"
                 .to_string()
         }
-        Caveat::SeveralReadings { readings } => format!(
-            "note: this citation reads more than one way and every reading is answered: {}. \
-                 Which was meant is yours to say.",
-            readings.join(", "),
-        ),
+        Caveat::SeveralReadings {
+            readings,
+            regulations,
+        } => {
+            let mut line = format!(
+                "note: this citation reads more than one way and every reading is answered: {}.",
+                readings.join(", "),
+            );
+            if !regulations.is_empty() {
+                let _ = write!(
+                    line,
+                    " The register gives the name to more than one regulation: {}.",
+                    regulations.join(", "),
+                );
+            }
+            line.push_str(" Which was meant is yours to say.");
+            line
+        }
         Caveat::ReadingUnresolved {
             reading,
             because,
@@ -715,6 +728,10 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: {count} text(s) in the {scope} carry no vector, because the model will not \
              take them in one input, so no ranking reaches them. They are answered by \
              identifier.",
+        ),
+        Caveat::TextsUnindexed { scope, count } => format!(
+            "note: {count} text(s) in the {scope} are too long to index for full text, so no \
+             word in them finds them. They are answered by identifier.",
         ),
         Caveat::NotCommenced { articles } => format!(
             "note: article(s) {} have not commenced and do not apply yet. Each is shown as \
@@ -939,6 +956,37 @@ mod tests {
         assert!(note.contains("do not apply yet"), "{note}");
         assert!(note.contains("as the rendition prints"), "{note}");
         assert!(!note.contains("will have"), "{note}");
+    }
+
+    /// Texts no word finds are named apart from texts no vector ranks: a reader
+    /// told one would look for the other by the wrong route.
+    #[test]
+    fn texts_no_word_finds_say_they_are_found_by_identifier() {
+        let note = caveat_line(&Caveat::TextsUnindexed {
+            scope: "corpus".into(),
+            count: 3,
+        });
+
+        assert!(note.contains("3 text(s) in the corpus"), "{note}");
+        assert!(note.contains("no word"), "{note}");
+        assert!(note.contains("identifier"), "{note}");
+    }
+
+    /// The regulations sharing the name are named where the service names them.
+    #[test]
+    fn several_readings_name_the_regulations_that_share_a_name() {
+        let note = caveat_line(&Caveat::SeveralReadings {
+            readings: vec!["literal".into()],
+            regulations: vec!["BWBR0005537".into(), "BWBR0005538".into()],
+        });
+
+        assert!(note.contains("BWBR0005537, BWBR0005538"), "{note}");
+
+        let without = caveat_line(&Caveat::SeveralReadings {
+            readings: vec!["book".into(), "literal".into()],
+            regulations: Vec::new(),
+        });
+        assert!(!without.contains("regulations"), "{without}");
     }
 
     #[test]
