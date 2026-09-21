@@ -186,6 +186,18 @@ pub enum Caveat {
     /// configuration makes of them. The vector list read the whole question.
     WordsUnsearched { words: Vec<String> },
 
+    /// These hits' places were read up to `bound` in the article or lid list.
+    /// Their counts are lower bounds, and the places named are first among
+    /// those read, not necessarily first across all places.
+    PlacesRead {
+        bound: u32,
+        content_hashes: Vec<String>,
+    },
+
+    /// Renditions for the moment asked that the index does not hold as the
+    /// corpus does. Their texts rank as last indexed, or not at all.
+    IndexBehind { scope: String, count: u32 },
+
     /// A treaty prints `number` in its authentic text and in a translation,
     /// and the authentic text is what answered. `lang` names the languages the
     /// translations stand in and `paths` where each is printed.
@@ -357,6 +369,10 @@ pub enum Caveat {
     /// whose every held text can be quoted.
     RenditionsUnread { count: u32, renditions: u32 },
 
+    /// These renditions were parsed for articles alone, so the answer covers
+    /// their articles and no other units.
+    ReadForArticles { renditions: Vec<String> },
+
     /// The rendition `expression` prints words that no unit holds: beside the
     /// units of a chapter or a bijlage that holds some, or under an element
     /// without the publisher's identity. `units` counts them per element.
@@ -437,6 +453,14 @@ impl Caveat {
             WordsUnsearched {
                 words: Vec<String>,
             },
+            PlacesRead {
+                bound: u32,
+                content_hashes: Vec<String>,
+            },
+            IndexBehind {
+                scope: String,
+                count: u32,
+            },
             TranslationLeftOut {
                 number: String,
                 lang: Vec<String>,
@@ -471,6 +495,9 @@ impl Caveat {
             RenditionsUnread {
                 count: u32,
                 renditions: u32,
+            },
+            ReadForArticles {
+                renditions: Vec<String>,
             },
             TextOutsideArticles {
                 expression: String,
@@ -509,6 +536,14 @@ impl Caveat {
             Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
             Ok(Stated::TextsUnindexed { scope, count }) => Self::TextsUnindexed { scope, count },
             Ok(Stated::WordsUnsearched { words }) => Self::WordsUnsearched { words },
+            Ok(Stated::PlacesRead {
+                bound,
+                content_hashes,
+            }) => Self::PlacesRead {
+                bound,
+                content_hashes,
+            },
+            Ok(Stated::IndexBehind { scope, count }) => Self::IndexBehind { scope, count },
             Ok(Stated::TranslationLeftOut {
                 number,
                 lang,
@@ -568,6 +603,7 @@ impl Caveat {
             Ok(Stated::RenditionsUnread { count, renditions }) => {
                 Self::RenditionsUnread { count, renditions }
             }
+            Ok(Stated::ReadForArticles { renditions }) => Self::ReadForArticles { renditions },
             Ok(Stated::TextOutsideArticles { expression, units }) => {
                 Self::TextOutsideArticles { expression, units }
             }
@@ -872,6 +908,44 @@ mod tests {
         let stated = serde_json::json!({"kind": "something_later", "detail": 3});
 
         assert_eq!(Caveat::stated(&stated), Caveat::Unrecognised { stated });
+    }
+
+    #[test]
+    fn search_and_article_coverage_limits_keep_their_names_and_fields() {
+        for stated in [
+            serde_json::json!({"kind": "places_read", "bound": 100, "content_hashes": ["a".repeat(64), "b".repeat(64)]}),
+            serde_json::json!({"kind": "index_behind", "scope": "moment", "count": 7}),
+            serde_json::json!({"kind": "read_for_articles", "renditions": ["2025-01-01_0", "2026-01-01_0"]}),
+        ] {
+            assert_eq!(
+                serde_json::to_value(Caveat::stated(&stated)).unwrap(),
+                stated
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_limits_and_unreadable_new_limits_keep_the_whole_payload() {
+        for stated in [
+            serde_json::json!({"kind": "something_later", "detail": {"nested": [1, "two", null]}}),
+            serde_json::json!({"kind": "places_read", "bound": 100}),
+            serde_json::json!({"kind": "places_read", "bound": "many", "content_hashes": ["a".repeat(64)]}),
+            serde_json::json!({"kind": "index_behind", "count": 7}),
+            serde_json::json!({"kind": "index_behind", "scope": "moment", "count": "seven"}),
+            serde_json::json!({"kind": "read_for_articles", "renditions": [7], "detail": {"why": "later"}}),
+        ] {
+            let read = Caveat::stated(&stated);
+            assert_eq!(
+                read,
+                Caveat::Unrecognised {
+                    stated: stated.clone()
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(read).unwrap(),
+                serde_json::json!({"kind": "unrecognised", "stated": stated})
+            );
+        }
     }
 
     /// The units are a map, and a map the shape here does not read still

@@ -1264,6 +1264,19 @@ fn caveat_line(caveat: &Caveat) -> String {
              ranking read the whole question, so a hit found only by words may be missing.",
             words.join(", "),
         ),
+        Caveat::PlacesRead {
+            bound,
+            content_hashes,
+        } => format!(
+            "note: places for text(s) {} were read up to {bound} in the article or lid list. \
+             Their places counts are lower bounds; the places named are first among those \
+             read, not necessarily first across all places.",
+            content_hashes.join(", "),
+        ),
+        Caveat::IndexBehind { scope, count } => format!(
+            "note: the search index is behind on {count} rendition(s) for the {scope} asked. \
+             Their texts rank as the index last held them, or not at all."
+        ),
         // The text answered is the authentic one, which is the text that binds.
         // The translation is named rather than silently passed over.
         Caveat::TranslationLeftOut {
@@ -1346,6 +1359,11 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::RenditionsUnread { count, renditions } => format!(
             "note: {count} of the {renditions} rendition(s) listed are held and were not parsed \
                  into articles, so they have no article to answer"
+        ),
+        Caveat::ReadForArticles { renditions } => format!(
+            "note: rendition(s) {} were parsed for articles alone. This answer covers their \
+             articles and no other units.",
+            renditions.join(", "),
         ),
         // Every element, the aanhef too: the count is the service's, and naming
         // only some of it would be bron deciding which text matters.
@@ -1511,6 +1529,55 @@ mod tests {
 
         assert!(note.contains("van, de"), "{note}");
         assert!(note.contains("ranking read the whole question"), "{note}");
+    }
+
+    #[test]
+    fn bounded_places_name_the_texts_and_limit_what_the_count_claims() {
+        let hashes = ["a".repeat(64), "b".repeat(64)];
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "places_read", "bound": 100, "content_hashes": hashes,
+        })));
+
+        for hash in hashes {
+            assert!(note.contains(&hash), "{note}");
+        }
+        assert!(note.contains("up to 100"), "{note}");
+        assert!(note.contains("lower bounds"), "{note}");
+        assert!(note.contains("first among those read"), "{note}");
+        assert!(
+            note.contains("not necessarily first across all places"),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn an_index_behind_names_the_moment_count_and_the_ranking_limit() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "index_behind", "scope": "moment", "count": 7,
+        })));
+
+        assert!(
+            note.contains("7 rendition(s) for the moment asked"),
+            "{note}"
+        );
+        assert!(
+            note.contains("as the index last held them, or not at all"),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn renditions_read_for_articles_name_what_the_answer_covers() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "read_for_articles", "renditions": ["2025-01-01_0", "2026-01-01_0"],
+        })));
+
+        assert!(note.contains("2025-01-01_0, 2026-01-01_0"), "{note}");
+        assert!(note.contains("parsed for articles alone"), "{note}");
+        assert!(
+            note.contains("covers their articles and no other units"),
+            "{note}"
+        );
     }
 
     /// The text answered is the authentic one, and the note says a translation
