@@ -2203,7 +2203,6 @@ mod tests {
     ) -> bron::service::PublicationHit {
         bron::service::PublicationHit {
             id: id.into(),
-            collection: id.split('-').next().unwrap_or_default().into(),
             held,
             publication_type: Some("Kamerstuk".into()),
             title: title.map(str::to_string),
@@ -2245,14 +2244,12 @@ mod tests {
         let record = Answer::Publication(Box::new(Answered {
             data: Publication {
                 id: "kst-33669-6".into(),
-                collection: "kst".into(),
                 publication_type: Some("Kamerstuk".into()),
                 title: Some("Programmatische aanpak stikstof".into()),
                 published_on: Some("2013-10-01".parse().unwrap()),
                 signed_on: None,
                 dossier: Some("33669".into()),
                 held: true,
-                known_since: None,
                 manifestations: Vec::new(),
                 dossiers: Vec::new(),
                 units: None,

@@ -52,7 +52,6 @@ pub struct PublicationSearch {
 #[derive(Debug, Deserialize)]
 pub struct PublicationHit {
     pub id: String,
-    pub collection: String,
     pub held: bool,
     #[serde(rename = "type")]
     pub publication_type: Option<String>,
@@ -66,7 +65,6 @@ pub struct PublicationHit {
 #[derive(Debug, Deserialize)]
 pub struct Publication {
     pub id: String,
-    pub collection: String,
     #[serde(rename = "type")]
     pub publication_type: Option<String>,
     pub title: Option<String>,
@@ -77,12 +75,6 @@ pub struct Publication {
     /// Whether the corpus keeps it. False where it was passed on, under a
     /// `publication_not_held` caveat.
     pub held: bool,
-    /// The earliest manifestation's own `Last-Modified`, as the register
-    /// states it: the day from which the corpus can say what the publisher
-    /// served. Carried as the service sends it rather than parsed, because its
-    /// shape differs between a held publication's timestamp and a passed-on
-    /// one's.
-    pub known_since: Option<String>,
     pub manifestations: Vec<Manifestation>,
     /// The dossier the publication states as its own, in its `<histnoot>`. On
     /// a publication not held, `stated_in` is the digest of the bytes bron
@@ -102,11 +94,9 @@ pub struct Manifestation {
     /// SHA-256 of its bytes. Absent where the publication was passed on and
     /// this format was not the one item asked for.
     pub blob: Option<String>,
-    /// The item's own `Last-Modified`, as the register states it.
-    pub last_modified: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct PublicationDossier {
     pub dossier: String,
     pub stated_in: String,
