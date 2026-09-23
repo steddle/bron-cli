@@ -32,8 +32,10 @@ pub struct SearchRequest<'a> {
     pub regulation: Option<String>,
     /// As the service reads it: digits, exactly as typed. A numeric string
     /// crosses the same request body a bare number would: the service reads
-    /// either.
-    pub limit: &'a str,
+    /// either. Left out where untyped, so the service's window is the
+    /// default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<&'a str>,
     /// The two coordinates as typed, each left out where the caller named
     /// none. See [`super::Ask`].
     #[serde(skip_serializing_if = "Option::is_none")]

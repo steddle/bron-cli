@@ -139,7 +139,14 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
             regulation,
             limit,
             moment,
-        } => run_find(&query.join(" "), regulation, limit, moment, quiet, &service),
+        } => run_find(
+            &query.join(" "),
+            regulation,
+            limit.as_deref(),
+            moment,
+            quiet,
+            &service,
+        ),
         Command::Blob { digest, span } => run_blob(digest, *span, quiet, &service),
     }
 }
@@ -213,7 +220,7 @@ pub fn item<'a>(text: &'a str, letter: &str) -> Option<&'a str> {
 fn run_find(
     query: &str,
     regulation: &[String],
-    limit: &str,
+    limit: Option<&str>,
     moment: &Moment,
     quiet: bool,
     service: &Service,
@@ -254,14 +261,14 @@ fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
                     kind: kind.as_deref(),
                     as_of: moment.as_of.as_deref(),
                     as_known_on: moment.as_known_on.as_deref(),
-                    limit,
-                    offset,
+                    limit: limit.as_deref(),
+                    offset: offset.as_deref(),
                 },
             )
             .map(Answer::LawHits),
 
         Law::Amendments { id, limit, offset } => service
-            .amendments(&client, id, limit, offset)
+            .amendments(&client, id, limit.as_deref(), offset.as_deref())
             .map(|answered| Answer::Amendments(Box::new(answered))),
 
         Law::Relations {
@@ -283,8 +290,8 @@ fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
                         as_known_on,
                         kind: kind.as_deref(),
                         article: article.as_deref(),
-                        limit,
-                        offset,
+                        limit: limit.as_deref(),
+                        offset: offset.as_deref(),
                     },
                 )
                 .map(|answered| Answer::Relations {
@@ -343,8 +350,8 @@ fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
                         lang: lang.as_deref(),
                         raw: *raw,
                         not_commenced: *not_commenced,
-                        limit,
-                        offset,
+                        limit: limit.as_deref(),
+                        offset: offset.as_deref(),
                     },
                 )
                 .map(|answered| Answer::Parts {
@@ -372,8 +379,8 @@ fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
                     known_to: known_to.as_deref(),
                     kind: kind.as_deref(),
                     regulation: regulation.as_deref(),
-                    limit,
-                    offset,
+                    limit: limit.as_deref(),
+                    offset: offset.as_deref(),
                 },
             )
             .map(Answer::Published),
@@ -383,7 +390,12 @@ fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
             regulation,
             limit,
         } => service
-            .feed(&client, since.as_deref(), limit, regulation.as_deref())
+            .feed(
+                &client,
+                since.as_deref(),
+                limit.as_deref(),
+                regulation.as_deref(),
+            )
             .map(Answer::Feed),
 
         Law::Upcoming {
@@ -405,8 +417,8 @@ fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
                         from: from.as_deref(),
                         to: to.as_deref(),
                         kind: kind.as_deref(),
-                        limit,
-                        offset,
+                        limit: limit.as_deref(),
+                        offset: offset.as_deref(),
                     },
                 )
                 .map(Answer::Upcoming)
@@ -602,7 +614,7 @@ fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome
                         q: (!q.is_empty()).then_some(q.as_str()),
                         collection: collection.map(CollectionArg::as_code),
                         dossier: dossier.as_deref(),
-                        limit,
+                        limit: limit.as_deref(),
                         next: next.as_deref(),
                     },
                 )
@@ -616,7 +628,14 @@ fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome
             limit,
             offset,
         } => service
-            .publication(&client, id, limit, offset, *rendered, *raw)
+            .publication(
+                &client,
+                id,
+                limit.as_deref(),
+                offset.as_deref(),
+                *rendered,
+                *raw,
+            )
             .map(|answered| Answer::Publication(Box::new(answered))),
     }
 }

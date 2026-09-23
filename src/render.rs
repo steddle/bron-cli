@@ -1807,6 +1807,12 @@ fn caveat_line(caveat: &Caveat) -> String {
                              in the BWB, the kinds of act counted as left out, and EU regulations \
                              are not in it."
             .to_string(),
+        Caveat::ProvenanceOfArticle { articles, fields } => format!(
+            "note: these fields describe article(s) {}, not the lid: {}. The register records \
+             provenance per article.",
+            articles.join(", "),
+            fields.join(", "),
+        ),
         Caveat::UnitsWithdrawnByRemark { count } => format!(
             "note: {count} unit(s) the rendition prints as not yet in force are left out, because \
              the register's own remark on each says the change will not take effect."

@@ -411,6 +411,15 @@ pub enum Caveat {
     /// and nothing in the list can say which are missing.
     NotInBwb,
 
+    /// An answer narrowed to one lid carries `fields` that describe each of
+    /// `articles` whole and not the lid: the register records provenance per
+    /// article, so `amended_by`, `dossiers`, `commenced_by`,
+    /// `in_force_from`, `effect`, `remarks` and `withdrawn` are the article's.
+    ProvenanceOfArticle {
+        articles: Vec<String>,
+        fields: Vec<String>,
+    },
+
     /// `count` units printed as not yet in force are left out of what waits,
     /// because the register's own remark on each says the change will not
     /// take effect.
@@ -576,6 +585,10 @@ impl Caveat {
             UnitsWithdrawnByRemark {
                 count: u32,
             },
+            ProvenanceOfArticle {
+                articles: Vec<String>,
+                fields: Vec<String>,
+            },
             WordsUnsearched {
                 words: Vec<String>,
             },
@@ -687,6 +700,9 @@ impl Caveat {
             Ok(Stated::RankingShort { asked, reached }) => Self::RankingShort { asked, reached },
             Ok(Stated::CountsNotTaken { caveats }) => Self::CountsNotTaken { caveats },
             Ok(Stated::UnitsWithdrawnByRemark { count }) => Self::UnitsWithdrawnByRemark { count },
+            Ok(Stated::ProvenanceOfArticle { articles, fields }) => {
+                Self::ProvenanceOfArticle { articles, fields }
+            }
             Ok(Stated::WordsUnsearched { words }) => Self::WordsUnsearched { words },
             Ok(Stated::PlacesRead {
                 bound,

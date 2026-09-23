@@ -228,11 +228,12 @@ pub struct Waiting<'a> {
     pub to: Option<&'a str>,
     /// The register's own word for a kind of regulation: wet, AMvB, zbo.
     pub kind: Option<&'a str>,
-    /// As the service reads `limit` and `offset`: digits, exactly as typed.
-    /// Sent as sent; the service is the one that pages this route or refuses
+    /// As the service reads `limit` and `offset`: digits, exactly as typed,
+    /// and absent where untyped. Sent as sent; the service is the one that
+    /// pages this route, with its own window where none is sent, or refuses
     /// the value.
-    pub limit: &'a str,
-    pub offset: &'a str,
+    pub limit: Option<&'a str>,
+    pub offset: Option<&'a str>,
 }
 
 /// What a rendition's articles resolved to.
@@ -586,7 +587,7 @@ pub struct Span {
 pub struct Published<'a> {
     /// How many rows to skip, so a list cut at its window can be read past.
     /// As the service reads it: digits, exactly as typed.
-    pub offset: &'a str,
+    pub offset: Option<&'a str>,
     /// The four days of the two windows, each as typed.
     pub from: Option<&'a str>,
     pub to: Option<&'a str>,
@@ -597,7 +598,7 @@ pub struct Published<'a> {
     /// A BWB identifier as typed. Whether it is one is the service's to say.
     pub regulation: Option<&'a str>,
     /// As the service reads it: digits, exactly as typed.
-    pub limit: &'a str,
+    pub limit: Option<&'a str>,
 }
 
 /// Which rendition a question is about, and how much of its text to send.
@@ -645,9 +646,9 @@ pub struct Units<'a> {
     /// As the service reads `limit`: digits, or the literal `none` for the
     /// whole set, since the rendition bounds this route. Sent as typed; the
     /// service is the one that pages it or refuses the word.
-    pub limit: &'a str,
+    pub limit: Option<&'a str>,
     /// As the service reads it: digits, exactly as typed.
-    pub offset: &'a str,
+    pub offset: Option<&'a str>,
 }
 
 /// Which regulations to look for by name, and how to narrow the answer.
@@ -659,9 +660,10 @@ pub struct Named<'a> {
     /// The day a name is asked to stand on, on either axis, as typed.
     pub as_of: Option<&'a str>,
     pub as_known_on: Option<&'a str>,
-    /// As the service reads `limit` and `offset`: digits, exactly as typed.
-    pub limit: &'a str,
-    pub offset: &'a str,
+    /// As the service reads `limit` and `offset`: digits, exactly as typed,
+    /// and absent where untyped, so the service's window is the default.
+    pub limit: Option<&'a str>,
+    pub offset: Option<&'a str>,
 }
 
 /// Which relations to ask for, and how to narrow them.
@@ -676,9 +678,10 @@ pub struct Relating<'a> {
     /// service matches it against is the service's rule, not one this end
     /// guesses at.
     pub article: Option<&'a str>,
-    /// As the service reads `limit` and `offset`: digits, exactly as typed.
-    pub limit: &'a str,
-    pub offset: &'a str,
+    /// As the service reads `limit` and `offset`: digits, exactly as typed,
+    /// and absent where untyped, so the service's window is the default.
+    pub limit: Option<&'a str>,
+    pub offset: Option<&'a str>,
 }
 
 /// Which two days to compare, and how to narrow the comparison.

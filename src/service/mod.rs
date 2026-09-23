@@ -125,11 +125,13 @@ impl Service {
     ) -> Outcome<Answered<Vec<Regulation>>> {
         let url = format!("{}/api/v1/regulations", self.base);
 
-        let mut query = vec![
-            ("q", ask.query),
-            ("limit", ask.limit),
-            ("offset", ask.offset),
-        ];
+        let mut query = vec![("q", ask.query)];
+        if let Some(limit) = ask.limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = ask.offset {
+            query.push(("offset", offset));
+        }
 
         if let Some(kind) = ask.kind {
             query.push(("type", kind));
@@ -172,7 +174,13 @@ impl Service {
     ) -> Outcome<Answered<Vec<Expression>>> {
         let url = format!("{}/api/v1/expressions", self.base);
 
-        let mut query = vec![("limit", ask.limit), ("offset", ask.offset)];
+        let mut query = Vec::new();
+        if let Some(limit) = ask.limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = ask.offset {
+            query.push(("offset", offset));
+        }
 
         for (name, day) in [
             ("in_force_from", ask.from),
@@ -201,12 +209,15 @@ impl Service {
         &self,
         client: &Client,
         since: Option<&str>,
-        limit: &str,
+        limit: Option<&str>,
         regulation: Option<&str>,
     ) -> Outcome<Answered<Feed>> {
         let url = format!("{}/api/v1/feed", self.base);
 
-        let mut query = vec![("limit", limit)];
+        let mut query = Vec::new();
+        if let Some(limit) = limit {
+            query.push(("limit", limit));
+        }
 
         // The service requires a cursor and says so where none is sent.
         if let Some(since) = since {
@@ -224,7 +235,13 @@ impl Service {
     pub fn upcoming(&self, client: &Client, ask: &Waiting<'_>) -> Outcome<Answered<Vec<Upcoming>>> {
         let url = format!("{}/api/v1/upcoming", self.base);
 
-        let mut query = vec![("limit", ask.limit), ("offset", ask.offset)];
+        let mut query = Vec::new();
+        if let Some(limit) = ask.limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = ask.offset {
+            query.push(("offset", offset));
+        }
 
         if let Some(day) = ask.as_of {
             query.push(("as_of", day));
@@ -296,11 +313,13 @@ impl Service {
     pub fn parts(&self, client: &Client, law: &str, ask: &Units<'_>) -> Outcome<Answered<Parts>> {
         let url = self.route(&["regulations", law, "parts"])?;
 
-        let mut query = vec![
-            ("rendered", "1"),
-            ("limit", ask.limit),
-            ("offset", ask.offset),
-        ];
+        let mut query = vec![("rendered", "1")];
+        if let Some(limit) = ask.limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = ask.offset {
+            query.push(("offset", offset));
+        }
 
         if let Some(date) = ask.as_of {
             query.push(("as_of", date));
@@ -338,11 +357,18 @@ impl Service {
         &self,
         client: &Client,
         law: &str,
-        limit: &str,
-        offset: &str,
+        limit: Option<&str>,
+        offset: Option<&str>,
     ) -> Outcome<Answered<Amendments>> {
         let url = self.route(&["regulations", law, "amendments"])?;
-        let query = [("limit", limit), ("offset", offset)];
+
+        let mut query = Vec::new();
+        if let Some(limit) = limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = offset {
+            query.push(("offset", offset));
+        }
 
         self.read(client, client.get(&url).query(&query))
     }
@@ -356,7 +382,13 @@ impl Service {
     ) -> Outcome<Answered<Relations>> {
         let url = self.route(&["regulations", law, "relations"])?;
 
-        let mut query = vec![("limit", ask.limit), ("offset", ask.offset)];
+        let mut query = Vec::new();
+        if let Some(limit) = ask.limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = ask.offset {
+            query.push(("offset", offset));
+        }
 
         if let Some(day) = ask.as_of {
             query.push(("as_of", day));

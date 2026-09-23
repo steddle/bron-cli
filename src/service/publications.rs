@@ -29,8 +29,10 @@ pub struct PublicationQuery<'a> {
     pub collection: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dossier: Option<&'a str>,
-    /// As the service reads it: digits, exactly as typed.
-    pub limit: &'a str,
+    /// As the service reads it: digits, exactly as typed, and left out
+    /// where untyped, so the service's window is the default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<&'a str>,
     /// Where to ask on, as a previous answer's own `next`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<&'a str>,
@@ -133,14 +135,20 @@ impl Service {
         &self,
         client: &Client,
         id: &str,
-        limit: &str,
-        offset: &str,
+        limit: Option<&str>,
+        offset: Option<&str>,
         rendered: bool,
         raw: bool,
     ) -> Outcome<Answered<Publication>> {
         let url = self.route(&["publications", id])?;
 
-        let mut query = vec![("limit", limit), ("offset", offset)];
+        let mut query = Vec::new();
+        if let Some(limit) = limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = offset {
+            query.push(("offset", offset));
+        }
         if rendered {
             query.push(("rendered", "1"));
         }

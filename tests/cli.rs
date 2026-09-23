@@ -118,7 +118,6 @@ async fn both_coordinates_of_a_moment_reach_the_service() {
         .and(path("/api/v1/search"))
         .and(body_json(serde_json::json!({
             "q": "6:162",
-            "limit": "20",
             "as_of": "2019-06-01",
             "as_known_on": "2020-01-01",
         })))
@@ -152,7 +151,6 @@ async fn a_zicht_date_alone_is_sent_alone() {
         .and(path("/api/v1/search"))
         .and(body_json(serde_json::json!({
             "q": "6:162",
-            "limit": "20",
             "as_known_on": "2020-01-01",
         })))
         .respond_with(ResponseTemplate::new(200).set_body_raw(LOOKUP, "application/json"))
@@ -205,7 +203,7 @@ async fn an_unnamed_moment_is_left_to_the_service() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/search"))
-        .and(body_json(serde_json::json!({"q": "6:162", "limit": "20"})))
+        .and(body_json(serde_json::json!({"q": "6:162"})))
         .respond_with(ResponseTemplate::new(200).set_body_raw(LOOKUP, "application/json"))
         .expect(1)
         .mount(&server)
@@ -3147,8 +3145,8 @@ async fn law_relations_says_what_rests_on_a_law_and_from_which_article() {
         .and(query_param("kind", "grondslag_voor"))
         .and(query_param("article", "Artikel 175"))
         .and(query_param("as_of", "2019-06-01"))
-        .and(query_param("limit", "50"))
-        .and(query_param("offset", "0"))
+        .and(query_param_is_missing("limit"))
+        .and(query_param_is_missing("offset"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(RELATIONS, "application/json"))
         .expect(1)
         .mount(&server)
@@ -3268,7 +3266,6 @@ async fn every_name_the_routes_declare_can_be_sent() {
         .and(body_json(serde_json::json!({
             "q": "onrechtmatige daad",
             "regulation": "BWBR0005289,BWBR0005537",
-            "limit": "20",
             "as_of": "2026-09-19",
         })))
         .respond_with(ResponseTemplate::new(404).set_body_raw(
@@ -3327,6 +3324,90 @@ async fn every_name_the_routes_declare_can_be_sent() {
             "2026-09-19",
         ][..],
     ] {
+        let output = bron(&server, args).await;
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+    }
+}
+
+/// Production's answer for artikel 6:162 BW lid 2 on 2026-09-24, edited by
+/// hand to add the `provenance_of_article` caveat the service is about to
+/// state on an answer narrowed to one lid.
+const LID_WITH_ARTICLE_PROVENANCE: &str =
+    "bron-articles-BWBR0005289-162-lid-2-edited-provenance.json";
+
+/// The fields the register records per article are said to be the
+/// article's, not the lid's, in words and not as a limit without a sentence.
+#[tokio::test(flavor = "multi_thread")]
+async fn provenance_of_article_says_the_fields_describe_the_article() {
+    let sent = fixture(LID_WITH_ARTICLE_PROVENANCE);
+    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", &sent).await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "BWBR0005289",
+            "--article",
+            "162",
+            "--paragraph",
+            "2",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "these fields describe article(s) 162, not the lid: amended_by, dossiers, \
+             in_force_from, effect, remarks. The register records provenance per article."
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("no sentence for"), "{text}");
+
+    let json = bron(&server, &["--json", "law", "show", "BWBR0005289"]).await;
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
+/// A bare question sends no page: the service's window is the default, so the
+/// CLI and the MCP answer the same question alike. `law show` and `law
+/// versions` are the exception, asking for the whole set with `limit=none`.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_untyped_page_is_left_to_the_service() {
+    let server = MockServer::start().await;
+    for route in [
+        "/api/v1/regulations",
+        "/api/v1/regulations/BWBR0005289/parts",
+        "/api/v1/regulations/BWBR0005289/amendments",
+        "/api/v1/expressions",
+        "/api/v1/feed",
+        "/api/v1/publications/stb-2026-56",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param_is_missing("limit"))
+            .and(query_param_is_missing("offset"))
+            .respond_with(ResponseTemplate::new(404).set_body_raw(
+                r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","message":"seen","detail":[]}}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    for args in [
+        &["law", "search", "awb"][..],
+        &["law", "parts", "BWBR0005289"][..],
+        &["law", "amendments", "BWBR0005289"][..],
+        &["law", "published", "--from", "2026-01-01"][..],
+        &["law", "feed", "--since", "0"][..],
+        &["publication", "show", "stb-2026-56"][..],
+    ] {
+        // The mock answers only where no page was sent, and its answer is the
+        // not-found this asserts on.
         let output = bron(&server, args).await;
         assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
     }
@@ -3761,7 +3842,8 @@ async fn every_caveat_on_upcoming_has_a_sentence() {
 /// Every name the route declares reaches it, and nothing else: the service
 /// refuses a name it does not declare. With no moment named neither
 /// coordinate is sent, and a zicht date alone is sent alone: the service reads
-/// it as that day for both.
+/// it as that day for both. With no page named neither `limit` nor `offset`
+/// is sent, so the service's window is the default.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
     let server = MockServer::start().await;
@@ -3794,8 +3876,8 @@ async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
         .and(path("/api/v1/upcoming"))
         .and(query_param_is_missing("as_of"))
         .and(query_param_is_missing("as_known_on"))
-        .and(query_param("limit", "50"))
-        .and(query_param("offset", "0"))
+        .and(query_param_is_missing("limit"))
+        .and(query_param_is_missing("offset"))
         .respond_with(
             ResponseTemplate::new(200).set_body_raw(fixture(UPCOMING), "application/json"),
         )
@@ -3854,13 +3936,8 @@ async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
             assert!(declared.contains(&name.as_str()), "{name}: {}", request.url);
         }
     }
-    assert_eq!(
-        names(&asked[1]),
-        ["as_known_on", "limit", "offset"],
-        "{}",
-        asked[1].url
-    );
-    assert_eq!(names(&asked[2]), ["limit", "offset"], "{}", asked[2].url);
+    assert_eq!(names(&asked[1]), ["as_known_on"], "{}", asked[1].url);
+    assert!(names(&asked[2]).is_empty(), "{}", asked[2].url);
 }
 
 /// A failure the service states keeps its kind: a question it refuses exits
@@ -4964,9 +5041,7 @@ async fn publication_search_sends_the_collections_short_code() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/publications/search"))
-        .and(body_json(
-            serde_json::json!({"collection": "stb", "limit": "20"}),
-        ))
+        .and(body_json(serde_json::json!({"collection": "stb"})))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":0}}"#,
             "application/json",

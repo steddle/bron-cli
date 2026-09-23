@@ -81,10 +81,11 @@ pub enum Command {
         #[arg(long, value_name = "BWB")]
         regulation: Vec<String>,
 
-        /// How many hits to answer. Sent to the service exactly as typed; the
-        /// service pages this route and refuses what it refuses.
-        #[arg(long, default_value = "20", allow_negative_numbers = true)]
-        limit: String,
+        /// How many hits to answer; untyped, the service's window. Sent
+        /// exactly as typed; the service pages this route and refuses what it
+        /// refuses.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
         #[command(flatten)]
         moment: Moment,
@@ -142,13 +143,14 @@ pub enum Law {
         #[arg(long = "type", value_name = "TYPE")]
         kind: Option<String>,
 
-        /// How many hits to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "20", allow_negative_numbers = true)]
-        limit: String,
+        /// How many hits to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
-        /// How many rows to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0", allow_negative_numbers = true)]
-        offset: String,
+        /// How many rows to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
 
         #[command(flatten)]
         moment: Moment,
@@ -267,19 +269,18 @@ pub enum Law {
         raw: bool,
 
         /// How many units to answer, or `none` for every one the rendition
-        /// prints: the rendition bounds this route, so the service pages it
-        /// only where asked.
+        /// prints; untyped, the service's window.
         ///
         /// Sent to the service exactly as typed. The rendition bounds this
         /// route, as it bounds `law show`, so bron judges nothing about the
         /// word: `none`, a negative number, a decimal all reach the service
         /// and come back as its own `invalid_parameter` where they are wrong.
-        #[arg(long, default_value = "20", allow_negative_numbers = true)]
-        limit: String,
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
-        /// How many units to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0", allow_negative_numbers = true)]
-        offset: String,
+        /// How many units to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
 
         #[command(flatten)]
         moment: Moment,
@@ -294,13 +295,14 @@ pub enum Law {
         /// BWB identifier, e.g. BWBR0046553.
         id: String,
 
-        /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50", allow_negative_numbers = true)]
-        limit: String,
+        /// How many rows to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
-        /// How many rows to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0", allow_negative_numbers = true)]
-        offset: String,
+        /// How many rows to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
     },
 
     /// What the register states rests on a law, and what cites it.
@@ -321,13 +323,14 @@ pub enum Law {
         #[arg(long)]
         article: Option<String>,
 
-        /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50", allow_negative_numbers = true)]
-        limit: String,
+        /// How many rows to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
-        /// How many rows to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0", allow_negative_numbers = true)]
-        offset: String,
+        /// How many rows to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
 
         #[command(flatten)]
         moment: Moment,
@@ -404,14 +407,15 @@ pub enum Law {
         #[arg(long)]
         regulation: Option<String>,
 
-        /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50", allow_negative_numbers = true)]
-        limit: String,
+        /// How many rows to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
-        /// How many rows to skip, to read past a list cut at its window.
-        /// Sent to the service exactly as typed.
-        #[arg(long, default_value = "0", allow_negative_numbers = true)]
-        offset: String,
+        /// How many rows to skip, to read past a list cut at its window;
+        /// untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
     },
 
     /// What the register has done since a cursor, in the order bron saw it.
@@ -433,9 +437,10 @@ pub enum Law {
         #[arg(long)]
         regulation: Option<String>,
 
-        /// How many events to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "100", allow_negative_numbers = true)]
-        limit: String,
+        /// How many events to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
     },
 
     /// Which regulations print provisions that do not yet apply, across every
@@ -470,14 +475,15 @@ pub enum Law {
         #[arg(long = "type", value_name = "TYPE")]
         kind: Option<String>,
 
-        /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50", allow_negative_numbers = true)]
-        limit: String,
+        /// How many rows to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
-        /// How many rows to skip, to read past a list cut at its window.
-        /// Sent to the service exactly as typed.
-        #[arg(long, default_value = "0", allow_negative_numbers = true)]
-        offset: String,
+        /// How many rows to skip, to read past a list cut at its window;
+        /// untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
 
         #[command(flatten)]
         moment: Moment,
@@ -587,9 +593,10 @@ pub enum Publication {
         #[arg(long)]
         dossier: Option<String>,
 
-        /// How many hits to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "20", allow_negative_numbers = true)]
-        limit: String,
+        /// How many hits to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
         /// Where to ask on: the `next` a previous answer stated. Walking it to
         /// its end reads every hit once.
@@ -614,13 +621,14 @@ pub enum Publication {
         #[arg(long)]
         raw: bool,
 
-        /// How many units to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50", allow_negative_numbers = true)]
-        limit: String,
+        /// How many units to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
 
-        /// How many units to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0", allow_negative_numbers = true)]
-        offset: String,
+        /// How many units to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
     },
 }
 
@@ -745,7 +753,7 @@ mod tests {
             panic!("law feed");
         };
         assert_eq!(since.as_deref(), Some("-1"));
-        assert_eq!(limit, "-1");
+        assert_eq!(limit.as_deref(), Some("-1"));
 
         let swallowed = Cli::try_parse_from(["bron", "law", "feed", "--since", "--json"]);
         assert!(swallowed.is_err(), "{swallowed:?}");
