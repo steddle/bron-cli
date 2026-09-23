@@ -32,7 +32,7 @@ pub use model::{
     Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Consolidated, Dossier,
     Expression, Feed, Had, History, Image, Lineage, LinkedDecree, Named, Paragraph, Parts,
     Produced, Published, PublishedAct, RegisterEvent, Regulation, Related, Relating, Relation,
-    Relations, Span, Summary, Units, Upcoming, Waiting, Window, name,
+    Relations, Remark, Span, Summary, Units, Upcoming, Waiting, Window, Withdrawn, name,
 };
 pub use publications::{
     Manifestation, Publication, PublicationDossier, PublicationHit, PublicationQuery,

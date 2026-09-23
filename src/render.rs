@@ -13,7 +13,7 @@ use chrono::NaiveDate;
 
 use bron::service::{
     Article, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Produced, Regulation,
-    Relation, SearchData, SearchLid, Upcoming, name,
+    Relation, Remark, SearchData, SearchLid, Upcoming, name,
 };
 use bron::wire::{AppealStatus, Caveat, Envelope};
 
@@ -608,6 +608,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 // the register's renditions not held, or held and carrying no
                 // such unit. Silence would read as a window it said nothing in.
                 let state = match entry.state.as_str() {
+                    _ if entry.withdrawn.is_some() => "withdrawn",
                     "text" => "",
                     "unknown" => "not held",
                     "absent" => "not carried",
@@ -629,6 +630,27 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     entry.renditions.first,
                     entry.renditions.last,
                 )?;
+            }
+
+            // Notes on the rows, so on stderr: the register's own remarks,
+            // at their range in the entry's first rendition.
+            for row in &rows {
+                let (_, entry) = row;
+                if entry.withdrawn.is_some() {
+                    writeln!(
+                        err,
+                        "{}, {}: {WITHDRAWN}",
+                        named(row),
+                        window(entry.in_force.from, entry.in_force.until)
+                    )?;
+                }
+                if let Some(remarks) = &entry.remarks {
+                    write_remarks(
+                        remarks,
+                        &format!("{} in {}: ", named(row), entry.renditions.first),
+                        err,
+                    )?;
+                }
             }
 
             caveats(&a.caveats, err)
@@ -666,7 +688,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 )?;
             }
 
-            caveats(&a.caveats, out)
+            caveats(&without_withdrawn(&a.caveats, &a.data.parts), out)
         }
 
         Answer::Articles {
@@ -733,7 +755,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     out,
                 )?;
             }
-            caveats(&a.caveats, out)
+            caveats(&without_withdrawn(&a.caveats, articles), out)
         }
 
         Answer::Changes {
@@ -812,6 +834,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 {
                     writeln!(out, "           commenced on {day}")?;
                 }
+                if change.to.as_ref().is_some_and(|to| to.withdrawn.is_some()) {
+                    writeln!(out, "           {WITHDRAWN}")?;
+                }
 
                 // Where the unit stands in each side's document, which the
                 // lines above name, so either text can be cut again.
@@ -822,6 +847,12 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     (Some(from), None) => writeln!(out, "           span {} (from)", span(from))?,
                     (None, Some(to)) => writeln!(out, "           span {} (to)", span(to))?,
                     (None, None) => {}
+                }
+                // Each side's remarks stand in that side's document.
+                for (side, unit) in [("from", &change.from), ("to", &change.to)] {
+                    if let Some(remarks) = unit.as_ref().and_then(|unit| unit.remarks.as_deref()) {
+                        write_remarks(remarks, &format!("           {side} "), out)?;
+                    }
                 }
 
                 match (&change.from, &change.to) {
@@ -1044,7 +1075,9 @@ fn write_unit(
     // The lawyer's minimum, ahead of the name and the words: a reader should
     // not have to reach the bottom of the block to learn the text above it
     // does not apply.
-    if not_commenced(unit) {
+    if unit.withdrawn.is_some() {
+        writeln!(out, "{WITHDRAWN}")?;
+    } else if not_commenced(unit) {
         match unit.in_force_from {
             Some(day) => writeln!(out, "not yet applied, applies from {day}")?,
             None => writeln!(out, "not yet applied")?,
@@ -1105,9 +1138,12 @@ fn write_unit(
     if !unit.images.is_empty() {
         writeln!(out, "images: {}", unit.images.join(", "))?;
     }
+    write_remarks(unit.remarks.as_deref().unwrap_or_default(), "", out)?;
     if let Some(act) = &unit.amended_by {
         let effect = unit.effect.as_deref().unwrap_or("wijziging");
-        if not_commenced(unit) {
+        // A withdrawn change was still published by its act; it never put
+        // anything in force.
+        if not_commenced(unit) || unit.withdrawn.is_some() {
             write!(out, "published by {act} ({effect})")?;
         } else {
             write!(out, "in force through {act} ({effect})")?;
@@ -1380,8 +1416,60 @@ fn first_line(text: &str) -> String {
 }
 
 /// Whether the register publishes this provision and does not yet apply it.
+///
+/// Not where its own remark says the change will not take effect: the
+/// register prints it `nogniet` all the same, and 'not yet' would promise a
+/// day it has cancelled.
 fn not_commenced(article: &Article) -> bool {
-    article.status.as_deref() == Some("nogniet")
+    article.status.as_deref() == Some("nogniet") && article.withdrawn.is_none()
+}
+
+/// What a person reads for a unit whose remark says it will not take effect,
+/// in place of when it applies.
+const WITHDRAWN: &str = "the register states this change will not take effect";
+
+/// The caveats of an answer about units, less the units the answer itself
+/// says will not take effect.
+///
+/// The service's `not_commenced` names every unit printed `nogniet` by number,
+/// a withdrawn one among them, and 'do not apply yet' is the promise its
+/// remark cancels. A number stays where any unit it names is not withdrawn.
+fn without_withdrawn(caveats: &[Caveat], units: &[Article]) -> Vec<Caveat> {
+    let withdrawn = |number: &str| {
+        let mut named = units
+            .iter()
+            .filter(|unit| unit.number.as_deref() == Some(number))
+            .peekable();
+        named.peek().is_some() && named.all(|unit| unit.withdrawn.is_some())
+    };
+
+    caveats
+        .iter()
+        .filter_map(|caveat| match caveat {
+            Caveat::NotCommenced { articles } => {
+                let articles: Vec<String> = articles
+                    .iter()
+                    .filter(|number| !withdrawn(number))
+                    .cloned()
+                    .collect();
+                (!articles.is_empty()).then_some(Caveat::NotCommenced { articles })
+            }
+            other => Some(other.clone()),
+        })
+        .collect()
+}
+
+/// Each remark the register prints on a unit, verbatim, at its byte range in
+/// the document `source:` names.
+fn write_remarks(remarks: &[Remark], indent: &str, out: &mut impl Write) -> io::Result<()> {
+    for remark in remarks {
+        writeln!(
+            out,
+            "{indent}register's remark ({}..{}): {}",
+            remark.span.start, remark.span.end, remark.text
+        )?;
+    }
+    Ok(())
 }
 
 fn data<T>(envelope: &Envelope<Vec<T>>) -> &[T] {
@@ -1578,6 +1666,16 @@ fn caveat_line(caveat: &Caveat) -> String {
             lang.join(", "),
             paths.join(", "),
         ),
+        Caveat::RankingShort { asked, reached } => format!(
+            "note: the ranking reached {reached} of the {asked} nearest texts it asked for, and \
+             may have stopped at a bound before finding more, so texts that would rank may be \
+             missing."
+        ),
+        Caveat::CountsNotTaken { caveats } => format!(
+            "note: this search did not count {}, so none being reported says nothing about \
+             whether the corpus holds any.",
+            caveats.join(" or "),
+        ),
         Caveat::TextsUnindexed { scope, count } => format!(
             "note: {count} text(s) in the {scope} are too long to index for full text, so no \
              word in them finds them. They are answered by identifier.",
@@ -1658,10 +1756,16 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: {count} treaty(ies) print units as not yet in force and are not in this list. \
              What a treaty prints so is no announcement: some treaties never enter into force."
         ),
-        Caveat::NotInBwb => "note: this list holds what the BWB prints. An act the Staatsblad \
-                             published and the BWB does not print yet is not in it, and neither \
-                             are EU regulations."
+        Caveat::NotInBwb => "note: this list holds what the BWB prints, and the acts the \
+                             Staatsblad published that the BWB does not print, as far as bron \
+                             holds the Staatsblad. An act published before that and never printed \
+                             in the BWB, the kinds of act counted as left out, and EU regulations \
+                             are not in it."
             .to_string(),
+        Caveat::UnitsWithdrawnByRemark { count } => format!(
+            "note: {count} unit(s) the rendition prints as not yet in force are left out, because \
+             the register's own remark on each says the change will not take effect."
+        ),
         // Every element, the aanhef too: the count is the service's, and naming
         // only some of it would be bron deciding which text matters.
         Caveat::TextOutsideArticles { expression, units } => format!(
@@ -2119,6 +2223,27 @@ mod tests {
         assert!(note.contains("262 held besluit(en) name no act"), "{note}");
         assert!(!note.contains("last 15 days"), "{note}");
         assert!(!note.contains(": ."), "{note}");
+    }
+
+    /// Both search limits the service states read in words, each with what
+    /// it carried, and neither as a limit this build has no sentence for.
+    #[test]
+    fn a_short_ranking_and_counts_not_taken_have_sentences() {
+        let short = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "ranking_short", "asked": 80, "reached": 23,
+        })));
+        assert!(
+            short.contains("reached 23 of the 80 nearest texts"),
+            "{short}"
+        );
+
+        let untaken = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "counts_not_taken", "caveats": ["unrankable_texts", "texts_unindexed"],
+        })));
+        assert!(
+            untaken.contains("did not count unrankable_texts or texts_unindexed"),
+            "{untaken}"
+        );
     }
 
     /// The besluit, the act it names and when it was published: enough to

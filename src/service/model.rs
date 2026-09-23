@@ -349,6 +349,10 @@ pub struct Had {
     /// where the register states it apart.
     pub text_in_force_from: Option<NaiveDate>,
     pub renditions: Carried,
+    /// See [`Article::remarks`], as the entry's first rendition prints them.
+    pub remarks: Option<Vec<Remark>>,
+    /// See [`Article::withdrawn`].
+    pub withdrawn: Option<Withdrawn>,
 }
 
 /// Which renditions carry one text, and how many.
@@ -441,8 +445,31 @@ pub struct Article {
     /// The file each image the unit prints is named by, in the order printed.
     #[serde(default)]
     pub images: Vec<String>,
+    /// Every editorial remark the unit's own `<brondata>` prints, the
+    /// register's words verbatim. Absent where the rendition was never read
+    /// for them, empty where it was and prints none.
+    pub remarks: Option<Vec<Remark>>,
+    /// Present only on a unit printed `nogniet` whose remark carries the
+    /// register's fixed sentence for a change that never took effect.
+    pub withdrawn: Option<Withdrawn>,
     #[serde(default)]
     pub paragraphs: Vec<Paragraph>,
+}
+
+/// One editorial remark the register prints on a unit, asserted by the
+/// publisher.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Remark {
+    pub text: String,
+    pub span: Span,
+}
+
+/// bron recognised, in one of a unit's remarks, the register's fixed sentence
+/// for a change that never took effect. Asserted by the machine that read it:
+/// the words at `span` are the register's.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Withdrawn {
+    pub span: Span,
 }
 
 impl Article {
@@ -706,6 +733,8 @@ mod tests {
             rendered: rendered.map(str::to_string),
             raw: None,
             images: Vec::new(),
+            remarks: None,
+            withdrawn: None,
             paragraphs: leden,
         }
     }

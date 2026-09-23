@@ -3591,6 +3591,148 @@ async fn decrees_unmatched_with_no_recent_besluit_states_the_count() {
     assert_eq!(stdout(&json), sent);
 }
 
+/// Answered by production on 2026-09-24 for artikel 6:2:15 Sv: printed
+/// `nogniet`, with the register's remark that the change will not take
+/// effect.
+const WITHDRAWN_ARTICLE: &str = "bron-articles-BWBR0001903-6-2-15.json";
+
+/// A unit whose remark says the change will not take effect reads as that,
+/// with the register's words at their range, and never as a provision that
+/// does not apply yet: not in its own lead line and not in the note.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawn_unit_reads_as_the_register_states_it() {
+    let sent = fixture(WITHDRAWN_ARTICLE);
+    let server = answering("GET", "/api/v1/regulations/BWBR0001903/articles", &sent).await;
+
+    let output = bron(
+        &server,
+        &["law", "show", "BWBR0001903", "--article", "6:2:15"],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("the register states this change will not take effect"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "register's remark (5320159..5320304): Deze wijziging treedt niet meer in werking. \
+             De wijziging is ingetrokken door Stb. 2019/504."
+        ),
+        "{text}"
+    );
+    assert!(text.contains("published by stb-2017-82 (nieuw)"), "{text}");
+    assert!(!text.contains("not yet applied"), "{text}");
+    assert!(!text.contains("do not apply yet"), "{text}");
+    assert!(!text.contains("no sentence for"), "{text}");
+
+    let json = bron(&server, &["--json", "law", "show", "BWBR0001903"]).await;
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
+/// Each side of a comparison carries its own remarks, at their range in its
+/// own document, and the later side says the change will not take effect.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_prints_each_sides_remarks() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0001903/changes",
+        &fixture("bron-changes-BWBR0001903-6-2-15-2025-12-31-to-2026-07-01.json"),
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "changes",
+            "BWBR0001903",
+            "--from",
+            "2025-12-31",
+            "--to",
+            "2026-07-01",
+            "--article",
+            "6:2:15",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("           the register states this change will not take effect"),
+        "{text}"
+    );
+    assert!(
+        text.contains("           to register's remark (5320159..5320304): Deze wijziging"),
+        "{text}"
+    );
+    assert!(!text.contains("from register's remark"), "{text}");
+}
+
+/// A history row whose text will not take effect says so in its state, and
+/// the register's remark goes to stderr with the rows' other notes.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_history_marks_a_withdrawn_text_and_notes_its_remark() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0001903/articles/6:2:15/history",
+        &fixture("bron-history-BWBR0001903-6-2-15-edited-remarks.json"),
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &["law", "history", "BWBR0001903", "--article", "6:2:15"],
+    )
+    .await;
+    let rows = stdout(&output);
+    let notes = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(rows.contains("withdrawn"), "{rows}");
+    assert!(!rows.contains("register's remark"), "{rows}");
+    assert!(
+        notes.contains("Artikel 6:2:15 in 2026-01-01_0: register's remark (5320159..5320304)"),
+        "{notes}"
+    );
+    assert!(
+        notes.contains("the register states this change will not take effect"),
+        "{notes}"
+    );
+}
+
+/// Every caveat production stated on `/upcoming` on 2026-09-24 has a
+/// sentence, the units a remark took out among them.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_caveat_on_upcoming_has_a_sentence() {
+    let sent = fixture("bron-upcoming-limit-1.json");
+    let server = answering("GET", "/api/v1/upcoming", &sent).await;
+
+    let output = bron(&server, &["law", "upcoming", "--limit", "1"]).await;
+    let said = format!(
+        "{}{}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        said.contains("9 unit(s) the rendition prints as not yet in force are left out"),
+        "{said}"
+    );
+    assert!(
+        said.contains("the acts the Staatsblad published that the BWB does not print"),
+        "{said}"
+    );
+    assert!(!said.contains("no sentence for"), "{said}");
+
+    let json = bron(&server, &["--json", "law", "upcoming", "--limit", "1"]).await;
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
 /// Every name the route declares reaches it, and nothing else: the service
 /// refuses a name it does not declare. With no moment named neither
 /// coordinate is sent, and a zicht date alone is sent alone: the service reads

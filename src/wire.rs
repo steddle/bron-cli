@@ -228,6 +228,16 @@ pub enum Caveat {
     /// stay answerable by identifier.
     TextsUnindexed { scope: String, count: u32 },
 
+    /// The ranking holds fewer hits than its window: the vector list reached
+    /// `reached` of the `asked` nearest texts at the moment, and its index
+    /// scan may have stopped at a bound before it found more.
+    RankingShort { asked: u32, reached: u32 },
+
+    /// The counts named here, by the kind each would have raised
+    /// (`unrankable_texts`, `texts_unindexed`), were not taken for this
+    /// search. Their absence is nothing checked, not the corpus holding none.
+    CountsNotTaken { caveats: Vec<String> },
+
     /// The citation reads more than one way and every reading is answered.
     ///
     /// Not [`Caveat::AmbiguousRendition`]: nothing is discarded here. `3:305a`
@@ -394,10 +404,17 @@ pub enum Caveat {
     /// announcement: some treaties never enter into force.
     TreatiesLeftOut { count: u32 },
 
-    /// The list holds what the BWB prints. An act the Staatsblad published
-    /// and the BWB does not print yet is not in it, and neither are EU
-    /// regulations, and nothing in the list can say which are missing.
+    /// The list holds what the BWB prints and the acts the Staatsblad
+    /// published, as far as the service holds the Staatsblad, that the BWB
+    /// does not. An act published before that and never printed in the BWB,
+    /// what [`Caveat::ActsLeftOut`] counts, and EU regulations are not in it,
+    /// and nothing in the list can say which are missing.
     NotInBwb,
+
+    /// `count` units printed as not yet in force are left out of what waits,
+    /// because the register's own remark on each says the change will not
+    /// take effect.
+    UnitsWithdrawnByRemark { count: u32 },
 
     /// The rendition `expression` prints words that no unit holds: beside the
     /// units of a chapter or a bijlage that holds some, or under an element
@@ -536,6 +553,16 @@ impl Caveat {
                 scope: String,
                 count: u32,
             },
+            RankingShort {
+                asked: u32,
+                reached: u32,
+            },
+            CountsNotTaken {
+                caveats: Vec<String>,
+            },
+            UnitsWithdrawnByRemark {
+                count: u32,
+            },
             WordsUnsearched {
                 words: Vec<String>,
             },
@@ -640,6 +667,9 @@ impl Caveat {
             }
             Ok(Stated::UnrankableTexts { scope, count }) => Self::UnrankableTexts { scope, count },
             Ok(Stated::TextsUnindexed { scope, count }) => Self::TextsUnindexed { scope, count },
+            Ok(Stated::RankingShort { asked, reached }) => Self::RankingShort { asked, reached },
+            Ok(Stated::CountsNotTaken { caveats }) => Self::CountsNotTaken { caveats },
+            Ok(Stated::UnitsWithdrawnByRemark { count }) => Self::UnitsWithdrawnByRemark { count },
             Ok(Stated::WordsUnsearched { words }) => Self::WordsUnsearched { words },
             Ok(Stated::PlacesRead {
                 bound,
