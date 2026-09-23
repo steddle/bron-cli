@@ -4351,6 +4351,29 @@ async fn publication_show_of_an_id_the_service_refuses_exits_on_its_code() {
     assert_eq!(envelope["error"]["code"], "invalid_publication_id");
 }
 
+/// A publication bron is known to keep out is refused the same way: usage,
+/// exit 1, the service's own code in `--json`. Real body, read from
+/// production on 2026-09-23 for `stb-1998-310`, an AMvB that names the
+/// geslachtsnaam of children of the Royal House.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_show_outside_scope_exits_on_its_code() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/publications/stb-1998-310"))
+        .respond_with(ResponseTemplate::new(400).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"usage","code":"publication_outside_scope","message":"stb-1998-310 is a AMvB of the Staatsblad, a kind bron neither holds nor passes on: decision F keeps out what names private persons","detail":["held: the Staatsblad from 2020-01-01 of type Wet, AMvB, Klein Koninklijk Besluit, Rijkswet, RijksAMvB, Verbeterblad","held: the Staatscourant of kind algemeen verbindend voorschrift (ministeriële regeling), beleidsregel, ander besluit van algemene strekking","held: a kamerstuk of a dossier the BWB names as an act's own","passed through: any other kamerstuk, a bijlage, the Tractatenblad, the Staatsblad before 2020-01-01"]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "publication", "show", "stb-1998-310"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "publication_outside_scope");
+}
+
 /// `publication search` posts the body the routes declares and reads its
 /// `next`: `tests/fixtures/bron-publication-search-dossier-36195.json` is a
 /// real page against production on 2026-09-23.
