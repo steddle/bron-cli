@@ -3890,3 +3890,43 @@ async fn a_rendition_that_prints_no_articles_says_so_and_points_at_its_parts() {
         assert_eq!(stdout(&output), line, "{args:?}");
     }
 }
+
+/// A segment an address cannot carry is the one thing bron refuses before
+/// asking: the URL standard drops `.` and `..`, so the question would reach
+/// another route, and no request is made. Encoded, the same characters are
+/// text like any other and go out as typed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_regulation_an_address_cannot_carry_is_refused_before_asking() {
+    let server = MockServer::start().await;
+
+    for args in [
+        &["--json", "law", "versions", ".."][..],
+        &["--json", "law", "show", "."][..],
+        &["--json", "law", "about", ""][..],
+    ] {
+        let output = bron(&server, args).await;
+        let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        assert_eq!(envelope["error"]["kind"], "usage", "{args:?}");
+        assert!(envelope["error"].get("code").is_none(), "{args:?}");
+        assert!(
+            envelope["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("cannot be sent as part of an address"),
+            "{envelope}"
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+
+    let _ = bron(&server, &["law", "versions", "%2E%2E"]).await;
+    let asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|request| request.url.path().to_string())
+        .collect();
+    assert_eq!(asked, ["/api/v1/regulations/%252E%252E/expressions"]);
+}

@@ -455,7 +455,23 @@ impl Service {
     /// segment. An identifier goes out as typed and the service says whether
     /// it is one, so text that holds a `/` or a `?` cannot become another
     /// route or a query.
+    ///
+    /// The one thing only bron can refuse: an address has no way to carry a
+    /// segment that is empty, `.` or `..`. The URL standard reads the last two
+    /// as steps through the path and drops them, so `law versions ..` would
+    /// ask `/regulations/expressions`, a question nobody put.
     fn route(&self, segments: &[&str]) -> Outcome<String> {
+        if let Some(segment) = segments
+            .iter()
+            .find(|segment| matches!(**segment, "" | "." | ".."))
+        {
+            return Err(Fault::usage(format!(
+                "[{segment}] cannot be sent as part of an address: a URL reads an empty \
+                 segment, `.` and `..` as steps through the path, so the question would reach \
+                 another route"
+            )));
+        }
+
         let mut url =
             reqwest::Url::parse(&format!("{}/api/v1", self.base)).map_err(|e| Fault::Upstream {
                 service: client::SERVICE,
