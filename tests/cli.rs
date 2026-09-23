@@ -2120,6 +2120,31 @@ async fn law_parts_puts_the_waiting_line_first_and_names_its_dossiers() {
     );
 }
 
+/// `dossiers` absent, from a rendition never read for them, and `dossiers: []`,
+/// from one read that states none, both leave the act's line as it always
+/// was: only a stated dossier earns the words.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_names_no_dossier_where_the_service_states_none() {
+    for dossiers in ["", r#""dossiers":[],"#] {
+        let fixture = PARTS.replace(
+            r#""kind":"bijlage","position":2,"#,
+            &format!(
+                r#""kind":"bijlage","position":2,"status":"nogniet","in_force_from":"2027-01-01","amended_by":"stb-2026-300",{dossiers}"effect":"wijziging","#
+            ),
+        );
+        assert_ne!(fixture, PARTS);
+        let server = answering("GET", "/api/v1/regulations/BWBR0001941/parts", &fixture).await;
+
+        let text = stdout(&bron(&server, &["law", "parts", "BWBR0001941"]).await);
+
+        assert!(
+            text.contains("published by stb-2026-300 (wijziging)\n"),
+            "{dossiers}: {text}"
+        );
+        assert!(!text.contains("dossier"), "{dossiers}: {text}");
+    }
+}
+
 /// `--not-commenced` asks the service for the waiting units of every kind,
 /// and an answer holding only those is bound to the rendition that publishes
 /// them rather than said to be in force.

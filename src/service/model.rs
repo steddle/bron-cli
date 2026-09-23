@@ -434,12 +434,12 @@ pub fn name(
     }
 }
 
-/// A kamerstukdossier the BWB states for an act, with the digest of the held
-/// document that states it.
+/// A kamerstukdossier the BWB states for an act. The service also carries
+/// `stated_in`, the digest of the document that states it, but nothing here
+/// reads it: `--json` prints the envelope as sent, not this type.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Dossier {
     pub dossier: String,
-    pub stated_in: String,
 }
 
 /// One lid, as the register numbers it.
