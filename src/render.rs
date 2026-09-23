@@ -36,6 +36,9 @@ const IMAGES: usize = 10;
 /// The widest a hit's `found_by` reads, `vector+text`.
 const FOUND_BY: usize = 11;
 
+/// A waiting row that states no day to come, as wide as a date.
+const NO_DAY: &str = "no day yet";
+
 /// Writes one answer for a person.
 ///
 /// Where stdout carries rows, one per thing listed, every note on them goes to
@@ -272,6 +275,67 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 a.data.next, a.data.head, a.data.origin
             )?;
 
+            caveats(&a.caveats, err)
+        }
+
+        // Rows, one per regulation, in the service's order; what the columns
+        // mean is a note on them and goes to stderr.
+        Answer::Upcoming(a) => {
+            let rows = &a.data;
+            if rows.is_empty() {
+                writeln!(
+                    out,
+                    "No regulation prints a unit waiting to apply, as asked."
+                )?;
+                return caveats(&a.caveats, out);
+            }
+
+            // The lists last and named, because one regulation naming three
+            // acts would otherwise push every row's title out by the width of
+            // all three.
+            let listed = |named: &[String]| {
+                if named.is_empty() {
+                    "-".to_string()
+                } else {
+                    named.join(", ")
+                }
+            };
+            let units_width = rows
+                .iter()
+                .map(|row| row.units.to_string().len())
+                .max()
+                .unwrap_or(0);
+
+            for row in rows {
+                let day = row
+                    .first_day
+                    .map_or_else(|| NO_DAY.to_string(), |day| day.to_string());
+                let mut line = format!(
+                    "{day}  {}  {:>units_width$} waiting",
+                    row.regulation_id, row.units
+                );
+                if let Some(title) = &row.regulation_title {
+                    let _ = write!(line, "  {title}");
+                }
+                let _ = write!(
+                    line,
+                    "  acts {}  decrees {}",
+                    listed(&row.acts),
+                    listed(&row.decrees)
+                );
+                writeln!(out, "{line}")?;
+            }
+
+            writeln!(
+                err,
+                "first column = the earliest day to come a waiting unit states, {NO_DAY} = none \
+                 states one"
+            )?;
+            writeln!(
+                err,
+                "acts = the publications that produced the waiting text, decrees = the besluiten \
+                 the rendition names as commencing it, - = it names none"
+            )?;
             caveats(&a.caveats, err)
         }
 

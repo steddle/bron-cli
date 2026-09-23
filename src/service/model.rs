@@ -122,6 +122,40 @@ pub struct Feed {
     pub events: Vec<RegisterEvent>,
 }
 
+/// One regulation whose rendition at the moment asked prints units it does
+/// not yet apply.
+#[derive(Debug, Deserialize)]
+pub struct Upcoming {
+    pub regulation_id: String,
+    pub regulation_title: Option<String>,
+    /// How many units of every kind the rendition prints as not yet in force.
+    pub units: u32,
+    /// The earliest day to come a waiting unit states. Absent where none
+    /// states one.
+    pub first_day: Option<NaiveDate>,
+    /// The publications that produced the waiting texts, as `stb-2025-385`.
+    pub acts: Vec<String>,
+    /// The besluiten the rendition names as commencing them, as
+    /// `stb-2026-159`. Empty where it names none.
+    pub decrees: Vec<String>,
+}
+
+/// Which moment to read the register's waiting units at, and how to narrow
+/// the list.
+#[derive(Debug)]
+pub struct Waiting<'a> {
+    pub as_of: NaiveDate,
+    pub as_known_on: Option<NaiveDate>,
+    /// Bounds on the days to come a waiting unit states. Where either is
+    /// named, a regulation whose units state no day is not listed.
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+    /// The register's own word for a kind of regulation: wet, AMvB, zbo.
+    pub kind: Option<&'a str>,
+    pub limit: u32,
+    pub offset: u32,
+}
+
 /// What a rendition's articles resolved to.
 #[derive(Debug, Deserialize)]
 pub struct Articles {

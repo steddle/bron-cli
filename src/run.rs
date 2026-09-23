@@ -43,6 +43,7 @@ pub enum Answer {
     },
     Published(Answered<Vec<service::Expression>>),
     Feed(Answered<service::Feed>),
+    Upcoming(Answered<Vec<service::Upcoming>>),
     Changes {
         answered: Box<Answered<service::Changes>>,
         /// Whether --kind or --article narrowed the list, which the service's
@@ -100,6 +101,7 @@ impl Answer {
             Self::Parts { answered, .. } => sent(out, &answered.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
+            Self::Upcoming(a) => sent(out, &a.envelope),
             Self::Changes { answered, .. } => sent(out, &answered.envelope),
             Self::Articles { answered, .. } => sent(out, &answered.envelope),
             Self::CaseHits(e) => write(out, e),
@@ -414,6 +416,33 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             service
                 .feed(&client, *since, *limit, law.as_ref())
                 .map(Answer::Feed)
+        }
+
+        Law::Upcoming {
+            from,
+            to,
+            kind,
+            limit,
+            offset,
+            moment,
+        } => {
+            ordered(*from, *to, "--from", "--to")?;
+            let (as_of, as_known_on) = moment.coordinates(today);
+
+            service
+                .upcoming(
+                    &client,
+                    &service::Waiting {
+                        as_of,
+                        as_known_on,
+                        from: *from,
+                        to: *to,
+                        kind: kind.as_deref(),
+                        limit: *limit,
+                        offset: *offset,
+                    },
+                )
+                .map(Answer::Upcoming)
         }
 
         Law::Changes {

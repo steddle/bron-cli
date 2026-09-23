@@ -397,6 +397,47 @@ pub enum Law {
         limit: u32,
     },
 
+    /// Which regulations print provisions that do not yet apply, across every
+    /// law.
+    ///
+    /// The register publishes no rendition ahead. What it holds of the future
+    /// stands inside the rendition in force, as units it prints as not yet
+    /// commenced. One row per regulation: the first day to come those units
+    /// state, how many wait, the acts that produced them and the besluiten
+    /// that commence them. Days to come first, earliest first; then the rows
+    /// that state no day, the newest act first. Every day is one the register
+    /// states, never an estimate.
+    ///
+    /// Treaties are left out and counted, and an act the BWB does not print
+    /// yet is not in the list. `law show ID --not-commenced` reads one
+    /// regulation's waiting articles.
+    Upcoming {
+        /// Only regulations with a waiting unit that states a day on or after
+        /// this one. Without --from and --to, regulations whose units state
+        /// no day are listed too.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        from: Option<NaiveDate>,
+
+        /// Only regulations with a waiting unit that states a day on or
+        /// before this one.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        to: Option<NaiveDate>,
+
+        /// Only laws of this type, as the register spells it: wet, AMvB, zbo.
+        #[arg(long = "type", value_name = "TYPE")]
+        kind: Option<String>,
+
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
+        limit: u32,
+
+        /// How many rows to skip, to read past a list cut at its window.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+
+        #[command(flatten)]
+        moment: Moment,
+    },
+
     /// What changed in a law between two dates.
     ///
     /// The service's own comparison, unit by unit: the articles, and the

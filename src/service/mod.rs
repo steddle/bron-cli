@@ -33,7 +33,8 @@ pub use client::Answered;
 pub use model::{
     Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Expression, Feed, Had,
     History, Image, Lineage, Named, Paragraph, Parts, Produced, Published, RegisterEvent,
-    Regulation, Related, Relating, Relation, Relations, Span, Summary, Units, Window, name,
+    Regulation, Related, Relating, Relation, Relations, Span, Summary, Units, Upcoming, Waiting,
+    Window, name,
 };
 pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
 
@@ -208,6 +209,33 @@ impl Service {
 
         if let Some(law) = regulation {
             query.push(("regulation", law.to_string()));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// The regulations whose rendition at a moment prints units it does not
+    /// yet apply, one row each, in the service's order.
+    pub fn upcoming(&self, client: &Client, ask: &Waiting<'_>) -> Outcome<Answered<Vec<Upcoming>>> {
+        let url = format!("{}/api/v1/upcoming", self.base);
+
+        let mut query = vec![
+            ("as_of", ask.as_of.to_string()),
+            ("limit", ask.limit.to_string()),
+            ("offset", ask.offset.to_string()),
+        ];
+
+        if let Some(day) = ask.as_known_on {
+            query.push(("as_known_on", day.to_string()));
+        }
+        if let Some(day) = ask.from {
+            query.push(("from", day.to_string()));
+        }
+        if let Some(day) = ask.to {
+            query.push(("to", day.to_string()));
+        }
+        if let Some(kind) = ask.kind {
+            query.push(("type", kind.to_string()));
         }
 
         self.read(client, client.get(&url).query(&query))

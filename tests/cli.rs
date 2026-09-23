@@ -3044,3 +3044,273 @@ async fn find_refuses_a_regulation_that_is_no_identifier() {
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+/// A response the service really sent, frozen under `tests/fixtures/`.
+fn fixture(name: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+const UPCOMING: &str = "bron-upcoming-limit-5.json";
+const UPCOMING_2027_Q1: &str = "bron-upcoming-from-2027-01-01-to-2027-03-31-limit-5.json";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_prints_the_envelope_the_service_sent() {
+    let sent = fixture(UPCOMING_2027_Q1);
+    let server = answering("GET", "/api/v1/upcoming", &sent).await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "upcoming",
+            "--from",
+            "2027-01-01",
+            "--to",
+            "2027-03-31",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{sent}\n"));
+}
+
+/// One row per regulation in the order the service sent them, and every note
+/// on the rows, the legend and the limits the service stated, on stderr.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_prints_one_row_per_regulation_and_its_notes_apart() {
+    let server = answering("GET", "/api/v1/upcoming", &fixture(UPCOMING)).await;
+
+    let output = bron(&server, &["law", "upcoming", "--limit", "5"]).await;
+    let err = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        "2026-10-01  BWBR0035072   1 waiting  Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052\n\
+         2026-10-01  BWBR0035474  13 waiting  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575\n\
+         2026-10-01  BWBR0045685  13 waiting  Regeling Europese EZ-, LVVN- en KGG-subsidies 2021  acts stcrt-2026-29272  decrees stcrt-2026-29272\n\
+         2026-10-01  BWBR0051172   3 waiting  Besluit Aanmeldprocedure Staatsexamen Nt2 2027  acts stcrt-2025-22378  decrees -\n\
+         2026-10-01  BWBR0046685   1 waiting  Wet kwaliteit incassodienstverlening  acts stb-2022-186  decrees -\n"
+    );
+    assert!(
+        err.contains("the rendition names as commencing it"),
+        "{err}"
+    );
+    assert!(err.contains("note: filtered over a window of 5"), "{err}");
+    assert!(err.contains("note: 268 treaty(ies)"), "{err}");
+    assert!(err.contains("what the BWB prints"), "{err}");
+    assert!(!err.contains("no sentence for"), "{err}");
+}
+
+/// A regulation whose waiting units state no day is listed as waiting with no
+/// day, never with a date bron made up, and several acts are named in one
+/// column.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_regulation_whose_units_state_no_day_says_so() {
+    const UNDATED: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-23","as_known_on":"2026-09-23",
+ "data":[{"regulation_id":"BWBR0005537","regulation_title":"Algemene wet bestuursrecht","type":"wet","label":"2026-08-15_0","units":4,"dated":0,"acts":["stb-1994-1","stb-2021-2"],"decrees":[]}],
+ "caveats":[{"kind":"not_in_bwb"}]}"#;
+
+    let server = answering("GET", "/api/v1/upcoming", UNDATED).await;
+
+    let output = bron(&server, &["law", "upcoming"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        "no day yet  BWBR0005537  4 waiting  Algemene wet bestuursrecht  acts stb-1994-1, stb-2021-2  decrees -\n"
+    );
+}
+
+/// Nothing waiting is an answer, not a not-found, and with no rows to keep
+/// clean the limits stand under the sentence that says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_with_nothing_waiting_is_an_answer() {
+    const NOTHING: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-23","as_known_on":"2026-09-23",
+ "data":[],"caveats":[{"kind":"not_in_bwb"}]}"#;
+
+    let server = answering("GET", "/api/v1/upcoming", NOTHING).await;
+
+    let output = bron(
+        &server,
+        &["law", "upcoming", "--from", "2090-01-01", "--type", "wet"],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        text.contains("No regulation prints a unit waiting"),
+        "{text}"
+    );
+    assert!(text.contains("what the BWB prints"), "{text}");
+}
+
+/// Every name the route declares reaches it, and nothing else: the service
+/// refuses a name it does not declare. With no moment named the moment is
+/// today, and a zicht date alone names the day the text is for as well.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/upcoming"))
+        .and(query_param("as_of", "2026-06-01"))
+        .and(query_param("as_known_on", "2026-07-01"))
+        .and(query_param("type", "AMvB"))
+        .and(query_param("from", "2027-01-01"))
+        .and(query_param("to", "2027-03-31"))
+        .and(query_param("limit", "7"))
+        .and(query_param("offset", "14"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(fixture(UPCOMING_2027_Q1), "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/upcoming"))
+        .and(query_param("as_of", "2026-07-01"))
+        .and(query_param("as_known_on", "2026-07-01"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(fixture(UPCOMING), "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/upcoming"))
+        .and(query_param("limit", "50"))
+        .and(query_param("offset", "0"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(fixture(UPCOMING), "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    for args in [
+        &[
+            "law",
+            "upcoming",
+            "--as-of",
+            "2026-06-01",
+            "--as-known-on",
+            "2026-07-01",
+            "--type",
+            "AMvB",
+            "--from",
+            "2027-01-01",
+            "--to",
+            "2027-03-31",
+            "--limit",
+            "7",
+            "--offset",
+            "14",
+        ][..],
+        &["law", "upcoming", "--as-known-on", "2026-07-01"][..],
+        &["law", "upcoming"][..],
+    ] {
+        let output = bron(&server, args).await;
+        assert!(output.status.success(), "{args:?}: {output:?}");
+    }
+
+    let declared = [
+        "as_of",
+        "as_known_on",
+        "type",
+        "from",
+        "to",
+        "limit",
+        "offset",
+    ];
+    let asked = server.received_requests().await.unwrap();
+    let names = |request: &wiremock::Request| {
+        let mut names: Vec<String> = request
+            .url
+            .query_pairs()
+            .map(|(name, _)| name.into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+
+    for request in &asked {
+        for name in names(request) {
+            assert!(declared.contains(&name.as_str()), "{name}: {}", request.url);
+        }
+    }
+    assert_eq!(
+        names(&asked[2]),
+        ["as_of", "limit", "offset"],
+        "{}",
+        asked[2].url
+    );
+}
+
+/// A window that runs backwards is refused before it is asked, as the
+/// service would refuse it: a usage failure, exit 1.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_refuses_a_window_that_runs_backwards() {
+    let server = MockServer::start().await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "upcoming",
+            "--from",
+            "2027-03-31",
+            "--to",
+            "2027-01-01",
+        ],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "usage");
+    assert!(server.received_requests().await.unwrap().is_empty());
+
+    let zero = bron(&server, &["law", "upcoming", "--limit", "0"]).await;
+    assert_eq!(zero.status.code(), Some(1), "{zero:?}");
+}
+
+/// A failure the service states keeps its kind: a question it refuses exits
+/// 1 with its code, and one it understood and could not answer exits 4.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_failures_keep_the_kind_the_service_gave_them() {
+    for (status, body, exit, code) in [
+        (
+            400,
+            r#"{"bron":1,"grade":"authority","error":{"kind":"usage","code":"invalid_parameter","message":"type must be a regulation type, e.g. wet or AMvB","detail":[]}}"#,
+            1,
+            "invalid_parameter",
+        ),
+        (
+            500,
+            r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"internal","message":"the service could not list what waits","detail":[]}}"#,
+            4,
+            "internal",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/upcoming"))
+            .respond_with(ResponseTemplate::new(status).set_body_raw(body, "application/json"))
+            .mount(&server)
+            .await;
+
+        let output = bron(&server, &["--json", "law", "upcoming", "--type", "wet"]).await;
+        let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+        assert_eq!(output.status.code(), Some(exit), "{output:?}");
+        assert_eq!(envelope["error"]["code"], code, "{envelope}");
+    }
+}

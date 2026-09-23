@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use bron::ids::BwbId;
-use bron::service::{Ask, SearchData, SearchRequest, Service};
+use bron::service::{Ask, SearchData, SearchRequest, Service, Waiting};
 use bron::sources::Client;
 use bron::wire::Caveat;
 use wiremock::matchers::{method, path};
@@ -632,4 +632,73 @@ async fn a_reading_the_service_contradicts_itself_about_still_arrives() {
     // The contradiction is readable as the service sent it: held, no hash.
     assert!(resolved[1].held);
     assert!(resolved[1].content_hash.is_none());
+}
+
+/// A response the service really sent, frozen under `tests/fixtures/`.
+fn fixture(name: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+fn waiting() -> Waiting<'static> {
+    Waiting {
+        as_of: "2026-09-23".parse().unwrap(),
+        as_known_on: None,
+        from: None,
+        to: None,
+        kind: None,
+        limit: 5,
+        offset: 0,
+    }
+}
+
+/// The list production answered on 2026-09-23, read as the service shaped
+/// it: a row that names no decree still reads, and every limit it stated
+/// arrives under its own name rather than as unrecognised.
+#[tokio::test(flavor = "multi_thread")]
+async fn what_waits_to_apply_is_read_as_the_service_sent_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/upcoming"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(fixture("bron-upcoming-limit-5.json"), "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .upcoming(&client, &waiting())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("the service answered");
+
+    let rows = &answered.data;
+    assert_eq!(rows.len(), 5);
+    assert_eq!(rows[0].regulation_id, "BWBR0035072");
+    assert_eq!(
+        rows[0].regulation_title.as_deref(),
+        Some("Regeling genetisch gemodificeerde organismen milieubeheer 2013")
+    );
+    assert_eq!(rows[1].units, 13);
+    assert_eq!(rows[0].first_day, Some("2026-10-01".parse().unwrap()));
+    assert_eq!(rows[4].acts, vec!["stb-2022-186".to_string()]);
+    assert!(rows[4].decrees.is_empty());
+
+    assert_eq!(answered.as_of, Some("2026-09-23".parse().unwrap()));
+    assert_eq!(
+        answered.caveats,
+        vec![
+            Caveat::Truncated { window: 5 },
+            Caveat::TreatiesLeftOut { count: 268 },
+            Caveat::NotInBwb,
+        ]
+    );
 }
