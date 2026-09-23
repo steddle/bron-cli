@@ -423,9 +423,9 @@ pub enum Caveat {
 
     /// Held inwerkingtredingsbesluiten that name no act by `extref` or
     /// `ketenid`, so bron cannot say what they commence and raises no
-    /// [`Caveat::CommencementPending`] for them. `unlinked` counts those of
-    /// any age since the Staatsblad lane starts in 2020; `decrees` names the
-    /// ones published in the last 15 days, and is empty where none was.
+    /// [`Caveat::CommencementPending`] for them. `unlinked` counts every one
+    /// the service holds, of any age; `decrees` names the ones published in
+    /// the last 15 days, and is empty where none was.
     DecreesUnmatched {
         unlinked: u32,
         decrees: Vec<UnmatchedDecree>,

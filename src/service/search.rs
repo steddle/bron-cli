@@ -26,7 +26,7 @@ use super::client::Answered;
 /// What a search asks for. Mirrors the service's own body.
 #[derive(Debug, Serialize)]
 pub struct SearchRequest<'a> {
-    pub q: String,
+    pub q: &'a str,
     /// One or more BWB identifiers to search inside, separated by commas.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regulation: Option<String>,

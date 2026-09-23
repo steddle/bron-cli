@@ -1708,8 +1708,8 @@ fn caveat_line(caveat: &Caveat) -> String {
         ),
         Caveat::DecreesUnmatched { unlinked, decrees } => {
             let mut note = format!(
-                "note: {unlinked} held besluit(en) since 2020 name no act by reference or by \
-                 chain, so bron cannot say what they commence."
+                "note: {unlinked} held besluit(en) name no act by reference or by chain, so bron \
+                 cannot say what they commence."
             );
             if !decrees.is_empty() {
                 let _ = write!(
@@ -2098,7 +2098,7 @@ mod tests {
             "decrees": [{"id": "stb-2026-280", "published_on": "2026-09-20"}],
         })));
 
-        assert!(note.contains("262 held besluit(en) since 2020"), "{note}");
+        assert!(note.contains("262 held besluit(en) name no act"), "{note}");
         assert!(note.contains("cannot say what they commence"), "{note}");
         assert!(
             note.contains("1 of them published in the last 15 days: stb-2026-280 (2026-09-20)."),
@@ -2116,7 +2116,7 @@ mod tests {
             "decrees": [],
         })));
 
-        assert!(note.contains("262 held besluit(en) since 2020"), "{note}");
+        assert!(note.contains("262 held besluit(en) name no act"), "{note}");
         assert!(!note.contains("last 15 days"), "{note}");
         assert!(!note.contains(": ."), "{note}");
     }

@@ -221,7 +221,7 @@ fn run_find(
         .search(
             &client(quiet)?,
             &service::SearchRequest {
-                q: query.to_string(),
+                q: query,
                 regulation: (!regulation.is_empty()).then(|| regulation.join(",")),
                 limit,
                 as_of,

@@ -3564,7 +3564,7 @@ async fn decrees_unmatched_names_the_besluiten_bron_could_not_link() {
     let text = stdout(&output);
 
     assert!(output.status.success(), "{output:?}");
-    assert!(text.contains("262 held besluit(en) since 2020"), "{text}");
+    assert!(text.contains("262 held besluit(en) name no act"), "{text}");
     assert!(text.contains("stb-2026-280 (2026-09-20)"), "{text}");
     assert!(text.contains("cannot say what they commence"), "{text}");
     assert!(!text.contains("no sentence for"), "{text}");
@@ -3582,7 +3582,7 @@ async fn decrees_unmatched_with_no_recent_besluit_states_the_count() {
     let text = stdout(&output);
 
     assert!(output.status.success(), "{output:?}");
-    assert!(text.contains("262 held besluit(en) since 2020"), "{text}");
+    assert!(text.contains("262 held besluit(en) name no act"), "{text}");
     assert!(!text.contains("last 15 days"), "{text}");
     assert!(!text.contains("no sentence for"), "{text}");
 

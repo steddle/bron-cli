@@ -208,9 +208,9 @@ async fn searching(body: &str, status: u16) -> MockServer {
     server
 }
 
-fn asking_for(term: &str) -> SearchRequest<'static> {
+fn asking_for(term: &str) -> SearchRequest<'_> {
     SearchRequest {
-        q: term.to_string(),
+        q: term,
         regulation: None,
         limit: "20",
         as_of: Some("2026-08-24"),
