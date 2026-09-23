@@ -4755,8 +4755,7 @@ async fn publication_show_outside_scope_exits_on_its_code() {
 
 /// `dossier show` is one call to the service, and `--kind`, `--limit` and
 /// `--offset` go as typed: `tests/fixtures/bron-dossier-34608.json` is a real
-/// answer of the service's `/v1/dossiers` over a clone of the production
-/// corpus, captured on 2026-09-24.
+/// answer, captured against production on 2026-09-24.
 #[tokio::test(flavor = "multi_thread")]
 async fn dossier_show_prints_the_envelope_the_service_sent() {
     let answer = publication_fixture("bron-dossier-34608.json");
@@ -4805,20 +4804,36 @@ async fn dossier_show_prints_papers_as_rows_and_the_rest_on_stderr() {
 
     assert!(output.status.success(), "{output:?}");
     assert!(
-        text.contains("kst-34608-3  2016-11-17  memorie_van_toelichting\n"),
-        "{text}"
-    );
-    assert!(
-        text.contains("kst-34608-12  2018-12-21  amendement  Stemmen - aangenomen\n"),
+        text.starts_with("kst-34608-12  2018-12-21  amendement  no besluit stated\n  Amendement"),
         "{text}"
     );
     assert!(!text.contains("Kamerstukken 34608"), "{text}");
+    assert!(err.starts_with("Kamerstukken 34608\n"), "{err}");
     assert!(
-        err.contains("Kamerstukken 34608  Wijziging van het Burgerlijk Wetboek"),
+        err.contains("stb-2019-130  BWBR0001827 Wetboek van Burgerlijke Rechtsvordering, "),
         "{err}"
     );
-    assert!(err.contains("stb-2019-130  BWBR0005291"), "{err}");
-    assert!(err.contains("3 amendement(en) or motie(s)"), "{err}");
+    assert!(err.contains("1 amendement(en) or motie(s)"), "{err}");
+}
+
+/// Every besluit the Tweede Kamer states stands on the paper's row, and a
+/// paper of a kind nobody votes on carries none.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_prints_every_stated_besluit_on_its_paper() {
+    let server = answering(
+        "GET",
+        "/api/v1/dossiers/34608",
+        r#"{"bron":1,"grade":"authority","data":{"dossier":"34608","acts":[],"papers":[{"id":"kst-34608-3","number":"3","kind":"memorie_van_toelichting","title":"Memorie van toelichting","published_on":"2016-11-17","held":true},{"id":"kst-34608-21","number":"21","kind":"amendement","published_on":"2019-01-30","held":false,"fates":[{"decision":"Stemmen - uitstellen","zaak":"2019Z01877","stated_in":"acd2"},{"decision":"Stemmen - verworpen","zaak":"2019Z01877","stated_in":"acd2"}]}]}}"#,
+    )
+    .await;
+
+    let output = bron(&server, &["dossier", "show", "34608"]).await;
+
+    assert_eq!(
+        stdout(&output),
+        "kst-34608-3  2016-11-17  memorie_van_toelichting\n  Memorie van toelichting\n\
+         kst-34608-21  not held  2019-01-30  amendement  Stemmen - uitstellen; Stemmen - verworpen\n"
+    );
 }
 
 /// A dossier of acts from before 1995 answers no paper, and says why.

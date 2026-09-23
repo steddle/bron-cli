@@ -195,9 +195,9 @@ Exit 4 covers two things, and what is printed tells them apart. **The service st
 
 ## Reading through the service
 
-`bron law` reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
+`bron law`, `bron publication` and `bron dossier` read through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not. In the wetgeving lane the service froze them and names the digest; a decision or a publication is one bron fetched and hashed itself, and `provenance.frozen_by` on those answers says so and states when.
+Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not. For legislation and publications the service froze them and names the digest; a decision is one bron fetched and hashed itself, and `provenance.frozen_by` on that answer says so and states when.
 
 ```
 bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
@@ -205,7 +205,7 @@ bron blob <digest> --span 349072..361267        # fetch it, hash it, cut it your
 BRON_MIRROR=https://bron.example.org/api/v1     # another deployment
 ```
 
-Case law and official publications are read straight from the publisher, because neither has a service equivalent that would add anything: both registers already answer by identifier, and the digest travels with the answer either way.
+Case law is read straight from rechtspraak.nl, because the service holds no case law that would add anything: the register already answers by identifier, and the digest travels with the answer either way.
 
 Nothing is kept. bron writes one thing between runs, its share of the per-host rate-limit budget, so every answer is fetched and without a network there is no answer. A question put to `bron find` travels in a POST body for the same reason nothing is written down: the material is public, the interest in it is not.
 
