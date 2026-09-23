@@ -48,3 +48,8 @@ Nothing is tagged or published yet. Everything below can still change without a 
 - Per-host rate limiting coordinated through a file lock, so processes sharing a machine share one budget against the publishers. Any language that can take an `flock(2)` can join it; see [docs/buckets.md](docs/buckets.md).
 - The wetgeving lane takes no share of that budget. The budget is a promise to services that rate-limit by address; the bron service states its own limit, refuses with a 429 the caller still sees, and paces nobody. A refusal from it names the `Retry-After` it asked for.
 - Nothing is kept between runs. bron writes its share of the rate-limit budget under `~/.bron/buckets` and nothing else, and `BRON_HOME` relocates it. Without a network there is no answer.
+
+**Changed**
+
+- `publication search` without `--collection` now searches every collection the service reads: kamerstukken, the Staatsblad, the Staatscourant, the Tractatenblad and bijlagen. It previously searched kamerstukken only, because the old CQL client needed one collection to query and defaulted to that one.
+- `publication search` with no query, `--collection` and `--dossier` is now the service's `missing_parameter`, exit 1. It previously ran an unscoped search of the register's kamerstukken, because the old client had a query to send either way.
