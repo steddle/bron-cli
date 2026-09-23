@@ -14,10 +14,10 @@
 
 use std::path::PathBuf;
 
-use bron::service::{Ask, SearchData, SearchRequest, Service, Upcoming, Waiting};
+use bron::service::{Ask, PublicationQuery, SearchData, SearchRequest, Service, Upcoming, Waiting};
 use bron::sources::Client;
 use bron::wire::Caveat;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Somewhere for one test's rate-limit buckets to live.
@@ -759,5 +759,182 @@ async fn a_known_stage_that_does_not_match_its_own_shape_is_upstream() {
         !fault.1.contains("Upgrade to read what it says"),
         "{}",
         fault.1
+    );
+}
+
+// -- officiële publicaties ------------------------------------------------
+
+async fn answering_publication(id: &str, body: &str) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/publications/{id}")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// A held publication answers its manifestations under the digests that name
+/// them, and the units its XML prints at their spans, exactly as the service
+/// sent them: `tests/fixtures/bron-publication-stb-2026-56.json` is a real
+/// answer, `limit=2&rendered=1&raw=1` against production on 2026-09-23.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_publication_is_read_as_the_service_sent_it() {
+    let body = fixture("bron-publication-stb-2026-56.json");
+    let server = answering_publication("stb-2026-56", &body).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .publication(&client, "stb-2026-56", 2, 0, true, true)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("the service answered");
+
+    let doc = &answered.data;
+    assert!(doc.held);
+    assert_eq!(doc.dossier, None);
+    assert_eq!(doc.dossiers[0].dossier, "36327");
+    assert_eq!(
+        doc.manifestations
+            .iter()
+            .find(|m| m.format == "xml")
+            .unwrap()
+            .blob
+            .as_deref(),
+        Some("e3e33d868eaad813515d3f14520f88b2f225da1887631510d67b8c5d85fc534d")
+    );
+
+    let units = doc
+        .units
+        .as_ref()
+        .expect("an xml manifestation prints units");
+    assert_eq!(units.len(), 2);
+    assert_eq!(units[0].label.as_deref(), Some("Artikel 1.1.1"));
+    assert_eq!(
+        units[0].rendered.as_deref(),
+        Some("Artikel 1.1.1 Strafvordering heeft alleen plaats op de wijze bij de wet voorzien.")
+    );
+    assert!(units[0].raw.as_deref().unwrap().contains("<artikel"));
+
+    assert!(
+        answered.caveats.contains(&Caveat::Truncated { window: 2 }),
+        "{:?}",
+        answered.caveats
+    );
+}
+
+/// A publication the corpus passed on rather than kept answers `held: false`,
+/// no blob on the manifestations that were not fetched, and the
+/// `publication_not_held` caveat: `tests/fixtures/bron-publication-trb-2020-1.json`
+/// is a real answer against production on 2026-09-23.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_publication_passed_through_is_not_held() {
+    let body = fixture("bron-publication-trb-2020-1.json");
+    let server = answering_publication("trb-2020-1", &body).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .publication(&client, "trb-2020-1", 2, 0, false, false)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("the service answered");
+
+    let doc = &answered.data;
+    assert!(!doc.held);
+    let html = doc
+        .manifestations
+        .iter()
+        .find(|m| m.format == "html")
+        .unwrap();
+    assert_eq!(html.blob, None);
+
+    let units = doc
+        .units
+        .as_ref()
+        .expect("the xml item was still fetched and read");
+    assert_eq!(units.len(), 2);
+    assert!(units[0].rendered.is_none(), "rendered was not asked for");
+
+    assert!(
+        answered.caveats.contains(&Caveat::PublicationNotHeld),
+        "{:?}",
+        answered.caveats
+    );
+}
+
+/// A refused lookup carries the service's own code, exactly as `law show`'s
+/// failures do: the CLI judges nothing the service judges, an unrecognised
+/// collection prefix included.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_publication_id_the_service_refuses_carries_its_code() {
+    let body = r#"{"bron":1,"grade":"authority","error":{
+        "kind":"usage","code":"invalid_publication_id",
+        "message":"[xyz-2020-1] is no identifier of the officiële publicaties, which read as stb-2026-56 or kst-36327-3",
+        "detail":[]}}"#;
+    let server = answering_publication("xyz-2020-1", body).await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let fault = off_thread(&home, move |client| {
+        Service::at(&base)
+            .publication(&client, "xyz-2020-1", 50, 0, false, false)
+            .err()
+            .map(|e| (e.kind(), e.stated_code().map(str::to_string)))
+    })
+    .await
+    .expect("a refusal must not read as success");
+
+    assert_eq!(fault.0, "usage");
+    assert_eq!(fault.1.as_deref(), Some("invalid_publication_id"));
+}
+
+/// A search page names the publisher's own total and where to ask on:
+/// `tests/fixtures/bron-publication-search-dossier-36195.json` is a real
+/// answer, `{"dossier":"36195","limit":2}` against production on 2026-09-23.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_search_answers_next_to_walk_on() {
+    let body = fixture("bron-publication-search-dossier-36195.json");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/publications/search"))
+        .and(body_json(
+            serde_json::json!({"dossier": "36195", "limit": 2}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+        .mount(&server)
+        .await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let answered = off_thread(&home, move |client| {
+        Service::at(&base)
+            .publication_search(
+                &client,
+                &PublicationQuery {
+                    q: None,
+                    collection: None,
+                    dossier: Some("36195"),
+                    limit: 2,
+                    next: None,
+                },
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .expect("the service answered");
+
+    assert_eq!(answered.data.hits.len(), 2);
+    assert_eq!(answered.data.source_total, 53);
+    assert_eq!(answered.data.next.as_deref(), Some("3"));
+    assert!(
+        answered.caveats.contains(&Caveat::SourceTotalEstimated),
+        "{:?}",
+        answered.caveats
     );
 }

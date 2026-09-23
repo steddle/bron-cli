@@ -21,6 +21,7 @@
 
 pub mod client;
 pub mod model;
+pub mod publications;
 pub mod search;
 
 use chrono::NaiveDate;
@@ -34,6 +35,10 @@ pub use model::{
     Expression, Feed, Had, History, Image, Lineage, LinkedDecree, Named, Paragraph, Parts,
     Produced, Published, PublishedAct, RegisterEvent, Regulation, Related, Relating, Relation,
     Relations, Span, Summary, Units, Upcoming, Waiting, Window, name,
+};
+pub use publications::{
+    Manifestation, Publication, PublicationDossier, PublicationHit, PublicationQuery,
+    PublicationSearch, PublicationUnit,
 };
 pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
 

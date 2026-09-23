@@ -4236,3 +4236,180 @@ async fn a_regulation_an_address_cannot_carry_is_refused_before_asking() {
         .collect();
     assert_eq!(asked, ["/api/v1/regulations/%252E%252E/expressions"]);
 }
+
+// -- officiële publicaties ------------------------------------------------
+
+fn publication_fixture(name: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// `publication show` is one call to the service, so `--json` is what it
+/// answered: `tests/fixtures/bron-publication-stb-2026-56.json` is a real
+/// held answer, captured against production on 2026-09-23.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_show_prints_the_envelope_the_service_sent() {
+    let held = publication_fixture("bron-publication-stb-2026-56.json");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/publications/stb-2026-56"))
+        .and(query_param("limit", "2"))
+        .and(query_param("rendered", "1"))
+        .and(query_param("raw", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(held.clone(), "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "publication",
+            "show",
+            "stb-2026-56",
+            "--limit",
+            "2",
+            "--rendered",
+            "--raw",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{held}\n"));
+}
+
+/// A publication passed on rather than kept still answers its units, under
+/// the caveat that says so: `tests/fixtures/bron-publication-trb-2020-1.json`
+/// is a real answer against production on 2026-09-23.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_show_prints_a_passed_through_publication() {
+    let passed = publication_fixture("bron-publication-trb-2020-1.json");
+    let server = answering("GET", "/api/v1/publications/trb-2020-1", &passed).await;
+
+    let output = bron(&server, &["publication", "show", "trb-2020-1"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains(NOT_HELD_MARKER), "{text}");
+    assert!(text.contains("Article I"), "{text}");
+    assert!(text.contains("passed on"), "{text}");
+}
+
+const NOT_HELD_MARKER: &str = "not held";
+
+/// A publication id the service refuses, refused with its own code: bron
+/// pre-validates nothing this route judges.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_show_of_an_id_the_service_refuses_exits_on_its_code() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/publications/xyz-2020-1"))
+        .respond_with(ResponseTemplate::new(400).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"usage","code":"invalid_publication_id","message":"[xyz-2020-1] is no identifier of the officiële publicaties, which read as stb-2026-56 or kst-36327-3","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "publication", "show", "xyz-2020-1"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "invalid_publication_id");
+}
+
+/// `publication search` posts the body the routes declares and reads its
+/// `next`: `tests/fixtures/bron-publication-search-dossier-36195.json` is a
+/// real page against production on 2026-09-23.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_search_prints_the_envelope_and_walks_on_next() {
+    let page = publication_fixture("bron-publication-search-dossier-36195.json");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/publications/search"))
+        .and(body_json(
+            serde_json::json!({"dossier": "36195", "limit": 2}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(page.clone(), "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/publications/search"))
+        .and(body_json(
+            serde_json::json!({"dossier": "36195", "limit": 2, "next": "3"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":53}}"#,
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "publication",
+            "search",
+            "--dossier",
+            "36195",
+            "--limit",
+            "2",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{page}\n"));
+
+    let output = bron(
+        &server,
+        &[
+            "publication",
+            "search",
+            "--dossier",
+            "36195",
+            "--limit",
+            "2",
+            "--next",
+            "3",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// One collection is sent by its short code, the one the service reads, and
+/// not the CLI's own display words.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_search_sends_the_collections_short_code() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/publications/search"))
+        .and(body_json(
+            serde_json::json!({"collection": "stb", "limit": 20}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":0}}"#,
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["publication", "search", "--collection", "staatsblad"],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+}

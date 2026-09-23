@@ -9,7 +9,7 @@
 //! name part of a public contract that no compiler checks. Everything that
 //! crosses the process boundary is defined in [`crate::wire`].
 
-use crate::ids::{Ecli, PublicationId};
+use crate::ids::Ecli;
 use chrono::{DateTime, NaiveDate, Utc};
 
 /// A formal link between two decisions.
@@ -68,12 +68,4 @@ pub struct CaseHit {
     pub title: Option<String>,
     pub summary: Option<String>,
     pub decided_on: Option<NaiveDate>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicationHit {
-    pub id: PublicationId,
-    pub title: Option<String>,
-    pub dossier: Option<String>,
-    pub published_on: Option<NaiveDate>,
 }

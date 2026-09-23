@@ -4,11 +4,11 @@
 //! ECLI, a document number. Never a URL, which is an address that can change
 //! without the thing it addresses changing.
 //!
-//! An ECLI and a publication id are asked of the publisher directly, so each type
-//! validates on the way in. That makes the difference between a lookup and a
-//! search visible at the call site: `Ecli::from_str("hoge raad")` fails, so
-//! anything accepting free text is doing resolution, not retrieval. A BWB id
-//! goes to the service as typed, and the service says whether it is one.
+//! An ECLI is asked of rechtspraak directly, so it validates on the way in.
+//! That makes the difference between a lookup and a search visible at the
+//! call site: `Ecli::from_str("hoge raad")` fails, so anything accepting free
+//! text is doing resolution, not retrieval. A BWB id and a publication id go
+//! to the service as typed, and the service says whether either is one.
 
 use std::fmt;
 use std::str::FromStr;
@@ -125,69 +125,6 @@ impl FromStr for Ecli {
     }
 }
 
-/// An officiële bekendmakingen document number, e.g. `kst-33669-6` or
-/// `stb-2024-123`.
-///
-/// The collection prefix is open-ended, so this checks shape rather than
-/// membership of a fixed list.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PublicationId(String);
-
-string_id!(PublicationId, "publication id");
-
-impl PublicationId {
-    /// Collection prefix, e.g. `kst`, `stb`, `stcrt`.
-    pub fn collection(&self) -> &str {
-        self.0.split('-').next().unwrap_or_default()
-    }
-}
-
-impl FromStr for PublicationId {
-    type Err = InvalidId;
-
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let text = text.trim();
-        let mut fields = text.split('-');
-
-        let prefix_ok = fields
-            .next()
-            .is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_lowercase()));
-        let rest: Vec<&str> = fields.collect();
-        let rest_ok = !rest.is_empty()
-            && rest
-                .iter()
-                .all(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_alphanumeric()));
-
-        if prefix_ok && rest_ok {
-            Ok(Self(text.to_string()))
-        } else {
-            Err(InvalidId::new(Self::KIND, text))
-        }
-    }
-}
-
-impl PublicationId {
-    /// Resolves a BWB source reference to the publication it names.
-    ///
-    /// BWB writes these as `Stb.2023-41`; the publication register addresses
-    /// the same document as `stb-2023-41`. Translating between them is what
-    /// turns an article into the amending act that produced it, and the
-    /// amending act is where transitional law lives.
-    pub fn from_bwb_reference(reference: &str) -> Option<Self> {
-        let (kind, rest) = reference.trim().split_once('.')?;
-        let (year, number) = rest.split_once('-')?;
-
-        let valid = !kind.is_empty()
-            && kind.bytes().all(|b| b.is_ascii_alphabetic())
-            && year.len() == 4
-            && year.bytes().all(|b| b.is_ascii_digit())
-            && !number.is_empty()
-            && number.bytes().all(|b| b.is_ascii_alphanumeric());
-
-        valid.then(|| Self(format!("{}-{year}-{number}", kind.to_ascii_lowercase())))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,58 +147,5 @@ mod tests {
                 .parse::<Ecli>()
                 .is_err()
         );
-    }
-
-    #[test]
-    fn accepts_publication_ids_across_collections() {
-        assert_eq!(
-            "kst-33669-6".parse::<PublicationId>().unwrap().collection(),
-            "kst"
-        );
-        assert_eq!(
-            "stb-2024-123"
-                .parse::<PublicationId>()
-                .unwrap()
-                .collection(),
-            "stb"
-        );
-        assert!("stcrt-2024-1234".parse::<PublicationId>().is_ok());
-        assert!("ah-tk-20232024-1234".parse::<PublicationId>().is_ok());
-    }
-
-    #[test]
-    fn rejects_malformed_publication_ids() {
-        assert!("kst".parse::<PublicationId>().is_err());
-        assert!("KST-33669-6".parse::<PublicationId>().is_err());
-        assert!("kst--6".parse::<PublicationId>().is_err());
-    }
-
-    #[test]
-    fn bwb_source_references_resolve_to_publications() {
-        assert_eq!(
-            PublicationId::from_bwb_reference("Stb.2023-41")
-                .unwrap()
-                .as_str(),
-            "stb-2023-41"
-        );
-        assert_eq!(
-            PublicationId::from_bwb_reference("Stb.1991-600")
-                .unwrap()
-                .as_str(),
-            "stb-1991-600"
-        );
-        assert_eq!(
-            PublicationId::from_bwb_reference("Stcrt.2020-12345")
-                .unwrap()
-                .as_str(),
-            "stcrt-2020-12345"
-        );
-    }
-
-    #[test]
-    fn a_reference_that_is_not_one_resolves_to_nothing() {
-        assert!(PublicationId::from_bwb_reference("onbekend").is_none());
-        assert!(PublicationId::from_bwb_reference("Stb.91-600").is_none());
-        assert!(PublicationId::from_bwb_reference("").is_none());
     }
 }

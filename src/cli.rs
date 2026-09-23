@@ -11,8 +11,6 @@
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use bron::sources::publications::Collection;
-
 #[derive(Debug, Parser)]
 #[command(
     name = "bron",
@@ -587,36 +585,79 @@ pub enum Case {
 
 #[derive(Debug, Subcommand)]
 pub enum Publication {
-    /// Searches official publications.
+    /// The publisher's own ranking of a question over the officiële
+    /// publicaties, asked live: bron keeps no index of them.
+    ///
+    /// At least one of the query, --collection and --dossier; the service
+    /// refuses the absence of all three rather than bron.
     Search {
         query: Vec<String>,
-        #[arg(long, value_enum, default_value_t = CollectionArg::Kamerstuk)]
-        collection: CollectionArg,
+
+        /// One collection: kamerstukken, the Staatsblad, the Staatscourant,
+        /// the Tractatenblad or bijlagen.
+        #[arg(long, value_enum)]
+        collection: Option<CollectionArg>,
+
+        /// One kamerstukdossier by its number, e.g. 36195.
         #[arg(long)]
         dossier: Option<String>,
+
         #[arg(long, default_value_t = 20)]
         limit: u32,
+
+        /// Where to ask on: the `next` a previous answer stated. Walking it to
+        /// its end reads every hit once.
+        #[arg(long)]
+        next: Option<String>,
     },
 
-    /// Fetches one publication, e.g. kst-33669-6.
-    Show { id: String },
+    /// One publication by identifier, e.g. stb-2026-56 or kst-36327-3.
+    ///
+    /// Held where the corpus keeps it, passed through where it was fetched on
+    /// demand and not kept, and refused where bron is known to keep it out. A
+    /// manifestation in XML answers the articles it prints, at their spans.
+    Show {
+        id: String,
+
+        /// Also carry bron's rendering of each unit, beside the span and hash
+        /// that place it. See `law show`.
+        #[arg(long)]
+        rendered: bool,
+
+        /// Also carry the publisher's own bytes at every span. See `law show`.
+        #[arg(long)]
+        raw: bool,
+
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+
+        /// How many units to skip.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
 }
 
+/// One collection of the officiële publicaties, by the short code the service
+/// reads.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum CollectionArg {
     Kamerstuk,
     Staatsblad,
     Staatscourant,
     Tractatenblad,
+    /// A bijlage: an attachment to any of the above.
+    Blg,
 }
 
-impl From<CollectionArg> for Collection {
-    fn from(arg: CollectionArg) -> Self {
-        match arg {
-            CollectionArg::Kamerstuk => Self::Kamerstuk,
-            CollectionArg::Staatsblad => Self::Staatsblad,
-            CollectionArg::Staatscourant => Self::Staatscourant,
-            CollectionArg::Tractatenblad => Self::Tractatenblad,
+impl CollectionArg {
+    /// The service's own word for it, sent as the `collection` field.
+    pub fn as_code(self) -> &'static str {
+        match self {
+            Self::Kamerstuk => "kst",
+            Self::Staatsblad => "stb",
+            Self::Staatscourant => "stcrt",
+            Self::Tractatenblad => "trb",
+            Self::Blg => "blg",
         }
     }
 }

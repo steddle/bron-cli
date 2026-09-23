@@ -15,7 +15,7 @@ use bron::service::{
     Article, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Produced, Regulation,
     Relation, SearchData, SearchLid, Upcoming, name,
 };
-use bron::wire::{AppealStatus, Body, Caveat, Envelope};
+use bron::wire::{AppealStatus, Caveat, Envelope};
 
 use crate::run::Answer;
 
@@ -905,31 +905,76 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&e.caveats, out)
         }
 
-        Answer::Publication(e) => {
-            let Some(doc) = &e.data else { return Ok(()) };
+        Answer::Publication(a) => {
+            let doc = &a.data;
 
-            writeln!(out, "{}  {}", doc.id, doc.title.as_deref().unwrap_or(""))?;
+            write!(out, "{}", doc.id)?;
+            if let Some(kind) = &doc.publication_type {
+                write!(out, "  {kind}")?;
+            }
+            writeln!(out, "  {}", if doc.held { "held" } else { NOT_HELD })?;
+            if let Some(title) = &doc.title {
+                writeln!(out, "{title}")?;
+            }
             if let Some(dossier) = &doc.dossier {
-                writeln!(out, "  dossier {dossier}")?;
+                writeln!(out, "dossier {dossier}")?;
             }
-            if let Some(day) = doc.published_on {
-                writeln!(out, "  published {day}")?;
+            let dates: Vec<String> = [
+                doc.signed_on.map(|d| format!("signed {d}")),
+                doc.published_on.map(|d| format!("published {d}")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            if !dates.is_empty() {
+                writeln!(out, "{}", dates.join(", "))?;
             }
 
-            match &doc.body {
-                Body::Linked { provenance } => {
-                    writeln!(out, "source: {}", provenance.blob)?;
-                    writeln!(out, "{}", provenance.url)?;
+            writeln!(out)?;
+            for manifestation in &doc.manifestations {
+                let mut row = manifestation.format.clone();
+                if let Some(blob) = &manifestation.blob {
+                    let _ = write!(row, "  {blob}");
                 }
-                // Said in words. Silence here reads as a digest that went
-                // missing rather than one the register never had.
-                Body::Absent => writeln!(
-                    out,
-                    "the register links no document for this record, so there is nothing to hash"
-                )?,
+                writeln!(out, "{row}")?;
             }
 
-            caveats(&e.caveats, out)
+            if !doc.dossiers.is_empty() {
+                writeln!(out, "\ndossiers")?;
+                for dossier in &doc.dossiers {
+                    writeln!(
+                        out,
+                        "  {}  stated in {}",
+                        dossier.dossier, dossier.stated_in
+                    )?;
+                }
+            }
+
+            // The span points into the XML manifestation, so a reader who
+            // wants to check a unit fetches that document and none other.
+            let xml = doc
+                .manifestations
+                .iter()
+                .find(|m| m.format == "xml")
+                .and_then(|m| m.blob.as_deref());
+
+            for unit in doc.units.iter().flatten() {
+                writeln!(out, "\n{}", unit.name())?;
+                match xml {
+                    Some(blob) => writeln!(
+                        out,
+                        "source: {blob} ({}..{})",
+                        unit.span.start, unit.span.end
+                    )?,
+                    None => writeln!(out, "span {}..{}", unit.span.start, unit.span.end)?,
+                }
+                writeln!(out, "hash {}", unit.content_hash)?;
+                if let Some(text) = unit.rendered.as_deref().or(unit.raw.as_deref()) {
+                    writeln!(out, "\n{text}")?;
+                }
+            }
+
+            caveats(&a.caveats, out)
         }
 
         // The bytes on stdout exactly as they hashed, and nothing else there:
@@ -948,18 +993,28 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             writeln!(err, "\n{}", checked.url)
         }
 
-        Answer::PublicationHits(e) => {
-            for hit in data(e) {
+        Answer::PublicationHits(a) => {
+            for hit in &a.data.hits {
                 let mut row = hit.id.clone();
+                if !hit.held {
+                    let _ = write!(row, "  {NOT_HELD}");
+                }
                 if let Some(day) = hit.published_on {
                     let _ = write!(row, "  {day}");
                 }
-                writeln!(out, "{row}  {}", hit.title.as_deref().unwrap_or(""))?;
-                if let Some(dossier) = &hit.dossier {
-                    writeln!(out, "  dossier {dossier}")?;
+                writeln!(out, "{row}")?;
+                if let Some(title) = &hit.title {
+                    writeln!(out, "  {title}")?;
                 }
             }
-            caveats(&e.caveats, err)
+
+            write!(err, "source_total {}", a.data.source_total)?;
+            if let Some(next) = &a.data.next {
+                write!(err, "  next {next}")?;
+            }
+            writeln!(err)?;
+
+            caveats(&a.caveats, err)
         }
     }
 }
@@ -2138,29 +2193,80 @@ mod tests {
         );
     }
 
+    /// A search hit built for a test: every field a caller does not care about
+    /// held to a sensible default, so a test states only what it means to.
+    fn publication_hit(
+        id: &str,
+        held: bool,
+        title: Option<&str>,
+        published_on: Option<&str>,
+    ) -> bron::service::PublicationHit {
+        bron::service::PublicationHit {
+            id: id.into(),
+            collection: id.split('-').next().unwrap_or_default().into(),
+            held,
+            publication_type: Some("Kamerstuk".into()),
+            title: title.map(str::to_string),
+            published_on: published_on.map(|d| d.parse().unwrap()),
+        }
+    }
+
+    fn publication_search(
+        hits: Vec<bron::service::PublicationHit>,
+        caveats: Vec<Caveat>,
+    ) -> Answer {
+        Answer::PublicationHits(Answered {
+            data: bron::service::PublicationSearch {
+                hits,
+                source_total: 1,
+                next: None,
+            },
+            caveats,
+            as_of: None,
+            as_known_on: None,
+            envelope: String::new(),
+        })
+    }
+
     /// When a publication appeared is on its row and on the record.
     #[test]
     fn a_publication_says_when_it_was_published() {
-        use bron::wire::{Body, Publication, PublicationHit};
+        use bron::service::Publication;
 
-        let hits = Answer::PublicationHits(Envelope::ok(vec![PublicationHit {
-            id: "kst-33669-6".into(),
-            title: Some("Programmatische aanpak stikstof".into()),
-            dossier: Some("33669".into()),
-            published_on: Some("2013-10-01".parse().unwrap()),
-        }]));
-        let record = Answer::Publication(Envelope::ok(Box::new(Publication {
-            id: "kst-33669-6".into(),
-            title: Some("Programmatische aanpak stikstof".into()),
-            dossier: Some("33669".into()),
-            published_on: Some("2013-10-01".parse().unwrap()),
-            body: Body::Absent,
-        })));
+        let hits = publication_search(
+            vec![publication_hit(
+                "kst-33669-6",
+                true,
+                Some("Programmatische aanpak stikstof"),
+                Some("2013-10-01"),
+            )],
+            Vec::new(),
+        );
+        let record = Answer::Publication(Box::new(Answered {
+            data: Publication {
+                id: "kst-33669-6".into(),
+                collection: "kst".into(),
+                publication_type: Some("Kamerstuk".into()),
+                title: Some("Programmatische aanpak stikstof".into()),
+                published_on: Some("2013-10-01".parse().unwrap()),
+                signed_on: None,
+                dossier: Some("33669".into()),
+                held: true,
+                known_since: None,
+                manifestations: Vec::new(),
+                dossiers: Vec::new(),
+                units: None,
+            },
+            caveats: Vec::new(),
+            as_of: None,
+            as_known_on: None,
+            envelope: String::new(),
+        }));
 
         assert!(
             printed(&hits)
                 .lines()
-                .any(|l| l == "kst-33669-6  2013-10-01  Programmatische aanpak stikstof"),
+                .any(|l| l == "kst-33669-6  2013-10-01"),
             "{}",
             printed(&hits)
         );
@@ -2175,7 +2281,7 @@ mod tests {
     /// publisher, whose endpoints no test can stand in for.
     #[test]
     fn a_list_read_from_a_publisher_keeps_its_notes_off_stdout() {
-        use bron::wire::{CaseHit, PublicationHit};
+        use bron::wire::CaseHit;
 
         let cases = Answer::CaseHits(
             Envelope::ok(vec![CaseHit {
@@ -2190,14 +2296,14 @@ mod tests {
                 Caveat::Truncated { window: 20 },
             ]),
         );
-        let publications = Answer::PublicationHits(
-            Envelope::ok(vec![PublicationHit {
-                id: "kst-33669-6".into(),
-                title: Some("Programmatische aanpak stikstof".into()),
-                dossier: Some("33669".into()),
-                published_on: None,
-            }])
-            .with_caveats(vec![Caveat::Truncated { window: 20 }]),
+        let publications = publication_search(
+            vec![publication_hit(
+                "kst-33669-6",
+                true,
+                Some("Programmatische aanpak stikstof"),
+                None,
+            )],
+            vec![Caveat::Truncated { window: 20 }],
         );
 
         for (answer, row) in [

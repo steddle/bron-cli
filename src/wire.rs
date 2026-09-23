@@ -881,60 +881,6 @@ impl From<model::CaseHit> for CaseHit {
     }
 }
 
-/// Whether the register links a document for a publication.
-///
-/// Said outright rather than left to a missing key. The digest is how an answer
-/// from this lane is checked at all: a reader fetches the address beside it and
-/// hashes what arrives. A record the register publishes without a body has
-/// nothing to hash, and simply leaving the provenance out would read as an
-/// answer whose digest went missing.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case", tag = "body")]
-pub enum Body {
-    /// The register links an XML document. This is where those bytes came from
-    /// and what they hash to.
-    Linked { provenance: Provenance },
-    /// The register links none. The record is the whole of what it publishes
-    /// under this identifier, so there is nothing to fetch and nothing to hash.
-    Absent,
-}
-
-/// One publication, and the bytes behind it where there are any.
-#[derive(Debug, Serialize)]
-pub struct Publication {
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dossier: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub published_on: Option<NaiveDate>,
-    #[serde(flatten)]
-    pub body: Body,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PublicationHit {
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dossier: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub published_on: Option<NaiveDate>,
-}
-
-impl From<model::PublicationHit> for PublicationHit {
-    fn from(hit: model::PublicationHit) -> Self {
-        Self {
-            id: hit.id.into_string(),
-            title: hit.title,
-            dossier: hit.dossier,
-            published_on: hit.published_on,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1321,45 +1267,6 @@ mod tests {
                 stated
             );
         }
-    }
-
-    /// A record the register publishes without a body says so, rather than
-    /// arriving as one whose provenance went missing. The digest is the whole
-    /// of how an answer from this lane is checked.
-    #[test]
-    fn a_publication_says_whether_the_register_links_a_document() {
-        let linked = Publication {
-            id: "kst-33669-6".into(),
-            title: None,
-            dossier: None,
-            published_on: None,
-            body: Body::Linked {
-                provenance: Provenance::frozen(
-                    &sources::Provenance {
-                        blob: BlobId::of(b"<kamerstuk/>"),
-                        url: "https://zoek.officielebekendmakingen.nl/kst-33669-6.xml".into(),
-                        byte_len: 12,
-                    },
-                    "2026-08-24T09:00:00Z".parse().unwrap(),
-                ),
-            },
-        };
-        let json = serde_json::to_string(&linked).unwrap();
-
-        assert!(json.contains(r#""body":"linked""#), "{json}");
-        assert!(json.contains(r#""frozen_by":"bron""#), "{json}");
-
-        let bare = Publication {
-            id: "kst-33669-6".into(),
-            title: None,
-            dossier: None,
-            published_on: None,
-            body: Body::Absent,
-        };
-        let json = serde_json::to_string(&bare).unwrap();
-
-        assert!(json.contains(r#""body":"absent""#), "{json}");
-        assert!(!json.contains("provenance"), "{json}");
     }
 
     /// Provenance names who froze the bytes: bron fetched them itself and

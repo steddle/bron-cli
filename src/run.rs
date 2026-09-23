@@ -9,13 +9,13 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
 use bron::error::{Fault, Outcome, from_source};
-use bron::ids::{Ecli, PublicationId};
+use bron::ids::Ecli;
 use bron::model::{AppealStatus, Direction, Relation};
 use bron::service::{self, Answered, Service};
-use bron::sources::{Client, FetchedCase, publications, rechtspraak};
+use bron::sources::{Client, FetchedCase, rechtspraak};
 use bron::wire::{self, Caveat, Envelope};
 
-use crate::cli::{Case, Cli, Command, Law, Moment, Publication};
+use crate::cli::{Case, Cli, CollectionArg, Command, Law, Moment, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -73,8 +73,8 @@ pub enum Answer {
     CaseHits(Envelope<Vec<wire::CaseHit>>),
     Case(Envelope<Box<wire::Case>>),
     Appeal(Envelope<wire::AppealStatus>),
-    PublicationHits(Envelope<Vec<wire::PublicationHit>>),
-    Publication(Envelope<Box<wire::Publication>>),
+    PublicationHits(Answered<service::PublicationSearch>),
+    Publication(Box<Answered<service::Publication>>),
     Blob {
         envelope: Envelope<Box<wire::Blob>>,
         /// The bytes handed over, the whole document or the span cut from
@@ -112,8 +112,8 @@ impl Answer {
             Self::CaseHits(e) => write(out, e),
             Self::Case(e) => write(out, e),
             Self::Appeal(e) => write(out, e),
-            Self::PublicationHits(e) => write(out, e),
-            Self::Publication(e) => write(out, e),
+            Self::PublicationHits(a) => sent(out, &a.envelope),
+            Self::Publication(a) => sent(out, &a.envelope),
             Self::Blob { envelope, .. } => write(out, envelope),
         }
     }
@@ -133,7 +133,7 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
     match &cli.command {
         Command::Law(law) => run_law(law, today, quiet, &service),
         Command::Case(case) => run_case(case, quiet),
-        Command::Publication(pub_) => run_publication(pub_, quiet),
+        Command::Publication(pub_) => run_publication(pub_, quiet, &service),
         Command::Find {
             query,
             regulation,
@@ -585,58 +585,42 @@ fn run_case(case_cmd: &Case, quiet: bool) -> Outcome<Answer> {
 
 // -- officiële publicaties -----------------------------------------------
 
-fn run_publication(cmd: &Publication, quiet: bool) -> Outcome<Answer> {
+fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome<Answer> {
+    let client = client(quiet)?;
+
     match cmd {
         Publication::Search {
             query,
             collection,
             dossier,
             limit,
+            next,
         } => {
-            let client = client(quiet)?;
-            let hits = publications::search(
-                &client,
-                &publications::Query {
-                    terms: &query.join(" "),
-                    collection: (*collection).into(),
-                    dossier: dossier.as_deref(),
-                    limit: *limit,
-                },
-            )
-            .map_err(|e| from_source("officiële bekendmakingen", e))?;
+            let q = query.join(" ");
 
-            Ok(Answer::PublicationHits(Envelope::ok(
-                hits.into_iter().map(Into::into).collect(),
-            )))
+            service
+                .publication_search(
+                    &client,
+                    &service::PublicationQuery {
+                        q: (!q.is_empty()).then_some(q.as_str()),
+                        collection: collection.map(CollectionArg::as_code),
+                        dossier: dossier.as_deref(),
+                        limit: *limit,
+                        next: next.as_deref(),
+                    },
+                )
+                .map(Answer::PublicationHits)
         }
 
-        Publication::Show { id } => {
-            let id: PublicationId = parse_id(id)?;
-            let client = client(quiet)?;
-            let doc = publications::fetch(&client, &id)
-                .map_err(|e| from_source("officiële bekendmakingen", e))?;
-            let read_at = Utc::now();
-
-            // Not every record links a body, and the answer says which it is.
-            // A digest is the whole of how this lane can be checked, so its
-            // absence is a fact to state rather than a key to leave out.
-            let body = match &doc.provenance {
-                Some(source) => wire::Body::Linked {
-                    provenance: wire::Provenance::frozen(source, read_at),
-                },
-                None => wire::Body::Absent,
-            };
-
-            Ok(Answer::Publication(Envelope::ok(Box::new(
-                wire::Publication {
-                    id: doc.id.into_string(),
-                    title: doc.title,
-                    dossier: doc.dossier,
-                    published_on: doc.published_on,
-                    body,
-                },
-            ))))
-        }
+        Publication::Show {
+            id,
+            rendered,
+            raw,
+            limit,
+            offset,
+        } => service
+            .publication(&client, id, *limit, *offset, *rendered, *raw)
+            .map(|answered| Answer::Publication(Box::new(answered))),
     }
 }
 

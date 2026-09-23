@@ -12,8 +12,8 @@
 //!
 //! Three rules run through the whole crate:
 //!
-//! - **Identity is the official identifier.** A BWB id, [`ids::Ecli`],
-//!   [`ids::PublicationId`]. Never a URL.
+//! - **Identity is the official identifier.** A BWB id, [`ids::Ecli`], a
+//!   publication id. Never a URL.
 //! - **Provenance is not optional.** Every value carries the [`blob::BlobId`]
 //!   of the document it came from, whether bron froze it or the service did.
 //! - **Nothing in the resolution path is nondeterministic.** No clock reads

@@ -5,7 +5,6 @@
 //! command layer stamps the moment it read one, because a claim about what a
 //! register held is dated to when bron looked rather than to today.
 
-pub mod publications;
 pub mod rechtspraak;
 
 mod http;
@@ -16,7 +15,7 @@ pub use http::{Client, Fetched, FetchedBytes, Refused};
 use chrono::NaiveDate;
 
 use crate::blob::BlobId;
-use crate::ids::{Ecli, PublicationId};
+use crate::ids::Ecli;
 use crate::model::Relation;
 
 /// A document to parse, paired with everything needed to say where it came
@@ -87,14 +86,4 @@ pub struct FetchedCase {
     pub full_text: Option<String>,
     pub provenance: Provenance,
     pub relations: Vec<Relation>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct FetchedPublication {
-    pub id: PublicationId,
-    pub title: Option<String>,
-    pub dossier: Option<String>,
-    pub published_on: Option<NaiveDate>,
-    /// Absent when the record links no XML body.
-    pub provenance: Option<Provenance>,
 }
