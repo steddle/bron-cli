@@ -15,7 +15,7 @@ use bron::service::{self, Answered, Service};
 use bron::sources::{Client, FetchedCase, rechtspraak};
 use bron::wire::{self, Caveat, Envelope};
 
-use crate::cli::{Case, Cli, Command, DossierCmd, Law, Moment, Publication, collection_code};
+use crate::cli::{Case, Cli, Command, DossierCmd, Law, Moment, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -612,7 +612,7 @@ fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome
                     &client,
                     &service::PublicationQuery {
                         q: (!q.is_empty()).then_some(q.as_str()),
-                        collection: collection.as_deref().map(collection_code),
+                        collection: collection.as_deref(),
                         dossier: dossier.as_deref(),
                         limit: limit.as_deref(),
                         next: next.as_deref(),

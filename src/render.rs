@@ -1910,7 +1910,7 @@ fn caveat_line(caveat: &Caveat) -> String {
         ),
         Caveat::PapersNotHeld { count, papers } => format!(
             "note: {count} of the {papers} paper(s) the publisher lists for this dossier are not \
-             held yet and are left out; bron is reading them."
+             held and are left out while they are read."
         ),
         Caveat::PublicationsLeftOut { count } => format!(
             "note: {count} hit(s) on this page are of a kind bron does not open and are left \

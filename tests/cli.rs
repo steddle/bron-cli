@@ -5007,8 +5007,8 @@ async fn dossier_show_says_how_many_papers_are_not_held_yet() {
     assert!(output.status.success(), "{output:?}");
     assert!(
         said.contains(
-            "3 of the 27 paper(s) the publisher lists for this dossier are not held yet and are \
-             left out; bron is reading them."
+            "3 of the 27 paper(s) the publisher lists for this dossier are not held and are \
+             left out while they are read."
         ),
         "{said}"
     );
@@ -5111,15 +5111,14 @@ async fn publication_search_prints_the_envelope_and_walks_on_next() {
     assert!(output.status.success(), "{output:?}");
 }
 
-/// A collection named in words is sent by the service's code for it, and a
-/// code is sent as typed: `h`, the Handelingen, among them.
+/// A collection is sent exactly as typed: `h`, the Handelingen, among them.
 #[tokio::test(flavor = "multi_thread")]
-async fn publication_search_sends_the_collections_short_code() {
-    for (typed, sent) in [("staatsblad", "stb"), ("handelingen", "h"), ("h", "h")] {
+async fn publication_search_sends_the_collection_as_typed() {
+    for code in ["stb", "h"] {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/publications/search"))
-            .and(body_json(serde_json::json!({"collection": sent})))
+            .and(body_json(serde_json::json!({"collection": code})))
             .respond_with(ResponseTemplate::new(200).set_body_raw(
                 r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":0}}"#,
                 "application/json",
@@ -5128,21 +5127,24 @@ async fn publication_search_sends_the_collections_short_code() {
             .mount(&server)
             .await;
 
-        let output = bron(&server, &["publication", "search", "--collection", typed]).await;
+        let output = bron(&server, &["publication", "search", "--collection", code]).await;
 
-        assert!(output.status.success(), "{typed}: {output:?}");
+        assert!(output.status.success(), "{code}: {output:?}");
     }
 }
 
-/// Which collections exist is the service's to say: one it does not read
-/// reaches it as typed and comes back as its own refusal.
+/// Which collections exist is the service's to say: a word it does not read,
+/// the name of a collection among them, reaches it as typed and comes back
+/// as its own refusal, as the API and the MCP answer it.
 #[tokio::test(flavor = "multi_thread")]
 async fn publication_search_in_a_collection_the_service_does_not_read_is_its_refusal() {
     refused_by_the_service(
-        &["publication", "search", "--collection", "agenda"],
+        &["publication", "search", "--collection", "kamerstuk"],
         "POST",
         "/api/v1/publications/search",
-        vec![Carries::Body(serde_json::json!({"collection": "agenda"}))],
+        vec![Carries::Body(
+            serde_json::json!({"collection": "kamerstuk"}),
+        )],
         "invalid_parameter",
         "collection is one of kst, stb, stcrt, trb, blg, h",
     )

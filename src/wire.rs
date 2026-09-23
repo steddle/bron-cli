@@ -492,9 +492,10 @@ pub enum Caveat {
     /// left out of the answer while they are read again.
     PapersNotHeld { count: u32, papers: u32 },
 
-    /// Hits of a kind bron does not open, which decision F refuses or a
-    /// collection it has not measured, are left out of this page and counted.
-    /// `next` still walks on, past a page they emptied.
+    /// Hits of a kind bron does not open, a kind bron keeps out because it
+    /// names private persons, or a collection it has not measured, are left
+    /// out of this page and counted. `next` still walks on, past a page they
+    /// emptied.
     PublicationsLeftOut { count: u32 },
 
     /// The service stated a limit this bron has no sentence for.

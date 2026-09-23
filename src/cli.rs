@@ -584,10 +584,10 @@ pub enum Publication {
     Search {
         query: Vec<String>,
 
-        /// One collection, by the service's code or its name: kst or
-        /// kamerstuk, stb or staatsblad, stcrt or staatscourant, trb or
-        /// tractatenblad, blg for bijlagen, h or handelingen. Anything else is
-        /// sent exactly as typed, and the service says whether it is one.
+        /// One collection, by the service's code: kst for kamerstukken, stb
+        /// for the Staatsblad, stcrt for the Staatscourant, trb for the
+        /// Tractatenblad, blg for bijlagen, h for the Handelingen. Sent
+        /// exactly as typed, and the service says whether it is one.
         #[arg(long)]
         collection: Option<String>,
 
@@ -660,19 +660,6 @@ pub enum DossierCmd {
         #[arg(long, allow_negative_numbers = true)]
         offset: Option<String>,
     },
-}
-
-/// The service's code for a collection named in words, and anything else
-/// exactly as typed: which collections exist is the service's to say.
-pub fn collection_code(typed: &str) -> &str {
-    match typed {
-        "kamerstuk" => "kst",
-        "staatsblad" => "stb",
-        "staatscourant" => "stcrt",
-        "tractatenblad" => "trb",
-        "handelingen" => "h",
-        code => code,
-    }
 }
 
 /// Which moment a question about legislation means.
