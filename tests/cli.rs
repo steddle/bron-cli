@@ -4988,9 +4988,10 @@ async fn dossier_show_exits_on_the_code_the_service_states() {
 }
 
 /// `papers_not_held` says how many of the papers the publisher lists the
-/// answer leaves out while bron reads them. The fixture is the production
-/// answer for 34608 with the caveat added by hand, in the shape `openapi.json`
-/// states: `papers` the count listed, `count` the count left out.
+/// answer leaves out while bron reads them. The fixture is production's
+/// answer for 34608 on 2026-09-24 with the caveat added by hand, in the shape
+/// `openapi.json` states: `papers` the count listed, `count` the count left
+/// out. No dossier production answered that day carried it.
 #[tokio::test(flavor = "multi_thread")]
 async fn dossier_show_says_how_many_papers_are_not_held_yet() {
     let answer = publication_fixture("bron-dossier-34608-edited-papers-not-held.json");
@@ -5006,7 +5007,7 @@ async fn dossier_show_says_how_many_papers_are_not_held_yet() {
     assert!(output.status.success(), "{output:?}");
     assert!(
         said.contains(
-            "3 of the 41 paper(s) the publisher lists for this dossier are not held yet and are \
+            "3 of the 27 paper(s) the publisher lists for this dossier are not held yet and are \
              left out; bron is reading them."
         ),
         "{said}"
@@ -5018,16 +5019,14 @@ async fn dossier_show_says_how_many_papers_are_not_held_yet() {
 }
 
 /// `publications_left_out` says a page holds fewer hits than the publisher
-/// ranked, and that `next` still walks on. The fixture is a production page
-/// with the caveat added by hand, to the shape `{kind, count}`.
+/// ranked, and that `next` still walks on. The fixture is production's page
+/// for `Tesla` at a window of 8 on 2026-09-24: six hits, two left out.
 #[tokio::test(flavor = "multi_thread")]
 async fn publication_search_says_how_many_hits_are_left_out() {
-    let page = publication_fixture(
-        "bron-publication-search-dossier-36195-edited-publications-left-out.json",
-    );
+    let page = publication_fixture("bron-publication-search-tesla-limit-8.json");
     let server = answering("POST", "/api/v1/publications/search", &page).await;
 
-    let output = bron(&server, &["publication", "search", "--dossier", "36195"]).await;
+    let output = bron(&server, &["publication", "search", "Tesla", "--limit", "8"]).await;
     let said = format!(
         "{}{}",
         stdout(&output),
@@ -5037,18 +5036,14 @@ async fn publication_search_says_how_many_hits_are_left_out() {
     assert!(output.status.success(), "{output:?}");
     assert!(
         said.contains(
-            "1 hit(s) on this page are of a kind bron does not open and are left out; the \
+            "2 hit(s) on this page are of a kind bron does not open and are left out; the \
              publisher's next page may still hold more."
         ),
         "{said}"
     );
     assert!(!said.contains("no sentence for"), "{said}");
 
-    let json = bron(
-        &server,
-        &["--json", "publication", "search", "--dossier", "36195"],
-    )
-    .await;
+    let json = bron(&server, &["--json", "publication", "search", "Tesla"]).await;
     assert_eq!(stdout(&json), format!("{page}\n"));
 }
 
@@ -5116,27 +5111,40 @@ async fn publication_search_prints_the_envelope_and_walks_on_next() {
     assert!(output.status.success(), "{output:?}");
 }
 
-/// One collection is sent by its short code, the one the service reads, and
-/// not the CLI's own display words.
+/// A collection named in words is sent by the service's code for it, and a
+/// code is sent as typed: `h`, the Handelingen, among them.
 #[tokio::test(flavor = "multi_thread")]
 async fn publication_search_sends_the_collections_short_code() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/api/v1/publications/search"))
-        .and(body_json(serde_json::json!({"collection": "stb"})))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":0}}"#,
-            "application/json",
-        ))
-        .expect(1)
-        .mount(&server)
-        .await;
+    for (typed, sent) in [("staatsblad", "stb"), ("handelingen", "h"), ("h", "h")] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/publications/search"))
+            .and(body_json(serde_json::json!({"collection": sent})))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":0}}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let output = bron(
-        &server,
-        &["publication", "search", "--collection", "staatsblad"],
+        let output = bron(&server, &["publication", "search", "--collection", typed]).await;
+
+        assert!(output.status.success(), "{typed}: {output:?}");
+    }
+}
+
+/// Which collections exist is the service's to say: one it does not read
+/// reaches it as typed and comes back as its own refusal.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_search_in_a_collection_the_service_does_not_read_is_its_refusal() {
+    refused_by_the_service(
+        &["publication", "search", "--collection", "agenda"],
+        "POST",
+        "/api/v1/publications/search",
+        vec![Carries::Body(serde_json::json!({"collection": "agenda"}))],
+        "invalid_parameter",
+        "collection is one of kst, stb, stcrt, trb, blg, h",
     )
     .await;
-
-    assert!(output.status.success(), "{output:?}");
 }

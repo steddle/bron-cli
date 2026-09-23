@@ -9,7 +9,7 @@
 //! it would lose precision: `citeertitel`, `geldigheid`, `zicht`, `lid`.
 
 use chrono::NaiveDate;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -584,10 +584,12 @@ pub enum Publication {
     Search {
         query: Vec<String>,
 
-        /// One collection: kamerstukken, the Staatsblad, the Staatscourant,
-        /// the Tractatenblad or bijlagen.
-        #[arg(long, value_enum)]
-        collection: Option<CollectionArg>,
+        /// One collection, by the service's code or its name: kst or
+        /// kamerstuk, stb or staatsblad, stcrt or staatscourant, trb or
+        /// tractatenblad, blg for bijlagen, h or handelingen. Anything else is
+        /// sent exactly as typed, and the service says whether it is one.
+        #[arg(long)]
+        collection: Option<String>,
 
         /// One kamerstukdossier by its number, e.g. 36195.
         #[arg(long)]
@@ -660,28 +662,16 @@ pub enum DossierCmd {
     },
 }
 
-/// One collection of the officiële publicaties, by the short code the service
-/// reads.
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum CollectionArg {
-    Kamerstuk,
-    Staatsblad,
-    Staatscourant,
-    Tractatenblad,
-    /// A bijlage: an attachment to any of the above.
-    Blg,
-}
-
-impl CollectionArg {
-    /// The service's own word for it, sent as the `collection` field.
-    pub fn as_code(self) -> &'static str {
-        match self {
-            Self::Kamerstuk => "kst",
-            Self::Staatsblad => "stb",
-            Self::Staatscourant => "stcrt",
-            Self::Tractatenblad => "trb",
-            Self::Blg => "blg",
-        }
+/// The service's code for a collection named in words, and anything else
+/// exactly as typed: which collections exist is the service's to say.
+pub fn collection_code(typed: &str) -> &str {
+    match typed {
+        "kamerstuk" => "kst",
+        "staatsblad" => "stb",
+        "staatscourant" => "stcrt",
+        "tractatenblad" => "trb",
+        "handelingen" => "h",
+        code => code,
     }
 }
 
