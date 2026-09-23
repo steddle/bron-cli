@@ -5,7 +5,7 @@
 
 use std::io::{self, Write};
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use bron::error::{Fault, Outcome, from_source};
@@ -124,14 +124,11 @@ impl Answer {
 }
 
 pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
-    // Read once. A run that reads the clock twice can straddle midnight.
-    let today = Utc::now().date_naive();
-
     // Resolved once, so every fetch in a run takes the same route.
     let service = Service::resolve()?;
 
     match &cli.command {
-        Command::Law(law) => run_law(law, today, quiet, &service),
+        Command::Law(law) => run_law(law, quiet, &service),
         Command::Case(case) => run_case(case, quiet),
         Command::Publication(pub_) => run_publication(pub_, quiet, &service),
         Command::Find {
@@ -139,15 +136,7 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
             regulation,
             limit,
             moment,
-        } => run_find(
-            &query.join(" "),
-            regulation,
-            limit,
-            moment,
-            today,
-            quiet,
-            &service,
-        ),
+        } => run_find(&query.join(" "), regulation, limit, moment, quiet, &service),
         Command::Blob { digest, span } => run_blob(digest, *span, quiet, &service),
     }
 }
@@ -223,11 +212,10 @@ fn run_find(
     regulation: &[String],
     limit: &str,
     moment: &Moment,
-    today: NaiveDate,
     quiet: bool,
     service: &Service,
 ) -> Outcome<Answer> {
-    let (as_of, as_known_on) = moment.coordinates(today);
+    let (as_of, as_known_on) = moment.coordinates();
 
     service
         .search(
@@ -235,7 +223,7 @@ fn run_find(
             &service::SearchRequest {
                 q: query.to_string(),
                 regulation: (!regulation.is_empty()).then(|| regulation.join(",")),
-                limit: limit.to_string(),
+                limit,
                 as_of,
                 as_known_on,
             },
@@ -245,7 +233,7 @@ fn run_find(
 
 // -- wetgeving -----------------------------------------------------------
 
-fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> Outcome<Answer> {
+fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
     let client = client(quiet)?;
 
     match law_cmd {
@@ -261,10 +249,10 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 &service::Named {
                     query: &query.join(" "),
                     kind: kind.as_deref(),
-                    as_of: moment.as_of,
-                    as_known_on: moment.as_known_on,
-                    limit: limit.clone(),
-                    offset: offset.clone(),
+                    as_of: moment.as_of.as_deref(),
+                    as_known_on: moment.as_known_on.as_deref(),
+                    limit,
+                    offset,
                 },
             )
             .map(Answer::LawHits),
@@ -281,7 +269,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             offset,
             moment,
         } => {
-            let (as_of, as_known_on) = moment.coordinates(today);
+            let (as_of, as_known_on) = moment.coordinates();
 
             service
                 .relations(
@@ -292,8 +280,8 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         as_known_on,
                         kind: kind.as_deref(),
                         article: article.as_deref(),
-                        limit: limit.clone(),
-                        offset: offset.clone(),
+                        limit,
+                        offset,
                     },
                 )
                 .map(|answered| Answer::Relations {
@@ -312,7 +300,13 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             kind,
             as_known_on,
         } => service
-            .history(&client, id, article, kind.as_deref(), *as_known_on)
+            .history(
+                &client,
+                id,
+                article,
+                kind.as_deref(),
+                as_known_on.as_deref(),
+            )
             .map(|answered| Answer::History(Box::new(answered))),
 
         Law::Versions { id } => service.expressions(&client, id).map(Answer::Versions),
@@ -330,7 +324,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             offset,
             moment,
         } => {
-            let (as_of, as_known_on) = moment.coordinates(today);
+            let (as_of, as_known_on) = moment.coordinates();
 
             service
                 .parts(
@@ -342,12 +336,12 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         kind: kind.as_deref(),
                         number: number.as_deref(),
                         paragraph: paragraph.as_deref(),
-                        position: *position,
+                        position: position.as_deref(),
                         lang: lang.as_deref(),
                         raw: *raw,
                         not_commenced: *not_commenced,
-                        limit: limit.clone(),
-                        offset: offset.clone(),
+                        limit,
+                        offset,
                     },
                 )
                 .map(|answered| Answer::Parts {
@@ -369,14 +363,14 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             .published(
                 &client,
                 &service::Published {
-                    from: *from,
-                    to: *to,
-                    known_from: *known_from,
-                    known_to: *known_to,
+                    from: from.as_deref(),
+                    to: to.as_deref(),
+                    known_from: known_from.as_deref(),
+                    known_to: known_to.as_deref(),
                     kind: kind.as_deref(),
                     regulation: regulation.as_deref(),
-                    limit: limit.clone(),
-                    offset: offset.clone(),
+                    limit,
+                    offset,
                 },
             )
             .map(Answer::Published),
@@ -386,7 +380,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             regulation,
             limit,
         } => service
-            .feed(&client, *since, limit, regulation.as_deref())
+            .feed(&client, since.as_deref(), limit, regulation.as_deref())
             .map(Answer::Feed),
 
         Law::Upcoming {
@@ -397,7 +391,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             offset,
             moment,
         } => {
-            let (as_of, as_known_on) = moment.coordinates(today);
+            let (as_of, as_known_on) = moment.coordinates();
 
             service
                 .upcoming(
@@ -405,11 +399,11 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                     &service::Waiting {
                         as_of,
                         as_known_on,
-                        from: *from,
-                        to: *to,
+                        from: from.as_deref(),
+                        to: to.as_deref(),
                         kind: kind.as_deref(),
-                        limit: limit.clone(),
-                        offset: offset.clone(),
+                        limit,
+                        offset,
                     },
                 )
                 .map(Answer::Upcoming)
@@ -430,9 +424,9 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 &client,
                 id,
                 &service::Compare {
-                    from: *from,
-                    to: to.unwrap_or(today),
-                    as_known_on: *as_known_on,
+                    from: from.as_deref(),
+                    to: to.as_deref(),
+                    as_known_on: as_known_on.as_deref(),
                     kind: kind.as_deref(),
                     article: article.as_deref(),
                     lang: lang.as_deref(),
@@ -457,7 +451,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             raw,
             not_commenced,
         } => {
-            let (as_of, as_known_on) = moment.coordinates(today);
+            let (as_of, as_known_on) = moment.coordinates();
 
             let answered = service.articles(
                 &client,
@@ -605,7 +599,7 @@ fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome
                         q: (!q.is_empty()).then_some(q.as_str()),
                         collection: collection.map(CollectionArg::as_code),
                         dossier: dossier.as_deref(),
-                        limit: limit.clone(),
+                        limit,
                         next: next.as_deref(),
                     },
                 )

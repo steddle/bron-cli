@@ -30,7 +30,7 @@ pub struct PublicationQuery<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dossier: Option<&'a str>,
     /// As the service reads it: digits, exactly as typed.
-    pub limit: String,
+    pub limit: &'a str,
     /// Where to ask on, as a previous answer's own `next`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<&'a str>,
@@ -140,12 +140,12 @@ impl Service {
     ) -> Outcome<Answered<Publication>> {
         let url = self.route(&["publications", id])?;
 
-        let mut query = vec![("limit", limit.to_string()), ("offset", offset.to_string())];
+        let mut query = vec![("limit", limit), ("offset", offset)];
         if rendered {
-            query.push(("rendered", "1".to_string()));
+            query.push(("rendered", "1"));
         }
         if raw {
-            query.push(("raw", "1".to_string()));
+            query.push(("raw", "1"));
         }
 
         self.read(client, client.get(&url).query(&query))

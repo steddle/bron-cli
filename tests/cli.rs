@@ -143,17 +143,16 @@ async fn both_coordinates_of_a_moment_reach_the_service() {
 }
 
 /// One date names both coordinates of a zicht question: the text for a day, as
-/// the register had it that day. Sent alone, the service reads the other
-/// coordinate as today and resolves a rendition in force now.
+/// the register had it that day. The service reads it so, and bron sends it
+/// alone rather than copying it into the other coordinate.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_zicht_date_alone_names_the_day_it_is_about_too() {
+async fn a_zicht_date_alone_is_sent_alone() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/search"))
         .and(body_json(serde_json::json!({
             "q": "6:162",
             "limit": "20",
-            "as_of": "2020-01-01",
             "as_known_on": "2020-01-01",
         })))
         .respond_with(ResponseTemplate::new(200).set_body_raw(LOOKUP, "application/json"))
@@ -196,6 +195,55 @@ async fn law_show_sends_both_coordinates_too() {
     // The mock answers only where both coordinates arrived, and its answer is
     // the not-found this asserts on.
     assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+/// A moment named by no flag is sent by none: the service reads it as today
+/// and states the day it resolved in its answer, so no clock on this machine
+/// decides which text answers. The later day of a comparison is the same.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unnamed_moment_is_left_to_the_service() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/search"))
+        .and(body_json(serde_json::json!({"q": "6:162", "limit": "20"})))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(LOOKUP, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    for route in [
+        "/api/v1/regulations/BWBR0005289/articles",
+        "/api/v1/regulations/BWBR0005289/parts",
+        "/api/v1/regulations/BWBR0005289/relations",
+        "/api/v1/regulations/BWBR0005289/changes",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param_is_missing("as_of"))
+            .and(query_param_is_missing("as_known_on"))
+            .and(query_param_is_missing("to"))
+            .respond_with(ResponseTemplate::new(404).set_body_raw(
+                r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","message":"seen","detail":[]}}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let found = bron(&server, &["find", "6:162"]).await;
+    assert!(found.status.success(), "{found:?}");
+
+    for args in [
+        &["law", "show", "BWBR0005289"][..],
+        &["law", "parts", "BWBR0005289"][..],
+        &["law", "relations", "BWBR0005289"][..],
+        &["law", "changes", "BWBR0005289", "--from", "2020-01-01"][..],
+    ] {
+        // The mock answers only where no moment was sent, and its answer is
+        // the not-found this asserts on.
+        let output = bron(&server, args).await;
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+    }
 }
 
 /// `--lang` is the service's to judge: bron sends it as typed on every route
@@ -460,16 +508,15 @@ async fn a_failure_the_service_stated_carries_its_code_to_the_consumer() {
 /// A command line bron cannot parse never reaches the service, so no code is
 /// its to carry: presence says who stated the failure.
 ///
-/// `--limit` reaches every service route as typed now, so a bad one is the
-/// service's to refuse; a date clap itself types is what still fails here
-/// before any request is built.
+/// Every value a service route reads reaches it as typed, so what still fails
+/// here is what no route takes: `--item` without `--paragraph`.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_bron_states_itself_carries_no_code() {
     let server = MockServer::start().await;
 
     let output = bron(
         &server,
-        &["--json", "law", "published", "--from", "gisteren"],
+        &["--json", "law", "show", "BWBR0005289", "--item", "a"],
     )
     .await;
     let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
@@ -3523,8 +3570,9 @@ async fn decrees_unmatched_names_the_besluiten_bron_could_not_link() {
 }
 
 /// Every name the route declares reaches it, and nothing else: the service
-/// refuses a name it does not declare. With no moment named the moment is
-/// today, and a zicht date alone names the day the text is for as well.
+/// refuses a name it does not declare. With no moment named neither
+/// coordinate is sent, and a zicht date alone is sent alone: the service reads
+/// it as that day for both.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
     let server = MockServer::start().await;
@@ -3545,7 +3593,7 @@ async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
         .await;
     Mock::given(method("GET"))
         .and(path("/api/v1/upcoming"))
-        .and(query_param("as_of", "2026-07-01"))
+        .and(query_param_is_missing("as_of"))
         .and(query_param("as_known_on", "2026-07-01"))
         .respond_with(
             ResponseTemplate::new(200).set_body_raw(fixture(UPCOMING), "application/json"),
@@ -3555,6 +3603,8 @@ async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
         .await;
     Mock::given(method("GET"))
         .and(path("/api/v1/upcoming"))
+        .and(query_param_is_missing("as_of"))
+        .and(query_param_is_missing("as_known_on"))
         .and(query_param("limit", "50"))
         .and(query_param("offset", "0"))
         .respond_with(
@@ -3616,11 +3666,12 @@ async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
         }
     }
     assert_eq!(
-        names(&asked[2]),
-        ["as_of", "limit", "offset"],
+        names(&asked[1]),
+        ["as_known_on", "limit", "offset"],
         "{}",
-        asked[2].url
+        asked[1].url
     );
+    assert_eq!(names(&asked[2]), ["limit", "offset"], "{}", asked[2].url);
 }
 
 /// A failure the service states keeps its kind: a question it refuses exits
@@ -4024,6 +4075,103 @@ async fn law_search_with_a_limit_of_zero_is_the_services_refusal() {
         vec![Carries::Param("limit", "0")],
         "invalid_parameter",
         "limit must be between 1 and 100",
+    )
+    .await;
+}
+
+/// A date the service reads is the service's to judge: one that names no day
+/// reaches it as typed and comes back as its own refusal, as a bad `--limit`
+/// does. A zicht date alone travels alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_with_a_zicht_date_that_names_no_day_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "show", "BWBR0005289", "--as-known-on", "2026-02-30"],
+        "GET",
+        "/api/v1/regulations/BWBR0005289/articles",
+        vec![
+            Carries::Param("as_known_on", "2026-02-30"),
+            Carries::Missing("as_of"),
+        ],
+        "invalid_parameter",
+        "as_known_on must be a date as YYYY-MM-DD",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_with_a_date_that_names_no_day_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "show", "BWBR0005289", "--as-of", "2026-02-30"],
+        "GET",
+        "/api/v1/regulations/BWBR0005289/articles",
+        vec![
+            Carries::Param("as_of", "2026-02-30"),
+            Carries::Missing("as_known_on"),
+        ],
+        "invalid_parameter",
+        "as_of must be a date as YYYY-MM-DD",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_with_a_day_that_is_no_date_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "published", "--from", "gisteren"],
+        "GET",
+        "/api/v1/expressions",
+        vec![Carries::Param("in_force_from", "gisteren")],
+        "invalid_parameter",
+        "in_force_from must be a date as YYYY-MM-DD",
+    )
+    .await;
+}
+
+/// A negative number is the value of the flag before it, so `--limit -1` as
+/// two tokens reaches the service rather than reading as an unknown flag.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_with_a_negative_limit_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "upcoming", "--limit", "-1"],
+        "GET",
+        "/api/v1/upcoming",
+        vec![Carries::Param("limit", "-1")],
+        "invalid_parameter",
+        "limit must be between 1 and 500",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_feed_with_a_negative_cursor_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "feed", "--since", "-1"],
+        "GET",
+        "/api/v1/feed",
+        vec![Carries::Param("since", "-1")],
+        "invalid_parameter",
+        "since must be a whole number from 0",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_with_a_negative_place_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "aanhef",
+            "--position",
+            "-1",
+        ],
+        "GET",
+        "/api/v1/regulations/BWBR0001941/parts",
+        vec![Carries::Param("position", "-1")],
+        "invalid_parameter",
+        "position must be a whole number from 1: the place of a unit among the units of its kind",
     )
     .await;
 }

@@ -78,7 +78,7 @@ pub enum Command {
 
         /// How many hits to answer. Sent to the service exactly as typed; the
         /// service pages this route and refuses what it refuses.
-        #[arg(long, default_value = "20")]
+        #[arg(long, default_value = "20", allow_negative_numbers = true)]
         limit: String,
 
         #[command(flatten)]
@@ -138,11 +138,11 @@ pub enum Law {
         kind: Option<String>,
 
         /// How many hits to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "20")]
+        #[arg(long, default_value = "20", allow_negative_numbers = true)]
         limit: String,
 
         /// How many rows to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "0", allow_negative_numbers = true)]
         offset: String,
 
         #[command(flatten)]
@@ -235,9 +235,10 @@ pub enum Law {
         number: Option<String>,
 
         /// The place of one unit among the units of --kind, from 1: how a unit
-        /// that prints no number is asked for.
-        #[arg(long)]
-        position: Option<u32>,
+        /// that prints no number is asked for. Sent to the service exactly as
+        /// typed.
+        #[arg(long, allow_negative_numbers = true)]
+        position: Option<String>,
 
         /// One lid of that unit, as the register numbers it. The span, the
         /// text and the reference become the lid's.
@@ -268,11 +269,11 @@ pub enum Law {
         /// route, as it bounds `law show`, so bron judges nothing about the
         /// word: `none`, a negative number, a decimal all reach the service
         /// and come back as its own `invalid_parameter` where they are wrong.
-        #[arg(long, default_value = "20")]
+        #[arg(long, default_value = "20", allow_negative_numbers = true)]
         limit: String,
 
         /// How many units to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "0", allow_negative_numbers = true)]
         offset: String,
 
         #[command(flatten)]
@@ -289,11 +290,11 @@ pub enum Law {
         id: String,
 
         /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "50", allow_negative_numbers = true)]
         limit: String,
 
         /// How many rows to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "0", allow_negative_numbers = true)]
         offset: String,
     },
 
@@ -316,11 +317,11 @@ pub enum Law {
         article: Option<String>,
 
         /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "50", allow_negative_numbers = true)]
         limit: String,
 
         /// How many rows to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "0", allow_negative_numbers = true)]
         offset: String,
 
         #[command(flatten)]
@@ -356,9 +357,10 @@ pub enum Law {
         #[arg(long)]
         kind: Option<String>,
 
-        /// The day whose view of the register counts (zicht).
+        /// The day whose view of the register counts (zicht). Sent to the
+        /// service exactly as typed.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        as_known_on: Option<NaiveDate>,
+        as_known_on: Option<String>,
     },
 
     /// Every published version of a law, with its validity windows.
@@ -373,20 +375,21 @@ pub enum Law {
     /// poller that walks windows never sees it. `law feed` misses nothing.
     Published {
         /// The first day of the window on geldigheid: what took effect on or after it.
+        /// Each of the four days is sent to the service exactly as typed.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        from: Option<NaiveDate>,
+        from: Option<String>,
 
         /// The last day of that window.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        to: Option<NaiveDate>,
+        to: Option<String>,
 
         /// The first day of the window on zicht: what the register began showing on or after it.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        known_from: Option<NaiveDate>,
+        known_from: Option<String>,
 
         /// The last day of that window.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        known_to: Option<NaiveDate>,
+        known_to: Option<String>,
 
         /// Only laws of this type, as the register spells it: wet, AMvB, zbo.
         #[arg(long = "type", value_name = "TYPE")]
@@ -397,12 +400,12 @@ pub enum Law {
         regulation: Option<String>,
 
         /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "50", allow_negative_numbers = true)]
         limit: String,
 
         /// How many rows to skip, to read past a list cut at its window.
         /// Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "0", allow_negative_numbers = true)]
         offset: String,
     },
 
@@ -416,17 +419,17 @@ pub enum Law {
     /// corpus that cursor belongs to. Keep both: an origin you do not recognise
     /// means the corpus was rebuilt and the number means something else now.
     Feed {
-        /// The cursor to walk from. 0 for the whole log. The service refuses a
-        /// walk without one.
-        #[arg(long)]
-        since: Option<u64>,
+        /// The cursor to walk from. 0 for the whole log. Sent to the service
+        /// exactly as typed, and the service refuses a walk without one.
+        #[arg(long, allow_negative_numbers = true)]
+        since: Option<String>,
 
         /// Only this law, by its BWB identifier.
         #[arg(long)]
         regulation: Option<String>,
 
         /// How many events to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "100")]
+        #[arg(long, default_value = "100", allow_negative_numbers = true)]
         limit: String,
     },
 
@@ -448,26 +451,27 @@ pub enum Law {
     Upcoming {
         /// Only regulations with a waiting unit that states a day on or after
         /// this one. Without --from and --to, regulations whose units state
-        /// no day are listed too.
+        /// no day are listed too. Both days are sent to the service exactly as
+        /// typed.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        from: Option<NaiveDate>,
+        from: Option<String>,
 
         /// Only regulations with a waiting unit that states a day on or
         /// before this one.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        to: Option<NaiveDate>,
+        to: Option<String>,
 
         /// Only laws of this type, as the register spells it: wet, AMvB, zbo.
         #[arg(long = "type", value_name = "TYPE")]
         kind: Option<String>,
 
         /// How many rows to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "50", allow_negative_numbers = true)]
         limit: String,
 
         /// How many rows to skip, to read past a list cut at its window.
         /// Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "0", allow_negative_numbers = true)]
         offset: String,
 
         #[command(flatten)]
@@ -487,14 +491,15 @@ pub enum Law {
     Changes {
         id: String,
 
-        /// The earlier date, resolved against geldigheid. The service refuses
-        /// a comparison without one.
+        /// The earlier date, resolved against geldigheid. Sent to the service
+        /// exactly as typed, and the service refuses a comparison without one.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        from: Option<NaiveDate>,
+        from: Option<String>,
 
-        /// The later date. Defaults to today.
+        /// The later date. Sent exactly as typed; the service reads today
+        /// where none is named.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        to: Option<NaiveDate>,
+        to: Option<String>,
 
         /// Also list units that did not change.
         #[arg(long)]
@@ -518,7 +523,7 @@ pub enum Law {
         /// The day the register is read on (zicht), which selects what it
         /// showed then. Both days of the comparison are resolved against it.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        as_known_on: Option<NaiveDate>,
+        as_known_on: Option<String>,
 
         /// Also carry the publisher's own bytes at every span. See `law show`.
         #[arg(long)]
@@ -578,7 +583,7 @@ pub enum Publication {
         dossier: Option<String>,
 
         /// How many hits to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "20")]
+        #[arg(long, default_value = "20", allow_negative_numbers = true)]
         limit: String,
 
         /// Where to ask on: the `next` a previous answer stated. Walking it to
@@ -605,11 +610,11 @@ pub enum Publication {
         raw: bool,
 
         /// How many units to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "50", allow_negative_numbers = true)]
         limit: String,
 
         /// How many units to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "0", allow_negative_numbers = true)]
         offset: String,
     },
 }
@@ -646,32 +651,26 @@ impl CollectionArg {
 /// register showed, which is what you want to know about what someone could
 /// have known then. They diverge the moment something is published with
 /// retroactive effect, so a question may name a day in each.
+///
+/// Both are sent to the service exactly as typed, and each is left out where
+/// its flag was: the service judges a date, reads `as_known_on` alone as that
+/// day for both coordinates, reads a moment named by neither as today, and
+/// states the moment it resolved in its answer.
 #[derive(Debug, Args)]
 pub struct Moment {
     /// The text as it applied on this date (geldigheid).
     #[arg(long, value_name = "YYYY-MM-DD")]
-    pub as_of: Option<NaiveDate>,
+    pub as_of: Option<String>,
 
     /// The text as the register showed it on this date (zicht).
     #[arg(long, value_name = "YYYY-MM-DD")]
-    pub as_known_on: Option<NaiveDate>,
+    pub as_known_on: Option<String>,
 }
 
 impl Moment {
-    /// The two coordinates as the service is asked for them: the day the text
-    /// is for, and the day the register is read on where one was named.
-    ///
-    /// A zicht date alone names both: the text for a day, as the register had
-    /// it that day. Sent without the first, the service reads that coordinate
-    /// as today and resolves a rendition in force now, which for anything
-    /// amended since is none at all.
-    ///
-    /// `today` is read once, at startup, so a run cannot straddle midnight by
-    /// reading the clock twice.
-    pub fn coordinates(&self, today: NaiveDate) -> (NaiveDate, Option<NaiveDate>) {
-        let as_of = self.as_of.or(self.as_known_on).unwrap_or(today);
-
-        (as_of, self.as_known_on)
+    /// The two coordinates as typed, each absent where its flag was.
+    pub fn coordinates(&self) -> (Option<&str>, Option<&str>) {
+        (self.as_of.as_deref(), self.as_known_on.as_deref())
     }
 }
 
@@ -679,10 +678,6 @@ impl Moment {
 mod tests {
     use super::*;
     use clap::CommandFactory;
-
-    fn date(text: &str) -> NaiveDate {
-        text.parse().unwrap()
-    }
 
     #[test]
     fn the_command_tree_is_well_formed() {
@@ -692,52 +687,56 @@ mod tests {
     /// `law parts --limit` is a bare string, sent to the service exactly as
     /// typed: bron judges nothing the service judges, so `NONE`, `1.5` and
     /// `-1` all parse here and are the service's to refuse.
-    ///
-    /// `--limit=-1` rather than two tokens: clap reads a bare `-1` as an
-    /// unrecognised flag before the value parser ever sees it, which is a
-    /// property of how a negative-looking token is split from its flag, not
-    /// of what this parser accepts.
     #[test]
     fn law_parts_accepts_any_limit_text() {
         for limit in ["20", "none", "NONE", "1.5", "-1", "whole"] {
-            let flag = format!("--limit={limit}");
-            let result = Cli::try_parse_from(["bron", "law", "parts", "BWBR0001941", &flag]);
+            let result =
+                Cli::try_parse_from(["bron", "law", "parts", "BWBR0001941", "--limit", limit]);
 
             assert!(result.is_ok(), "[{limit}]: {result:?}");
         }
     }
 
-    fn moment(as_of: Option<&str>, as_known_on: Option<&str>) -> Moment {
-        Moment {
-            as_of: as_of.map(date),
-            as_known_on: as_known_on.map(date),
-        }
+    /// A negative number is the value of the flag before it, as two tokens,
+    /// and a flag that is no number is never taken for one: `--json` after
+    /// `--limit -1` is still `--json`.
+    #[test]
+    fn a_negative_number_is_a_value_and_a_flag_stays_a_flag() {
+        let cli = Cli::try_parse_from([
+            "bron", "law", "feed", "--since", "-1", "--limit", "-1", "--json",
+        ])
+        .unwrap();
+
+        assert!(cli.json);
+        let Command::Law(Law::Feed { since, limit, .. }) = cli.command else {
+            panic!("law feed");
+        };
+        assert_eq!(since.as_deref(), Some("-1"));
+        assert_eq!(limit, "-1");
+
+        let swallowed = Cli::try_parse_from(["bron", "law", "feed", "--since", "--json"]);
+        assert!(swallowed.is_err(), "{swallowed:?}");
     }
 
+    /// Each coordinate travels as typed and only where its flag was named. A
+    /// zicht date alone stays alone: the service reads it as that day for
+    /// both coordinates.
     #[test]
-    fn an_unstated_moment_means_what_is_in_force_today() {
-        assert_eq!(
-            moment(None, None).coordinates(date("2026-08-06")),
-            (date("2026-08-06"), None)
-        );
-    }
+    fn a_moment_is_sent_as_typed() {
+        let cli = Cli::try_parse_from([
+            "bron",
+            "law",
+            "show",
+            "BWBR0005289",
+            "--as-known-on",
+            "2026-02-30",
+        ])
+        .unwrap();
+        let Command::Law(Law::Show { moment, .. }) = cli.command else {
+            panic!("law show");
+        };
 
-    #[test]
-    fn a_moment_is_a_point_in_both_windows() {
-        let today = date("2026-08-06");
-
-        assert_eq!(
-            moment(Some("2023-06-01"), None).coordinates(today),
-            (date("2023-06-01"), None)
-        );
-        assert_eq!(
-            moment(None, Some("2023-06-01")).coordinates(today),
-            (date("2023-06-01"), Some(date("2023-06-01")))
-        );
-        assert_eq!(
-            moment(Some("2023-06-01"), Some("2024-01-01")).coordinates(today),
-            (date("2023-06-01"), Some(date("2024-01-01")))
-        );
+        assert_eq!(moment.coordinates(), (None, Some("2026-02-30")));
     }
 
     #[test]
@@ -755,11 +754,16 @@ mod tests {
         assert!(result.is_ok(), "a moment is a point in both windows");
     }
 
+    /// A date the service reads is the service's to judge. `case search
+    /// --from` is read by rechtspraak.nl directly, so bron is its only judge.
     #[test]
-    fn a_malformed_date_is_refused_by_the_parser() {
-        let result =
+    fn a_malformed_date_is_refused_only_where_bron_is_the_judge() {
+        let service =
             Cli::try_parse_from(["bron", "law", "show", "BWBR0005289", "--as-of", "gisteren"]);
-        assert!(result.is_err());
+        assert!(service.is_ok(), "{service:?}");
+
+        let rechtspraak = Cli::try_parse_from(["bron", "case", "search", "--from", "gisteren"]);
+        assert!(rechtspraak.is_err());
     }
 
     #[test]

@@ -219,19 +219,20 @@ pub struct LinkedDecree {
 /// the list.
 #[derive(Debug)]
 pub struct Waiting<'a> {
-    pub as_of: NaiveDate,
-    pub as_known_on: Option<NaiveDate>,
-    /// Bounds on the days to come a waiting unit states. Where either is
-    /// named, a regulation whose units state no day is not listed.
-    pub from: Option<NaiveDate>,
-    pub to: Option<NaiveDate>,
+    /// See [`Ask`] for the two coordinates.
+    pub as_of: Option<&'a str>,
+    pub as_known_on: Option<&'a str>,
+    /// Bounds on the days to come a waiting unit states, as typed. Where
+    /// either is named, a regulation whose units state no day is not listed.
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
     /// The register's own word for a kind of regulation: wet, AMvB, zbo.
     pub kind: Option<&'a str>,
     /// As the service reads `limit` and `offset`: digits, exactly as typed.
     /// Sent as sent; the service is the one that pages this route or refuses
     /// the value.
-    pub limit: String,
-    pub offset: String,
+    pub limit: &'a str,
+    pub offset: &'a str,
 }
 
 /// What a rendition's articles resolved to.
@@ -558,33 +559,31 @@ pub struct Span {
 pub struct Published<'a> {
     /// How many rows to skip, so a list cut at its window can be read past.
     /// As the service reads it: digits, exactly as typed.
-    pub offset: String,
-    pub from: Option<NaiveDate>,
-    pub to: Option<NaiveDate>,
-    pub known_from: Option<NaiveDate>,
-    pub known_to: Option<NaiveDate>,
+    pub offset: &'a str,
+    /// The four days of the two windows, each as typed.
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
+    pub known_from: Option<&'a str>,
+    pub known_to: Option<&'a str>,
     /// The register's own word for a kind of regulation: wet, AMvB, zbo.
     pub kind: Option<&'a str>,
     /// A BWB identifier as typed. Whether it is one is the service's to say.
     pub regulation: Option<&'a str>,
     /// As the service reads it: digits, exactly as typed.
-    pub limit: String,
+    pub limit: &'a str,
 }
 
 /// Which rendition a question is about, and how much of its text to send.
 ///
-/// Both coordinates travel, because the service resolves a point in both
-/// windows and defaults the one it is not given to today. Asking what the
-/// register showed on a past date without saying which date's text is meant
-/// resolves against a rendition in force now, which for anything amended since
-/// is no rendition at all.
+/// Each coordinate is sent as typed and left out where the caller named none.
+/// The service resolves a point in both windows: `as_known_on` alone names
+/// that day for both, the text for a day as the register had it that day, and
+/// a moment named by neither is today. Its answer states the moment it
+/// resolved.
 #[derive(Debug)]
 pub struct Ask<'a> {
-    pub as_of: NaiveDate,
-    /// Stated only where the caller asked what the register showed. One date
-    /// names both coordinates of that point: the text for a day, as the
-    /// register had it that day.
-    pub as_known_on: Option<NaiveDate>,
+    pub as_of: Option<&'a str>,
+    pub as_known_on: Option<&'a str>,
     pub number: Option<&'a str>,
     /// One lid number as printed. The service narrows the span, the text, the
     /// label and the Juriconnect reference to that lid.
@@ -602,14 +601,15 @@ pub struct Ask<'a> {
 /// Which units of a rendition to ask for. See [`Ask`] for the two coordinates.
 #[derive(Debug)]
 pub struct Units<'a> {
-    pub as_of: NaiveDate,
-    pub as_known_on: Option<NaiveDate>,
+    pub as_of: Option<&'a str>,
+    pub as_known_on: Option<&'a str>,
     /// One lid number as printed, which narrows the span, the text and the
     /// reference to that lid.
     pub paragraph: Option<&'a str>,
     pub kind: Option<&'a str>,
     pub number: Option<&'a str>,
-    pub position: Option<u32>,
+    /// The place of a unit among its kind, as typed.
+    pub position: Option<&'a str>,
     /// A treaty's text in this language, as the register writes it. See [`Ask::lang`].
     pub lang: Option<&'a str>,
     pub raw: bool,
@@ -618,9 +618,9 @@ pub struct Units<'a> {
     /// As the service reads `limit`: digits, or the literal `none` for the
     /// whole set, since the rendition bounds this route. Sent as typed; the
     /// service is the one that pages it or refuses the word.
-    pub limit: String,
+    pub limit: &'a str,
     /// As the service reads it: digits, exactly as typed.
-    pub offset: String,
+    pub offset: &'a str,
 }
 
 /// Which regulations to look for by name, and how to narrow the answer.
@@ -629,19 +629,20 @@ pub struct Named<'a> {
     pub query: &'a str,
     /// The register's own word for a kind of regulation: wet, AMvB, zbo.
     pub kind: Option<&'a str>,
-    /// The day a name is asked to stand on, on either axis.
-    pub as_of: Option<NaiveDate>,
-    pub as_known_on: Option<NaiveDate>,
+    /// The day a name is asked to stand on, on either axis, as typed.
+    pub as_of: Option<&'a str>,
+    pub as_known_on: Option<&'a str>,
     /// As the service reads `limit` and `offset`: digits, exactly as typed.
-    pub limit: String,
-    pub offset: String,
+    pub limit: &'a str,
+    pub offset: &'a str,
 }
 
 /// Which relations to ask for, and how to narrow them.
 #[derive(Debug)]
 pub struct Relating<'a> {
-    pub as_of: NaiveDate,
-    pub as_known_on: Option<NaiveDate>,
+    /// See [`Ask`] for the two coordinates.
+    pub as_of: Option<&'a str>,
+    pub as_known_on: Option<&'a str>,
     /// One kind of relation, as the WTI groups them.
     pub kind: Option<&'a str>,
     /// One article, as the service matches it. Passed on as typed: what the
@@ -649,18 +650,19 @@ pub struct Relating<'a> {
     /// guesses at.
     pub article: Option<&'a str>,
     /// As the service reads `limit` and `offset`: digits, exactly as typed.
-    pub limit: String,
-    pub offset: String,
+    pub limit: &'a str,
+    pub offset: &'a str,
 }
 
 /// Which two days to compare, and how to narrow the comparison.
 #[derive(Debug)]
 pub struct Compare<'a> {
     /// Absent where the caller named none, which the service refuses.
-    pub from: Option<NaiveDate>,
-    pub to: NaiveDate,
+    pub from: Option<&'a str>,
+    /// Absent where the caller named none, which the service reads as today.
+    pub to: Option<&'a str>,
     /// The day the register is read on, which selects what it showed then.
-    pub as_known_on: Option<NaiveDate>,
+    pub as_known_on: Option<&'a str>,
     pub kind: Option<&'a str>,
     pub article: Option<&'a str>,
     /// A treaty's text in this language, as the register writes it. See [`Ask::lang`].

@@ -52,7 +52,7 @@ fn law() -> &'static str {
 
 fn asking() -> Ask<'static> {
     Ask {
-        as_of: "2018-01-01".parse().unwrap(),
+        as_of: Some("2018-01-01"),
         as_known_on: None,
         number: Some("1"),
         paragraph: None,
@@ -208,12 +208,12 @@ async fn searching(body: &str, status: u16) -> MockServer {
     server
 }
 
-fn asking_for(term: &str) -> SearchRequest {
+fn asking_for(term: &str) -> SearchRequest<'static> {
     SearchRequest {
         q: term.to_string(),
         regulation: None,
-        limit: "20".to_string(),
-        as_of: "2026-08-24".parse().unwrap(),
+        limit: "20",
+        as_of: Some("2026-08-24"),
         as_known_on: None,
     }
 }
@@ -652,13 +652,13 @@ fn fixture(name: &str) -> String {
 
 fn waiting() -> Waiting<'static> {
     Waiting {
-        as_of: "2026-09-23".parse().unwrap(),
+        as_of: Some("2026-09-23"),
         as_known_on: None,
         from: None,
         to: None,
         kind: None,
-        limit: "5".to_string(),
-        offset: "0".to_string(),
+        limit: "5",
+        offset: "0",
     }
 }
 
@@ -920,7 +920,7 @@ async fn publication_search_answers_next_to_walk_on() {
                     q: None,
                     collection: None,
                     dossier: Some("36195"),
-                    limit: "2".to_string(),
+                    limit: "2",
                     next: None,
                 },
             )

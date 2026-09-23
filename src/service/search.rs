@@ -15,7 +15,6 @@
 //! log the request passes, which is also why the answer to one is never written
 //! to disk here; see [`crate::sources`] and `Reading::Envelope`.
 
-use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Outcome;
@@ -26,7 +25,7 @@ use super::client::Answered;
 
 /// What a search asks for. Mirrors the service's own body.
 #[derive(Debug, Serialize)]
-pub struct SearchRequest {
+pub struct SearchRequest<'a> {
     pub q: String,
     /// One or more BWB identifiers to search inside, separated by commas.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,10 +33,13 @@ pub struct SearchRequest {
     /// As the service reads it: digits, exactly as typed. A numeric string
     /// crosses the same request body a bare number would: the service reads
     /// either.
-    pub limit: String,
-    pub as_of: NaiveDate,
+    pub limit: &'a str,
+    /// The two coordinates as typed, each left out where the caller named
+    /// none. See [`super::Ask`].
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub as_known_on: Option<NaiveDate>,
+    pub as_of: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_known_on: Option<&'a str>,
 }
 
 /// What the term turned out to be.
@@ -164,7 +166,7 @@ impl Service {
     pub fn search(
         &self,
         client: &Client,
-        request: &SearchRequest,
+        request: &SearchRequest<'_>,
     ) -> Outcome<Answered<SearchData>> {
         let url = format!("{}/api/v1/search", self.base());
 

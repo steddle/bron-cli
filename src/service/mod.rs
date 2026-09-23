@@ -24,8 +24,6 @@ pub mod model;
 pub mod publications;
 pub mod search;
 
-use chrono::NaiveDate;
-
 use crate::error::{Fault, Outcome};
 use crate::sources::Client;
 
@@ -126,21 +124,21 @@ impl Service {
         let url = format!("{}/api/v1/regulations", self.base);
 
         let mut query = vec![
-            ("q", ask.query.to_string()),
-            ("limit", ask.limit.clone()),
-            ("offset", ask.offset.clone()),
+            ("q", ask.query),
+            ("limit", ask.limit),
+            ("offset", ask.offset),
         ];
 
         if let Some(kind) = ask.kind {
-            query.push(("type", kind.to_string()));
+            query.push(("type", kind));
         }
         // A name the register states is a name it states on a day: a
         // citeertitel is given and taken away like any other text.
         if let Some(day) = ask.as_of {
-            query.push(("as_of", day.to_string()));
+            query.push(("as_of", day));
         }
         if let Some(day) = ask.as_known_on {
-            query.push(("as_known_on", day.to_string()));
+            query.push(("as_known_on", day));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -172,7 +170,7 @@ impl Service {
     ) -> Outcome<Answered<Vec<Expression>>> {
         let url = format!("{}/api/v1/expressions", self.base);
 
-        let mut query = vec![("limit", ask.limit.clone()), ("offset", ask.offset.clone())];
+        let mut query = vec![("limit", ask.limit), ("offset", ask.offset)];
 
         for (name, day) in [
             ("in_force_from", ask.from),
@@ -181,16 +179,16 @@ impl Service {
             ("visible_to", ask.known_to),
         ] {
             if let Some(day) = day {
-                query.push((name, day.to_string()));
+                query.push((name, day));
             }
         }
 
         if let Some(kind) = ask.kind {
-            query.push(("type", kind.to_string()));
+            query.push(("type", kind));
         }
 
         if let Some(law) = ask.regulation {
-            query.push(("regulation", law.to_string()));
+            query.push(("regulation", law));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -200,20 +198,20 @@ impl Service {
     pub fn feed(
         &self,
         client: &Client,
-        since: Option<u64>,
+        since: Option<&str>,
         limit: &str,
         regulation: Option<&str>,
     ) -> Outcome<Answered<Feed>> {
         let url = format!("{}/api/v1/feed", self.base);
 
-        let mut query = vec![("limit", limit.to_string())];
+        let mut query = vec![("limit", limit)];
 
         // The service requires a cursor and says so where none is sent.
         if let Some(since) = since {
-            query.push(("since", since.to_string()));
+            query.push(("since", since));
         }
         if let Some(law) = regulation {
-            query.push(("regulation", law.to_string()));
+            query.push(("regulation", law));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -224,23 +222,22 @@ impl Service {
     pub fn upcoming(&self, client: &Client, ask: &Waiting<'_>) -> Outcome<Answered<Vec<Upcoming>>> {
         let url = format!("{}/api/v1/upcoming", self.base);
 
-        let mut query = vec![
-            ("as_of", ask.as_of.to_string()),
-            ("limit", ask.limit.clone()),
-            ("offset", ask.offset.clone()),
-        ];
+        let mut query = vec![("limit", ask.limit), ("offset", ask.offset)];
 
+        if let Some(day) = ask.as_of {
+            query.push(("as_of", day));
+        }
         if let Some(day) = ask.as_known_on {
-            query.push(("as_known_on", day.to_string()));
+            query.push(("as_known_on", day));
         }
         if let Some(day) = ask.from {
-            query.push(("from", day.to_string()));
+            query.push(("from", day));
         }
         if let Some(day) = ask.to {
-            query.push(("to", day.to_string()));
+            query.push(("to", day));
         }
         if let Some(kind) = ask.kind {
-            query.push(("type", kind.to_string()));
+            query.push(("type", kind));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -260,31 +257,33 @@ impl Service {
         let url = self.route(&["regulations", law, "articles"])?;
 
         let mut query = vec![
-            ("as_of", ask.as_of.to_string()),
             // Always, because the answer is built from the leden and their
             // text is what `rendered` carries.
-            ("rendered", "1".to_string()),
-            ("limit", WHOLE.to_string()),
+            ("rendered", "1"),
+            ("limit", WHOLE),
         ];
 
+        if let Some(date) = ask.as_of {
+            query.push(("as_of", date));
+        }
         if let Some(date) = ask.as_known_on {
-            query.push(("as_known_on", date.to_string()));
+            query.push(("as_known_on", date));
         }
         if let Some(number) = ask.number {
-            query.push(("number", number.to_string()));
+            query.push(("number", number));
         }
         if let Some(paragraph) = ask.paragraph {
-            query.push(("paragraph", paragraph.to_string()));
+            query.push(("paragraph", paragraph));
         }
         if let Some(lang) = ask.lang {
-            query.push(("lang", lang.to_string()));
+            query.push(("lang", lang));
         }
         if ask.raw {
-            query.push(("raw", "1".to_string()));
+            query.push(("raw", "1"));
         }
 
         if ask.not_commenced {
-            query.push(("not_commenced", "1".to_string()));
+            query.push(("not_commenced", "1"));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -296,35 +295,37 @@ impl Service {
         let url = self.route(&["regulations", law, "parts"])?;
 
         let mut query = vec![
-            ("as_of", ask.as_of.to_string()),
-            ("rendered", "1".to_string()),
-            ("limit", ask.limit.clone()),
-            ("offset", ask.offset.clone()),
+            ("rendered", "1"),
+            ("limit", ask.limit),
+            ("offset", ask.offset),
         ];
 
+        if let Some(date) = ask.as_of {
+            query.push(("as_of", date));
+        }
         if let Some(date) = ask.as_known_on {
-            query.push(("as_known_on", date.to_string()));
+            query.push(("as_known_on", date));
         }
         if let Some(kind) = ask.kind {
-            query.push(("kind", kind.to_string()));
+            query.push(("kind", kind));
         }
         if let Some(number) = ask.number {
-            query.push(("number", number.to_string()));
+            query.push(("number", number));
         }
         if let Some(paragraph) = ask.paragraph {
-            query.push(("paragraph", paragraph.to_string()));
+            query.push(("paragraph", paragraph));
         }
         if let Some(position) = ask.position {
-            query.push(("position", position.to_string()));
+            query.push(("position", position));
         }
         if let Some(lang) = ask.lang {
-            query.push(("lang", lang.to_string()));
+            query.push(("lang", lang));
         }
         if ask.raw {
-            query.push(("raw", "1".to_string()));
+            query.push(("raw", "1"));
         }
         if ask.not_commenced {
-            query.push(("not_commenced", "1".to_string()));
+            query.push(("not_commenced", "1"));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -339,7 +340,7 @@ impl Service {
         offset: &str,
     ) -> Outcome<Answered<Amendments>> {
         let url = self.route(&["regulations", law, "amendments"])?;
-        let query = [("limit", limit.to_string()), ("offset", offset.to_string())];
+        let query = [("limit", limit), ("offset", offset)];
 
         self.read(client, client.get(&url).query(&query))
     }
@@ -353,20 +354,19 @@ impl Service {
     ) -> Outcome<Answered<Relations>> {
         let url = self.route(&["regulations", law, "relations"])?;
 
-        let mut query = vec![
-            ("as_of", ask.as_of.to_string()),
-            ("limit", ask.limit.clone()),
-            ("offset", ask.offset.clone()),
-        ];
+        let mut query = vec![("limit", ask.limit), ("offset", ask.offset)];
 
+        if let Some(day) = ask.as_of {
+            query.push(("as_of", day));
+        }
         if let Some(day) = ask.as_known_on {
-            query.push(("as_known_on", day.to_string()));
+            query.push(("as_known_on", day));
         }
         if let Some(kind) = ask.kind {
-            query.push(("kind", kind.to_string()));
+            query.push(("kind", kind));
         }
         if let Some(article) = ask.article {
-            query.push(("article", article.to_string()));
+            query.push(("article", article));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -379,7 +379,7 @@ impl Service {
         law: &str,
         number: &str,
         kind: Option<&str>,
-        as_known_on: Option<NaiveDate>,
+        as_known_on: Option<&str>,
     ) -> Outcome<Answered<History>> {
         // The number is the register's and stands in the path: `3:305a` is a
         // number this register prints.
@@ -387,10 +387,10 @@ impl Service {
 
         let mut query = Vec::new();
         if let Some(kind) = kind {
-            query.push(("kind", kind.to_string()));
+            query.push(("kind", kind));
         }
         if let Some(day) = as_known_on {
-            query.push(("as_known_on", day.to_string()));
+            query.push(("as_known_on", day));
         }
 
         self.read(client, client.get(&url).query(&query))
@@ -407,29 +407,32 @@ impl Service {
     ) -> Outcome<Answered<Changes>> {
         let url = self.route(&["regulations", law, "changes"])?;
 
-        let mut query = vec![("to", ask.to.to_string()), ("rendered", "1".to_string())];
+        let mut query = vec![("rendered", "1")];
 
         // The service requires the earlier day and says so where none is sent.
         if let Some(day) = ask.from {
-            query.push(("from", day.to_string()));
+            query.push(("from", day));
+        }
+        if let Some(day) = ask.to {
+            query.push(("to", day));
         }
         if let Some(day) = ask.as_known_on {
-            query.push(("as_known_on", day.to_string()));
+            query.push(("as_known_on", day));
         }
         if let Some(kind) = ask.kind {
-            query.push(("kind", kind.to_string()));
+            query.push(("kind", kind));
         }
         if let Some(article) = ask.article {
-            query.push(("article", article.to_string()));
+            query.push(("article", article));
         }
         if let Some(lang) = ask.lang {
-            query.push(("lang", lang.to_string()));
+            query.push(("lang", lang));
         }
         if ask.all {
-            query.push(("all", "1".to_string()));
+            query.push(("all", "1"));
         }
         if ask.raw {
-            query.push(("raw", "1".to_string()));
+            query.push(("raw", "1"));
         }
 
         self.read(client, client.get(&url).query(&query))
