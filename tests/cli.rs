@@ -919,7 +919,8 @@ async fn failing(
 }
 
 /// A 503 carries the delay the service named and, where its body is the
-/// envelope, the code and the sentence the service stated.
+/// envelope, the code and the message the service stated, as it stated them.
+/// The delay stands in a header, so `--json` carries it as `retry_after`.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_service_unable_to_fetch_says_so_with_its_code_and_its_delay() {
     let (output, envelope, said) = failing(
@@ -933,12 +934,11 @@ async fn the_service_unable_to_fetch_says_so_with_its_code_and_its_delay() {
     assert_eq!(output.status.code(), Some(4), "{output:?}");
     assert_eq!(envelope["error"]["kind"], "upstream");
     assert_eq!(envelope["error"]["code"], "source_unavailable");
-    assert!(
-        message.contains("the register did not serve 2016-07-01_0"),
-        "{envelope}"
-    );
-    assert!(message.contains("60s"), "{envelope}");
+    assert_eq!(message, "the register did not serve 2016-07-01_0");
+    assert_eq!(envelope["error"]["detail"], serde_json::json!([]));
+    assert_eq!(envelope["error"]["retry_after"], 60);
     assert!(said.contains("the service could not answer: "), "{said}");
+    assert!(said.contains("60s"), "{said}");
 }
 
 /// 'You were too fast' and 'everyone was' are two refusals under one status,
@@ -3771,4 +3771,34 @@ async fn bron_blob_for_what_is_no_digest_is_the_services_refusal() {
         "[abc] is not a SHA-256 digest as 64 lowercase hex characters",
     )
     .await;
+}
+
+/// A failure the service stated reads in `--json` as it stated it: the
+/// message as sent and the detail as sent, the one never folded into the
+/// other. A person reads the detail on lines of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stated_failure_carries_its_message_and_its_detail_as_sent() {
+    let (output, envelope, said) = failing(
+        404,
+        None,
+        r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"rendition_withdrawn","message":"no published rendition of BWBR0008691 in force on [2016-01-01]","detail":["2016-01-01_0","2016-06-16_0"]}}"#,
+    )
+    .await;
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(
+        envelope["error"],
+        serde_json::json!({
+            "kind": "not_found",
+            "code": "rendition_withdrawn",
+            "message": "no published rendition of BWBR0008691 in force on [2016-01-01]",
+            "detail": ["2016-01-01_0", "2016-06-16_0"],
+        })
+    );
+    assert!(
+        said.contains(
+            "bron: no published rendition of BWBR0008691 in force on [2016-01-01]\n  2016-01-01_0\n  2016-06-16_0\n"
+        ),
+        "{said}"
+    );
 }

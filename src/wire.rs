@@ -100,11 +100,23 @@ impl Envelope<()> {
             as_of: None,
             as_known_on: None,
             data: None,
-            error: Some(ErrorBody {
-                kind: fault.kind(),
-                code: fault.stated_code().map(str::to_string),
-                message: fault.to_string(),
-                detail: fault.chain(),
+            // A failure the service stated reads as it stated it; one bron
+            // states itself carries its own sentence and cause chain.
+            error: Some(match fault.statement() {
+                Some(statement) => ErrorBody {
+                    kind: fault.kind(),
+                    code: statement.code.clone(),
+                    message: statement.message.clone(),
+                    detail: statement.detail.clone(),
+                    retry_after: statement.retry_after,
+                },
+                None => ErrorBody {
+                    kind: fault.kind(),
+                    code: None,
+                    message: fault.to_string(),
+                    detail: fault.chain(),
+                    retry_after: None,
+                },
             }),
             caveats: Vec::new(),
         }
@@ -119,9 +131,16 @@ pub struct ErrorBody {
     /// it. Present only where the service stated the failure.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// The service's message as sent where it stated the failure, else bron's
+    /// own sentence.
     pub message: String,
-    /// The cause chain, outermost first.
+    /// The service's detail as sent where it stated the failure, else the
+    /// cause chain, outermost first.
     pub detail: Vec<String>,
+    /// The seconds the service's `Retry-After` asked for, which the service
+    /// states in a header and not in its body. Present only where it asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<u64>,
 }
 
 /// A stated limit on what an answer supports.
@@ -883,7 +902,12 @@ mod tests {
     /// service stated, so a failure bron states itself carries none.
     #[test]
     fn a_failure_carries_a_code_only_where_the_service_stated_one() {
-        let stated = Fault::not_found("law", "BWBR0000001").stated_as("regulation_not_found");
+        let stated = Fault::not_found("law", "BWBR0000001").stated(crate::error::Statement {
+            code: Some("regulation_not_found".into()),
+            message: "no regulation BWBR0000001".into(),
+            detail: Vec::new(),
+            retry_after: None,
+        });
         let json = serde_json::to_value(Envelope::failed(&stated)).unwrap();
         assert_eq!(json["error"]["kind"], "not_found");
         assert_eq!(json["error"]["code"], "regulation_not_found");

@@ -81,15 +81,30 @@ pub enum Fault {
     #[error("{0}")]
     Local(#[source] anyhow::Error),
 
-    /// A failure the service stated, with the `code` it stated beside the kind.
+    /// A failure the service stated, and what it stated about it.
     ///
     /// `fault` is the same failure in the kinds bron exits on, so the exit
-    /// code, the tag and the sentence are its. The code is the service's word,
-    /// kept as sent and never read here: one this build has never heard of
-    /// crosses like any other. Only a stated failure is built this way, which
-    /// is what keeps a code off `network` and `local`.
+    /// code, the tag and the sentence a person reads are its. `statement` is
+    /// the service's word, kept as sent and never read here: a code this build
+    /// has never heard of crosses like any other. Only a stated failure is
+    /// built this way, which is what keeps a code off `network` and `local`.
     #[error("{fault}")]
-    Stated { fault: Box<Fault>, code: String },
+    Stated {
+        fault: Box<Fault>,
+        statement: Box<Statement>,
+    },
+}
+
+/// What the service stated about a failure, as it sent it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Statement {
+    /// Which failure it is, finer than the kind. Absent where the service
+    /// stated none.
+    pub code: Option<String>,
+    pub message: String,
+    pub detail: Vec<String>,
+    /// The seconds its `Retry-After` asked a caller to wait, where it asked.
+    pub retry_after: Option<u64>,
 }
 
 impl Fault {
@@ -121,17 +136,23 @@ impl Fault {
     /// The `code` the service stated for this failure, as sent. Absent on a
     /// failure bron states itself, so presence says who stated it.
     pub fn stated_code(&self) -> Option<&str> {
+        self.statement()
+            .and_then(|statement| statement.code.as_deref())
+    }
+
+    /// What the service stated about this failure, where it stated it.
+    pub fn statement(&self) -> Option<&Statement> {
         match self {
-            Self::Stated { code, .. } => Some(code),
+            Self::Stated { statement, .. } => Some(statement),
             _ => None,
         }
     }
 
-    /// This failure, as one the service stated under `code`.
-    pub fn stated_as(self, code: impl Into<String>) -> Self {
+    /// This failure, as one the service stated.
+    pub fn stated(self, statement: Statement) -> Self {
         Self::Stated {
             fault: Box::new(self),
-            code: code.into(),
+            statement: Box::new(statement),
         }
     }
 

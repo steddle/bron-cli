@@ -163,7 +163,8 @@ async fn a_withdrawn_rendition_is_named_all_the_way_to_the_caller() {
 
 /// The labels of the withdrawn renditions covering a date are the whole point
 /// of that failure. Reporting the date as uncovered without them says the
-/// register never had it, which is a different fact.
+/// register never had it, which is a different fact. They arrive as the
+/// service sent them, beside its message.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_keeps_the_kind_and_the_detail_the_service_gave_it() {
     let body = r#"{"bron":1,"grade":"authority","error":{
@@ -178,14 +179,18 @@ async fn a_failure_keeps_the_kind_and_the_detail_the_service_gave_it() {
         Service::at(&base)
             .articles(&client, law(), &asking())
             .err()
-            .map(|e| (e.kind(), e.to_string()))
+            .map(|e| (e.kind(), e.statement().cloned()))
     })
     .await
     .expect("a 404 must not read as success");
 
     assert_eq!(fault.0, "not_found");
-    assert!(fault.1.contains("2016-01-01_0"), "{}", fault.1);
-    assert!(fault.1.contains("2016-06-16_0"), "{}", fault.1);
+    let statement = fault.1.expect("the service stated it");
+    assert_eq!(statement.detail, ["2016-01-01_0", "2016-06-16_0"]);
+    assert_eq!(
+        statement.message,
+        "no published rendition of BWBR0008691 in force on [2016-01-01]"
+    );
 }
 
 async fn searching(body: &str, status: u16) -> MockServer {
@@ -473,18 +478,20 @@ async fn a_citation_that_resolves_to_nothing_is_not_found() {
         Service::at(&base)
             .search(&client, &asking_for("3:99999"))
             .err()
-            .map(|e| (e.kind(), e.to_string()))
+            .map(|e| (e.kind(), e.statement().cloned()))
     })
     .await
     .expect("a citation that resolves to nothing must not read as success");
 
     assert_eq!(fault.0, "not_found");
-    assert!(
-        fault.1.contains("does not carry artikel 99999"),
-        "{}",
-        fault.1
+    let statement = fault.1.expect("the service stated it");
+    assert_eq!(
+        statement.detail,
+        [
+            "book: BWBR0005291 rendition 2025-07-01_0 does not carry artikel 99999",
+            "literal: no regulation prints artikel 3:99999",
+        ]
     );
-    assert!(fault.1.contains("no regulation prints"), "{}", fault.1);
 }
 
 /// Reads the shape at its tag, so what is wrong with a ranking is reported

@@ -126,4 +126,11 @@ fn report(fault: &Fault, json: bool) {
     for line in chain.iter().skip(1) {
         eprintln!("  caused by: {line}");
     }
+    // What the service named beside its message, one line each.
+    for line in fault
+        .statement()
+        .map_or(&[][..], |statement| &statement.detail)
+    {
+        eprintln!("  {line}");
+    }
 }

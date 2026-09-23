@@ -11,7 +11,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::{Fault, Outcome, from_source};
+use crate::error::{Fault, Outcome, Statement, from_source};
 use crate::sources::{Client, Refused};
 use crate::wire;
 
@@ -111,29 +111,37 @@ impl Stated {
     /// both ends, and re-reading it here as 'the service answered something
     /// unreadable' would have a caller retry what will never work.
     ///
-    /// `detail` travels with the message rather than being dropped. For the
-    /// answer this whole lane exists for it holds the labels of the withdrawn
-    /// renditions covering a date, and a not-found without them says a date is
-    /// uncovered when the truth is that what covers it has been withdrawn.
-    fn into_fault(self) -> Fault {
-        let message = if self.detail.is_empty() {
-            self.message
-        } else {
-            format!("{}: {}", self.message, self.detail.join(", "))
+    /// The code, the message and the detail travel as sent, so `--json`
+    /// answers what the API and the MCP answer. For the answer this whole lane
+    /// exists for `detail` holds the labels of the withdrawn renditions
+    /// covering a date, and a not-found without them says a date is uncovered
+    /// when the truth is that what covers it has been withdrawn.
+    ///
+    /// `refusal` is the 429 or 503 the failure came under, whose delay the
+    /// service states in a header: a person reads it beside the message, and
+    /// `--json` carries it as `retry_after`.
+    fn into_fault(self, refusal: Option<&Refused>) -> Fault {
+        let sentence = match refusal {
+            Some(refusal) => format!("{} ({})", self.message, refusal.sentence),
+            None => self.message.clone(),
         };
 
         let fault = match self.kind.as_str() {
-            "usage" => Fault::Usage(message),
-            "not_found" => Fault::NotFound(message),
+            "usage" => Fault::Usage(sentence),
+            "not_found" => Fault::NotFound(sentence),
             // Throttled, corpus and source are the service failing to answer
             // a question it understood, which is what upstream means from here.
-            _ => Fault::Unanswered(message),
+            _ => Fault::Unanswered(sentence),
         };
 
-        match self.code {
-            Some(code) => fault.stated_as(code),
-            None => fault,
-        }
+        fault.stated(Statement {
+            code: self.code,
+            message: self.message,
+            detail: self.detail,
+            retry_after: refusal
+                .and_then(|refusal| refusal.asked_for)
+                .map(|wait| wait.as_secs()),
+        })
     }
 }
 
@@ -187,7 +195,7 @@ impl Service {
 
         match Answer::settle(envelope, fetched.text)? {
             Answer::Data(answered) => Ok(answered),
-            Answer::Failed(stated) => Err(stated.into_fault()),
+            Answer::Failed(stated) => Err(stated.into_fault(None)),
         }
     }
 }
@@ -214,7 +222,7 @@ impl Service {
             Ok(Envelope {
                 error: Some(stated),
                 ..
-            }) => Err(stated.into_fault()),
+            }) => Err(stated.into_fault(None)),
             _ => {
                 let host = reqwest::Url::parse(&fetched.url)
                     .ok()
@@ -247,12 +255,9 @@ fn refused(error: anyhow::Error) -> Result<Fault, anyhow::Error> {
 
     match serde_json::from_str(&refusal.body) {
         Ok(Envelope::<serde::de::IgnoredAny> {
-            error: Some(mut stated),
+            error: Some(stated),
             ..
-        }) => {
-            stated.message = format!("{} ({})", stated.message, refusal.sentence);
-            Ok(stated.into_fault())
-        }
+        }) => Ok(stated.into_fault(Some(refusal))),
         _ => Ok(Fault::NoAnswer(
             gateway(&refusal.host, refusal.status, refusal.asked_for)
                 .unwrap_or_else(|| refusal.sentence.clone()),
@@ -336,17 +341,18 @@ mod tests {
             detail: Vec::new(),
         };
 
-        assert_eq!(stated("usage").into_fault().kind(), "usage");
-        assert_eq!(stated("not_found").into_fault().kind(), "not_found");
-        assert_eq!(stated("throttled").into_fault().kind(), "upstream");
-        assert_eq!(stated("corpus").into_fault().kind(), "upstream");
+        assert_eq!(stated("usage").into_fault(None).kind(), "usage");
+        assert_eq!(stated("not_found").into_fault(None).kind(), "not_found");
+        assert_eq!(stated("throttled").into_fault(None).kind(), "upstream");
+        assert_eq!(stated("corpus").into_fault(None).kind(), "upstream");
     }
 
     /// The labels of the withdrawn renditions covering a date are the whole
     /// point of that failure. Reporting the date as uncovered without them says
-    /// the register never had it, which is a different fact.
+    /// the register never had it, which is a different fact. They travel as
+    /// the service sent them, beside a message kept as sent.
     #[test]
-    fn the_detail_of_a_failure_travels_with_its_message() {
+    fn the_detail_of_a_failure_travels_as_sent_beside_its_message() {
         let stated = Stated {
             kind: "not_found".into(),
             code: Some("rendition_withdrawn".into()),
@@ -354,9 +360,14 @@ mod tests {
             detail: vec!["2016-01-01_0".into(), "2016-06-16_0".into()],
         };
 
-        let message = stated.into_fault().to_string();
-        assert!(message.contains("2016-01-01_0"), "{message}");
-        assert!(message.contains("2016-06-16_0"), "{message}");
+        let fault = stated.into_fault(None);
+        let statement = fault.statement().expect("the service stated it");
+
+        assert_eq!(statement.detail, ["2016-01-01_0", "2016-06-16_0"]);
+        assert_eq!(
+            statement.message,
+            "no published rendition of BWBR0037132 in force on [2016-01-01]"
+        );
     }
 
     /// The code is the service's word and crosses as sent. A code this build
@@ -369,7 +380,9 @@ mod tests {
                 Some(code) => format!(r#"{{"kind":"{kind}","code":"{code}","message":"m"}}"#),
                 None => format!(r#"{{"kind":"{kind}","message":"m"}}"#),
             };
-            serde_json::from_str::<Stated>(&body).unwrap().into_fault()
+            serde_json::from_str::<Stated>(&body)
+                .unwrap()
+                .into_fault(None)
         };
 
         let fault = stated("not_found", Some("regulation_not_found"));
@@ -391,7 +404,7 @@ mod tests {
 
         let null: Stated =
             serde_json::from_str(r#"{"kind":"not_found","code":null,"message":"m"}"#).unwrap();
-        assert_eq!(null.into_fault().stated_code(), None);
+        assert_eq!(null.into_fault(None).stated_code(), None);
     }
 
     /// A code is a string on the wire, like the kind beside it. One that is
@@ -417,8 +430,8 @@ mod tests {
         };
 
         assert_eq!(
-            stated(Some("source_unavailable")).into_fault().chain(),
-            stated(None).into_fault().chain()
+            stated(Some("source_unavailable")).into_fault(None).chain(),
+            stated(None).into_fault(None).chain()
         );
     }
 }
