@@ -212,7 +212,7 @@ fn asking_for(term: &str) -> SearchRequest {
     SearchRequest {
         q: term.to_string(),
         regulation: None,
-        limit: 20,
+        limit: "20".to_string(),
         as_of: "2026-08-24".parse().unwrap(),
         as_known_on: None,
     }
@@ -657,8 +657,8 @@ fn waiting() -> Waiting<'static> {
         from: None,
         to: None,
         kind: None,
-        limit: 5,
-        offset: 0,
+        limit: "5".to_string(),
+        offset: "0".to_string(),
     }
 }
 
@@ -787,7 +787,7 @@ async fn a_held_publication_is_read_as_the_service_sent_it() {
 
     let answered = off_thread(&home, move |client| {
         Service::at(&base)
-            .publication(&client, "stb-2026-56", 2, 0, true, true)
+            .publication(&client, "stb-2026-56", "2", "0", true, true)
             .map_err(|e| e.to_string())
     })
     .await
@@ -839,7 +839,7 @@ async fn a_publication_passed_through_is_not_held() {
 
     let answered = off_thread(&home, move |client| {
         Service::at(&base)
-            .publication(&client, "trb-2020-1", 2, 0, false, false)
+            .publication(&client, "trb-2020-1", "2", "0", false, false)
             .map_err(|e| e.to_string())
     })
     .await
@@ -883,7 +883,7 @@ async fn a_publication_id_the_service_refuses_carries_its_code() {
 
     let fault = off_thread(&home, move |client| {
         Service::at(&base)
-            .publication(&client, "xyz-2020-1", 50, 0, false, false)
+            .publication(&client, "xyz-2020-1", "50", "0", false, false)
             .err()
             .map(|e| (e.kind(), e.stated_code().map(str::to_string)))
     })
@@ -904,7 +904,7 @@ async fn publication_search_answers_next_to_walk_on() {
     Mock::given(method("POST"))
         .and(path("/api/v1/publications/search"))
         .and(body_json(
-            serde_json::json!({"dossier": "36195", "limit": 2}),
+            serde_json::json!({"dossier": "36195", "limit": "2"}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
         .mount(&server)
@@ -920,7 +920,7 @@ async fn publication_search_answers_next_to_walk_on() {
                     q: None,
                     collection: None,
                     dossier: Some("36195"),
-                    limit: 2,
+                    limit: "2".to_string(),
                     next: None,
                 },
             )

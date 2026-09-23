@@ -31,7 +31,10 @@ pub struct SearchRequest {
     /// One or more BWB identifiers to search inside, separated by commas.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regulation: Option<String>,
-    pub limit: u32,
+    /// As the service reads it: digits, exactly as typed. A numeric string
+    /// crosses the same request body a bare number would: the service reads
+    /// either.
+    pub limit: String,
     pub as_of: NaiveDate,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub as_known_on: Option<NaiveDate>,

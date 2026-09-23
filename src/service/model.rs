@@ -227,8 +227,11 @@ pub struct Waiting<'a> {
     pub to: Option<NaiveDate>,
     /// The register's own word for a kind of regulation: wet, AMvB, zbo.
     pub kind: Option<&'a str>,
-    pub limit: u32,
-    pub offset: u32,
+    /// As the service reads `limit` and `offset`: digits, exactly as typed.
+    /// Sent as sent; the service is the one that pages this route or refuses
+    /// the value.
+    pub limit: String,
+    pub offset: String,
 }
 
 /// What a rendition's articles resolved to.
@@ -554,7 +557,8 @@ pub struct Span {
 #[derive(Debug)]
 pub struct Published<'a> {
     /// How many rows to skip, so a list cut at its window can be read past.
-    pub offset: u32,
+    /// As the service reads it: digits, exactly as typed.
+    pub offset: String,
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
     pub known_from: Option<NaiveDate>,
@@ -563,7 +567,8 @@ pub struct Published<'a> {
     pub kind: Option<&'a str>,
     /// A BWB identifier as typed. Whether it is one is the service's to say.
     pub regulation: Option<&'a str>,
-    pub limit: u32,
+    /// As the service reads it: digits, exactly as typed.
+    pub limit: String,
 }
 
 /// Which rendition a question is about, and how much of its text to send.
@@ -614,7 +619,8 @@ pub struct Units<'a> {
     /// whole set, since the rendition bounds this route. Sent as typed; the
     /// service is the one that pages it or refuses the word.
     pub limit: String,
-    pub offset: u32,
+    /// As the service reads it: digits, exactly as typed.
+    pub offset: String,
 }
 
 /// Which regulations to look for by name, and how to narrow the answer.
@@ -626,8 +632,9 @@ pub struct Named<'a> {
     /// The day a name is asked to stand on, on either axis.
     pub as_of: Option<NaiveDate>,
     pub as_known_on: Option<NaiveDate>,
-    pub limit: u32,
-    pub offset: u32,
+    /// As the service reads `limit` and `offset`: digits, exactly as typed.
+    pub limit: String,
+    pub offset: String,
 }
 
 /// Which relations to ask for, and how to narrow them.
@@ -641,8 +648,9 @@ pub struct Relating<'a> {
     /// service matches it against is the service's rule, not one this end
     /// guesses at.
     pub article: Option<&'a str>,
-    pub limit: u32,
-    pub offset: u32,
+    /// As the service reads `limit` and `offset`: digits, exactly as typed.
+    pub limit: String,
+    pub offset: String,
 }
 
 /// Which two days to compare, and how to narrow the comparison.

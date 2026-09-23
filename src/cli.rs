@@ -76,8 +76,10 @@ pub enum Command {
         #[arg(long, value_name = "BWB")]
         regulation: Vec<String>,
 
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
+        /// How many hits to answer. Sent to the service exactly as typed; the
+        /// service pages this route and refuses what it refuses.
+        #[arg(long, default_value = "20")]
+        limit: String,
 
         #[command(flatten)]
         moment: Moment,
@@ -135,12 +137,13 @@ pub enum Law {
         #[arg(long = "type", value_name = "TYPE")]
         kind: Option<String>,
 
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
+        /// How many hits to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "20")]
+        limit: String,
 
-        /// How many rows to skip.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// How many rows to skip. Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
+        offset: String,
 
         #[command(flatten)]
         moment: Moment,
@@ -268,9 +271,9 @@ pub enum Law {
         #[arg(long, default_value = "20")]
         limit: String,
 
-        /// How many units to skip.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// How many units to skip. Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
+        offset: String,
 
         #[command(flatten)]
         moment: Moment,
@@ -285,12 +288,13 @@ pub enum Law {
         /// BWB identifier, e.g. BWBR0046553.
         id: String,
 
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
+        /// How many rows to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "50")]
+        limit: String,
 
-        /// How many rows to skip.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// How many rows to skip. Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
+        offset: String,
     },
 
     /// What the register states rests on a law, and what cites it.
@@ -311,12 +315,13 @@ pub enum Law {
         #[arg(long)]
         article: Option<String>,
 
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
+        /// How many rows to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "50")]
+        limit: String,
 
-        /// How many rows to skip.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// How many rows to skip. Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
+        offset: String,
 
         #[command(flatten)]
         moment: Moment,
@@ -391,12 +396,14 @@ pub enum Law {
         #[arg(long)]
         regulation: Option<String>,
 
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
+        /// How many rows to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "50")]
+        limit: String,
 
         /// How many rows to skip, to read past a list cut at its window.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
+        offset: String,
     },
 
     /// What the register has done since a cursor, in the order bron saw it.
@@ -418,8 +425,9 @@ pub enum Law {
         #[arg(long)]
         regulation: Option<String>,
 
-        #[arg(long, default_value_t = 100)]
-        limit: u32,
+        /// How many events to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "100")]
+        limit: String,
     },
 
     /// Which regulations print provisions that do not yet apply, across every
@@ -453,12 +461,14 @@ pub enum Law {
         #[arg(long = "type", value_name = "TYPE")]
         kind: Option<String>,
 
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
+        /// How many rows to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "50")]
+        limit: String,
 
         /// How many rows to skip, to read past a list cut at its window.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
+        offset: String,
 
         #[command(flatten)]
         moment: Moment,
@@ -530,6 +540,9 @@ pub enum Case {
         /// Only decisions from this date onwards.
         #[arg(long, value_name = "YYYY-MM-DD")]
         from: Option<NaiveDate>,
+        /// This lane reads rechtspraak.nl directly rather than the bron
+        /// service, so bron is the only judge there is: a whole number, and
+        /// nothing else.
         #[arg(long, default_value_t = 20)]
         limit: u32,
     },
@@ -564,8 +577,9 @@ pub enum Publication {
         #[arg(long)]
         dossier: Option<String>,
 
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
+        /// How many hits to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "20")]
+        limit: String,
 
         /// Where to ask on: the `next` a previous answer stated. Walking it to
         /// its end reads every hit once.
@@ -590,12 +604,13 @@ pub enum Publication {
         #[arg(long)]
         raw: bool,
 
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
+        /// How many units to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "50")]
+        limit: String,
 
-        /// How many units to skip.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// How many units to skip. Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
+        offset: String,
     },
 }
 

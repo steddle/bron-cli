@@ -118,7 +118,7 @@ async fn both_coordinates_of_a_moment_reach_the_service() {
         .and(path("/api/v1/search"))
         .and(body_json(serde_json::json!({
             "q": "6:162",
-            "limit": 20,
+            "limit": "20",
             "as_of": "2019-06-01",
             "as_known_on": "2020-01-01",
         })))
@@ -152,7 +152,7 @@ async fn a_zicht_date_alone_names_the_day_it_is_about_too() {
         .and(path("/api/v1/search"))
         .and(body_json(serde_json::json!({
             "q": "6:162",
-            "limit": 20,
+            "limit": "20",
             "as_of": "2020-01-01",
             "as_known_on": "2020-01-01",
         })))
@@ -459,11 +459,35 @@ async fn a_failure_the_service_stated_carries_its_code_to_the_consumer() {
 
 /// A command line bron cannot parse never reaches the service, so no code is
 /// its to carry: presence says who stated the failure.
+///
+/// `--limit` reaches every service route as typed now, so a bad one is the
+/// service's to refuse; a date clap itself types is what still fails here
+/// before any request is built.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_bron_states_itself_carries_no_code() {
     let server = MockServer::start().await;
 
-    let output = bron(&server, &["--json", "law", "published", "--limit", "many"]).await;
+    let output = bron(
+        &server,
+        &["--json", "law", "published", "--from", "gisteren"],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "usage");
+    assert!(envelope["error"].get("code").is_none(), "{envelope}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// `case search` reads rechtspraak.nl directly rather than the bron service,
+/// so bron is the only judge there is for `--limit`: it stays a `u32` and a
+/// bad one never leaves this process, exactly as a malformed date does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_still_judges_its_own_limit_locally() {
+    let server = MockServer::start().await;
+
+    let output = bron(&server, &["--json", "case", "search", "--limit", "abc"]).await;
     let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
 
     assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -3197,7 +3221,7 @@ async fn every_name_the_routes_declare_can_be_sent() {
         .and(body_json(serde_json::json!({
             "q": "onrechtmatige daad",
             "regulation": "BWBR0005289,BWBR0005537",
-            "limit": 20,
+            "limit": "20",
             "as_of": "2026-09-19",
         })))
         .respond_with(ResponseTemplate::new(404).set_body_raw(
@@ -3988,6 +4012,22 @@ async fn law_relations_with_a_limit_of_zero_is_the_services_refusal() {
     .await;
 }
 
+/// `law search` is a route this change moved off a local `u32`: `--limit 0`
+/// reaches the service exactly as typed, and its refusal is the service's,
+/// not clap's own exit 2.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_search_with_a_limit_of_zero_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "search", "Awb", "--limit", "0"],
+        "GET",
+        "/api/v1/regulations",
+        vec![Carries::Param("limit", "0")],
+        "invalid_parameter",
+        "limit must be between 1 and 100",
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn find_with_no_question_is_the_services_refusal() {
     refused_by_the_service(
@@ -4384,7 +4424,7 @@ async fn publication_search_prints_the_envelope_and_walks_on_next() {
     Mock::given(method("POST"))
         .and(path("/api/v1/publications/search"))
         .and(body_json(
-            serde_json::json!({"dossier": "36195", "limit": 2}),
+            serde_json::json!({"dossier": "36195", "limit": "2"}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_raw(page.clone(), "application/json"))
         .expect(1)
@@ -4393,7 +4433,7 @@ async fn publication_search_prints_the_envelope_and_walks_on_next() {
     Mock::given(method("POST"))
         .and(path("/api/v1/publications/search"))
         .and(body_json(
-            serde_json::json!({"dossier": "36195", "limit": 2, "next": "3"}),
+            serde_json::json!({"dossier": "36195", "limit": "2", "next": "3"}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":53}}"#,
@@ -4446,7 +4486,7 @@ async fn publication_search_sends_the_collections_short_code() {
     Mock::given(method("POST"))
         .and(path("/api/v1/publications/search"))
         .and(body_json(
-            serde_json::json!({"collection": "stb", "limit": 20}),
+            serde_json::json!({"collection": "stb", "limit": "20"}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             r#"{"bron":1,"grade":"authority","data":{"hits":[],"source_total":0}}"#,

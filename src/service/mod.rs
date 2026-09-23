@@ -127,8 +127,8 @@ impl Service {
 
         let mut query = vec![
             ("q", ask.query.to_string()),
-            ("limit", ask.limit.to_string()),
-            ("offset", ask.offset.to_string()),
+            ("limit", ask.limit.clone()),
+            ("offset", ask.offset.clone()),
         ];
 
         if let Some(kind) = ask.kind {
@@ -172,10 +172,7 @@ impl Service {
     ) -> Outcome<Answered<Vec<Expression>>> {
         let url = format!("{}/api/v1/expressions", self.base);
 
-        let mut query = vec![
-            ("limit", ask.limit.to_string()),
-            ("offset", ask.offset.to_string()),
-        ];
+        let mut query = vec![("limit", ask.limit.clone()), ("offset", ask.offset.clone())];
 
         for (name, day) in [
             ("in_force_from", ask.from),
@@ -204,7 +201,7 @@ impl Service {
         &self,
         client: &Client,
         since: Option<u64>,
-        limit: u32,
+        limit: &str,
         regulation: Option<&str>,
     ) -> Outcome<Answered<Feed>> {
         let url = format!("{}/api/v1/feed", self.base);
@@ -229,8 +226,8 @@ impl Service {
 
         let mut query = vec![
             ("as_of", ask.as_of.to_string()),
-            ("limit", ask.limit.to_string()),
-            ("offset", ask.offset.to_string()),
+            ("limit", ask.limit.clone()),
+            ("offset", ask.offset.clone()),
         ];
 
         if let Some(day) = ask.as_known_on {
@@ -302,7 +299,7 @@ impl Service {
             ("as_of", ask.as_of.to_string()),
             ("rendered", "1".to_string()),
             ("limit", ask.limit.clone()),
-            ("offset", ask.offset.to_string()),
+            ("offset", ask.offset.clone()),
         ];
 
         if let Some(date) = ask.as_known_on {
@@ -338,8 +335,8 @@ impl Service {
         &self,
         client: &Client,
         law: &str,
-        limit: u32,
-        offset: u32,
+        limit: &str,
+        offset: &str,
     ) -> Outcome<Answered<Amendments>> {
         let url = self.route(&["regulations", law, "amendments"])?;
         let query = [("limit", limit.to_string()), ("offset", offset.to_string())];
@@ -358,8 +355,8 @@ impl Service {
 
         let mut query = vec![
             ("as_of", ask.as_of.to_string()),
-            ("limit", ask.limit.to_string()),
-            ("offset", ask.offset.to_string()),
+            ("limit", ask.limit.clone()),
+            ("offset", ask.offset.clone()),
         ];
 
         if let Some(day) = ask.as_known_on {

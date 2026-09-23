@@ -29,7 +29,8 @@ pub struct PublicationQuery<'a> {
     pub collection: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dossier: Option<&'a str>,
-    pub limit: u32,
+    /// As the service reads it: digits, exactly as typed.
+    pub limit: String,
     /// Where to ask on, as a previous answer's own `next`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<&'a str>,
@@ -132,8 +133,8 @@ impl Service {
         &self,
         client: &Client,
         id: &str,
-        limit: u32,
-        offset: u32,
+        limit: &str,
+        offset: &str,
         rendered: bool,
         raw: bool,
     ) -> Outcome<Answered<Publication>> {
