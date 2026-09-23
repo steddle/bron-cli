@@ -435,8 +435,7 @@ pub enum Law {
         #[arg(long = "type", value_name = "TYPE")]
         kind: Option<String>,
 
-        /// How many rows to answer, 500 at most.
-        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=500))]
+        #[arg(long, default_value_t = 50)]
         limit: u32,
 
         /// How many rows to skip, to read past a list cut at its window.
