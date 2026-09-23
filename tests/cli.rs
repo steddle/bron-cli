@@ -2095,6 +2095,31 @@ async fn law_parts_reads_a_unit_the_way_law_show_reads_an_article() {
     );
 }
 
+/// The not-yet-applied line stands ahead of the unit's own name and words, so
+/// a reader is told before reading them rather than after, and the dossiers
+/// the BWB states for the act stand beside it, not only in the JSON envelope.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_puts_the_waiting_line_first_and_names_its_dossiers() {
+    let waiting = PARTS.replace(
+        r#""kind":"bijlage","position":2,"#,
+        r#""kind":"bijlage","position":2,"status":"nogniet","in_force_from":"2027-01-01","amended_by":"stb-2026-300","dossiers":[{"dossier":"36212","stated_in":"1eb72c0011119cf2fdcbc0660f12e7a0cf0612a40cb602f3a30a42a1db5b8de9"}],"effect":"wijziging","#,
+    );
+    assert_ne!(waiting, PARTS);
+    let server = answering("GET", "/api/v1/regulations/BWBR0001941/parts", &waiting).await;
+
+    let text = stdout(&bron(&server, &["law", "parts", "BWBR0001941"]).await);
+
+    let not_yet = text
+        .find("not yet applied, applies from 2027-01-01")
+        .unwrap_or_else(|| panic!("{text}"));
+    let name = text.find("Lijst Ia").unwrap_or_else(|| panic!("{text}"));
+    assert!(not_yet < name, "{text}");
+    assert!(
+        text.contains("published by stb-2026-300 (wijziging), dossier 36212"),
+        "{text}"
+    );
+}
+
 /// `--not-commenced` asks the service for the waiting units of every kind,
 /// and an answer holding only those is bound to the rendition that publishes
 /// them rather than said to be in force.

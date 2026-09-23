@@ -908,6 +908,15 @@ fn write_unit(
     narrowed: Narrowed<'_>,
     out: &mut impl Write,
 ) -> io::Result<()> {
+    // The lawyer's minimum, ahead of the name and the words: a reader should
+    // not have to reach the bottom of the block to learn the text above it
+    // does not apply.
+    if not_commenced(unit) {
+        match unit.in_force_from {
+            Some(day) => writeln!(out, "not yet applied, applies from {day}")?,
+            None => writeln!(out, "not yet applied")?,
+        }
+    }
     match (&unit.label, narrowed.lid) {
         (None, Some(lid)) => write!(out, "{} lid {lid}", unit.name())?,
         _ => write!(out, "{}", unit.name())?,
@@ -963,19 +972,24 @@ fn write_unit(
     if !unit.images.is_empty() {
         writeln!(out, "images: {}", unit.images.join(", "))?;
     }
-    if not_commenced(unit) {
-        match unit.in_force_from {
-            Some(day) => writeln!(out, "not yet applied, applies from {day}")?,
-            None => writeln!(out, "not yet applied")?,
-        }
-    }
     if let Some(act) = &unit.amended_by {
         let effect = unit.effect.as_deref().unwrap_or("wijziging");
         if not_commenced(unit) {
-            writeln!(out, "published by {act} ({effect})")?;
+            write!(out, "published by {act} ({effect})")?;
         } else {
-            writeln!(out, "in force through {act} ({effect})")?;
+            write!(out, "in force through {act} ({effect})")?;
         }
+        if let Some(dossiers) = &unit.dossiers
+            && !dossiers.is_empty()
+        {
+            let numbers = dossiers
+                .iter()
+                .map(|dossier| dossier.dossier.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            write!(out, ", dossier {numbers}")?;
+        }
+        writeln!(out)?;
     }
     writeln!(out)
 }

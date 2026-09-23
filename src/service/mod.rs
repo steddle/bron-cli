@@ -30,10 +30,10 @@ use crate::sources::Client;
 
 pub use client::Answered;
 pub use model::{
-    Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Expression, Feed, Had,
-    History, Image, Lineage, Named, Paragraph, Parts, Produced, Published, RegisterEvent,
-    Regulation, Related, Relating, Relation, Relations, Span, Summary, Units, Upcoming, Waiting,
-    Window, name,
+    Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Dossier, Expression,
+    Feed, Had, History, Image, Lineage, Named, Paragraph, Parts, Produced, Published,
+    RegisterEvent, Regulation, Related, Relating, Relation, Relations, Span, Summary, Units,
+    Upcoming, Waiting, Window, name,
 };
 pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
 

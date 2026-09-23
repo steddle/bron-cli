@@ -340,6 +340,10 @@ pub struct Article {
     /// which is what makes a comparison an identity match rather than a guess.
     pub stam_id: String,
     pub amended_by: Option<String>,
+    /// The kamerstukdossiers the BWB states for the act named in
+    /// `amended_by`. Absent where the rendition has not been read for them,
+    /// empty where it was and states none.
+    pub dossiers: Option<Vec<Dossier>>,
     pub effect: Option<String>,
     pub status: Option<String>,
     /// The language of the treaty text the unit stands in, and whether that
@@ -428,6 +432,14 @@ pub fn name(
         (None, None, Some(position)) => format!("{kind} {position}"),
         (None, None, None) => kind.to_string(),
     }
+}
+
+/// A kamerstukdossier the BWB states for an act, with the digest of the held
+/// document that states it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Dossier {
+    pub dossier: String,
+    pub stated_in: String,
 }
 
 /// One lid, as the register numbers it.
@@ -593,6 +605,7 @@ mod tests {
             path: None,
             stam_id: "1".into(),
             amended_by: None,
+            dossiers: None,
             effect: None,
             status: None,
             lang: None,
