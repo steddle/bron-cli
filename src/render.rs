@@ -12,8 +12,8 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::{
-    Article, Expression, Had, Lineage, Produced, Regulation, Relation, SearchData, SearchLid,
-    Upcoming, name,
+    Article, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Produced, Regulation,
+    Relation, SearchData, SearchLid, Upcoming, name,
 };
 use bron::wire::{AppealStatus, Body, Caveat, Envelope};
 
@@ -279,8 +279,8 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&a.caveats, err)
         }
 
-        // Rows, one per regulation, in the service's order; what the columns
-        // mean is a note on them and goes to stderr.
+        // Rows, one per regulation or published act, in the service's order;
+        // what the columns mean is a note on them and goes to stderr.
         Answer::Upcoming(a) => {
             let rows = &a.data;
             if rows.is_empty() {
@@ -301,62 +301,140 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     named.join(", ")
                 }
             };
+            let linked = |named: &[LinkedDecree]| {
+                if named.is_empty() {
+                    "-".to_string()
+                } else {
+                    named
+                        .iter()
+                        .map(|d| d.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            };
+            let cited = |named: &[Dossier]| {
+                if named.is_empty() {
+                    "-".to_string()
+                } else {
+                    named
+                        .iter()
+                        .map(|d| d.dossier.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            };
+
+            // Column widths read off the consolidated rows alone: a published
+            // row has no label or unit count to align.
+            let consolidated: Vec<&Consolidated> = rows
+                .iter()
+                .filter_map(|row| match row {
+                    Upcoming::Consolidated(row) => Some(row),
+                    Upcoming::Published(_) | Upcoming::Unknown(_) => None,
+                })
+                .collect();
             // A row where some units state a day to come and some do not says
             // how many do, so the first day is not read as every unit's. Where
             // none does, `no day yet` already says so.
-            let partly_dated = |row: &Upcoming| 0 < row.dated && row.dated < row.units;
-            let units_width = rows.iter().map(|row| digits(row.units)).max().unwrap_or(1);
-            let dated_width = rows
+            let partly_dated = |row: &Consolidated| 0 < row.dated && row.dated < row.units;
+            let units_width = consolidated
+                .iter()
+                .map(|row| digits(row.units))
+                .max()
+                .unwrap_or(1);
+            let dated_width = consolidated
                 .iter()
                 .filter(|row| partly_dated(row))
                 .map(|row| ", ".len() + digits(row.dated) + " dated".len())
                 .max()
                 .unwrap_or(0);
-            let label_width = rows
+            let label_width = consolidated
                 .iter()
                 .map(|row| row.label.chars().count())
                 .max()
                 .unwrap_or(0);
 
             for row in rows {
-                let day = row
-                    .first_day
-                    .map_or_else(|| NO_DAY.to_string(), |day| day.to_string());
-                let dated = if partly_dated(row) {
-                    format!(", {} dated", row.dated)
-                } else {
-                    String::new()
-                };
-                let mut line = format!(
-                    "{day}  {}  {:<label_width$}  {:>units_width$} waiting{dated:<dated_width$}",
-                    row.regulation_id, row.label, row.units
-                );
-                if let Some(title) = &row.regulation_title {
-                    let _ = write!(line, "  {title}");
+                match row {
+                    Upcoming::Consolidated(row) => {
+                        let day = row
+                            .first_day
+                            .map_or_else(|| NO_DAY.to_string(), |day| day.to_string());
+                        let dated = if partly_dated(row) {
+                            format!(", {} dated", row.dated)
+                        } else {
+                            String::new()
+                        };
+                        let mut line = format!(
+                            "{day}  {}  {:<label_width$}  {:>units_width$} \
+                             waiting{dated:<dated_width$}",
+                            row.regulation_id, row.label, row.units
+                        );
+                        if let Some(title) = &row.regulation_title {
+                            let _ = write!(line, "  {title}");
+                        }
+                        let _ = write!(
+                            line,
+                            "  acts {}  decrees {}  linked decrees {}",
+                            listed(&row.acts),
+                            listed(&row.decrees),
+                            linked(&row.linked_decrees),
+                        );
+                        writeln!(out, "{line}")?;
+                    }
+                    // Stated no day, in every held answer: the register keeps
+                    // no future rendition, and neither does the Staatsblad.
+                    Upcoming::Published(row) => {
+                        let mut line = format!(
+                            "{NO_DAY}  {}  published in the Staatsblad on {}, not consolidated \
+                             in the BWB",
+                            row.publication, row.published_on
+                        );
+                        if let Some(title) = &row.title {
+                            let _ = write!(line, "  {title}");
+                        }
+                        let _ = write!(
+                            line,
+                            "  dossiers {}  linked decrees {}",
+                            cited(&row.dossiers),
+                            linked(&row.linked_decrees),
+                        );
+                        writeln!(out, "{line}")?;
+                    }
+                    // A stage this build has no name for does not sink the
+                    // rows beside it. --json still carries it as the service
+                    // sent it.
+                    Upcoming::Unknown(value) => {
+                        let stage = value.get("stage").and_then(|s| s.as_str()).unwrap_or("?");
+                        writeln!(
+                            out,
+                            "{NO_DAY}  stage {stage} is not one this build knows; upgrade bron \
+                             to read it, or read it with --json"
+                        )?;
+                    }
                 }
-                let _ = write!(
-                    line,
-                    "  acts {}  decrees {}",
-                    listed(&row.acts),
-                    listed(&row.decrees)
-                );
-                writeln!(out, "{line}")?;
             }
 
             writeln!(
                 err,
                 "first column = the earliest day to come a waiting unit states, {NO_DAY} = none \
-                 states one"
+                 states one, or the row is a published act that states no day"
             )?;
             writeln!(
                 err,
-                "then the rendition read, how many units it prints as waiting, and how many of \
-                 them state a day to come where some do and some do not"
+                "a consolidated row: the rendition read, how many units it prints as waiting, \
+                 and how many of them state a day to come where some do and some do not"
             )?;
             writeln!(
                 err,
                 "acts = the publications that produced the waiting text, decrees = the besluiten \
                  the rendition names as commencing it, - = it names none"
+            )?;
+            writeln!(
+                err,
+                "linked decrees = besluiten bron holds that name the row's act, whether or not \
+                 the BWB has taken them in yet, - = it holds none; a published row's dossiers \
+                 are the kamerstukdossiers the act states as its own"
             )?;
             caveats(&a.caveats, err)
         }
@@ -1540,6 +1618,34 @@ fn caveat_line(caveat: &Caveat) -> String {
                 .collect::<Vec<_>>()
                 .join(", "),
         ),
+        Caveat::DecreesUnmatched { decrees } => format!(
+            "note: besluit(en) published in the last 15 days name no act by reference or by \
+             chain, so bron cannot say what they commence: {}.",
+            decrees
+                .iter()
+                .map(|d| format!("{} ({})", d.id, d.published_on))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        Caveat::CommencementPending { decrees } => format!(
+            "note: a published besluit names the act behind a waiting unit, and no rendition \
+             here names it as commenced yet. Whether its day has come stands in its own words, \
+             which bron does not read: {}.",
+            decrees
+                .iter()
+                .map(|d| format!(
+                    "{} commences {}, published {}",
+                    d.decree, d.act, d.published_on
+                ))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        Caveat::PublicationNotHeld => "note: this publication was passed on rather than kept; \
+             its digest is of the bytes bron read, and not one /blobs can serve again"
+            .to_string(),
+        Caveat::SourceTotalEstimated => "note: the publisher's own total is an estimate, so \
+             walking this search to its end can read a few hits more or fewer than it stated"
+            .to_string(),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
@@ -1833,6 +1939,47 @@ mod tests {
         });
 
         assert!(note.contains("2 of the 41"), "{note}");
+    }
+
+    /// Named besluiten, not a bare count: which ones bron could not link is
+    /// what tells a reader whether to look one up by hand.
+    #[test]
+    fn decrees_unmatched_names_the_besluiten_and_when_they_were_published() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "decrees_unmatched",
+            "decrees": [{"id": "stb-2026-280", "published_on": "2026-09-20"}],
+        })));
+
+        assert!(note.contains("stb-2026-280 (2026-09-20)"), "{note}");
+        assert!(note.contains("cannot say what they commence"), "{note}");
+    }
+
+    /// The besluit, the act it names and when it was published: enough to
+    /// look the besluit up without bron reading its day for the reader.
+    #[test]
+    fn commencement_pending_names_the_besluit_and_the_act_it_commences() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "commencement_pending",
+            "decrees": [{"decree": "stb-2026-8", "published_on": "2026-01-21", "act": "stb-2025-62"}],
+        })));
+
+        assert!(note.contains("stb-2026-8 commences stb-2025-62"), "{note}");
+        assert!(note.contains("published 2026-01-21"), "{note}");
+        assert!(note.contains("bron does not read"), "{note}");
+    }
+
+    #[test]
+    fn a_publication_not_held_says_its_digest_cannot_be_fetched_again() {
+        let note = caveat_line(&Caveat::PublicationNotHeld);
+
+        assert!(note.contains("passed on rather than kept"), "{note}");
+    }
+
+    #[test]
+    fn a_source_total_estimated_says_the_publisher_stated_it_as_one() {
+        let note = caveat_line(&Caveat::SourceTotalEstimated);
+
+        assert!(note.contains("estimate"), "{note}");
     }
 
     fn printed(answer: &Answer) -> String {

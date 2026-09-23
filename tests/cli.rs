@@ -891,6 +891,66 @@ async fn a_provision_not_yet_applied_is_not_said_to_be_in_force() {
     assert!(text.contains("stb-2026-219"), "{text}");
 }
 
+/// `commencement_pending` reaches `law show` in words: a besluit names the
+/// act behind a waiting unit and no rendition here has taken it in yet.
+#[tokio::test(flavor = "multi_thread")]
+async fn commencement_pending_reaches_law_show_in_words() {
+    let answer = serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": "2026-06-01",
+        "data": {
+            "regulation_id": "BWBR0005289",
+            "expression": {
+                "regulation_id": "BWBR0005289",
+                "label": "2026-01-01_0",
+                "in_force": {"from": "2026-01-01"},
+                "withdrawn": false,
+                "held": true,
+                "upstream_hash_check": "matches",
+                "blob": EARLIER_BLOB,
+            },
+            "articles": [],
+        },
+        "caveats": [{
+            "kind": "commencement_pending",
+            "decrees": [{"decree": "stb-2026-8", "published_on": "2026-01-21", "act": "stb-2025-62"}],
+        }],
+    });
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0005289/articles"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(answer.to_string(), "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/blobs/{EARLIER_BLOB}/provenance")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"bron":1,"grade":"authority","data":{"size":547732}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["law", "show", "BWBR0005289", "--as-of", "2026-06-01"],
+    )
+    .await;
+    // No article stands in the answer, so its note stands on stdout beside
+    // the sentence that says so.
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("stb-2026-8 commences stb-2025-62"), "{text}");
+    assert!(text.contains("published 2026-01-21"), "{text}");
+    assert!(text.contains("bron does not read"), "{text}");
+    assert!(!text.contains("no sentence for"), "{text}");
+}
+
 /// Runs one failing command against a service answering `status` with `body`,
 /// and a `Retry-After` where one is given. Returns the envelope and stderr.
 async fn failing(
@@ -3159,11 +3219,11 @@ async fn law_upcoming_prints_one_row_per_regulation_and_its_notes_apart() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         stdout(&output),
-        "2026-10-01  BWBR0035072  2026-07-01_0   1 waiting  Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052\n\
-         2026-10-01  BWBR0035474  2026-09-03_0  13 waiting  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575\n\
-         2026-10-01  BWBR0045685  2026-09-16_0  13 waiting  Regeling Europese EZ-, LVVN- en KGG-subsidies 2021  acts stcrt-2026-29272  decrees stcrt-2026-29272\n\
-         2026-10-01  BWBR0051172  2025-07-03_0   3 waiting  Besluit Aanmeldprocedure Staatsexamen Nt2 2027  acts stcrt-2025-22378  decrees -\n\
-         2026-10-01  BWBR0046685  2024-10-01_0   1 waiting  Wet kwaliteit incassodienstverlening  acts stb-2022-186  decrees -\n"
+        "2026-10-01  BWBR0035072  2026-07-01_0   1 waiting  Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052  linked decrees -\n\
+         2026-10-01  BWBR0035474  2026-09-03_0  13 waiting  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575  linked decrees -\n\
+         2026-10-01  BWBR0045685  2026-09-16_0  13 waiting  Regeling Europese EZ-, LVVN- en KGG-subsidies 2021  acts stcrt-2026-29272  decrees stcrt-2026-29272  linked decrees -\n\
+         2026-10-01  BWBR0051172  2025-07-03_0   3 waiting  Besluit Aanmeldprocedure Staatsexamen Nt2 2027  acts stcrt-2025-22378  decrees -  linked decrees -\n\
+         2026-10-01  BWBR0046685  2024-10-01_0   1 waiting  Wet kwaliteit incassodienstverlening  acts stb-2022-186  decrees -  linked decrees -\n"
     );
     assert!(
         err.contains("the rendition names as commencing it"),
@@ -3189,11 +3249,11 @@ async fn a_row_says_how_many_of_its_waiting_units_state_a_day() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         lines[1],
-        "2026-10-01  BWBR0035474  2026-09-03_0  13 waiting, 1 dated  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575"
+        "2026-10-01  BWBR0035474  2026-09-03_0  13 waiting, 1 dated  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575  linked decrees -"
     );
     assert_eq!(
         lines[0],
-        "2026-10-01  BWBR0035072  2026-07-01_0   1 waiting           Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052"
+        "2026-10-01  BWBR0035072  2026-07-01_0   1 waiting           Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052  linked decrees -"
     );
     assert!(!lines[2].contains("dated"), "{text}");
 }
@@ -3204,7 +3264,7 @@ async fn a_row_says_how_many_of_its_waiting_units_state_a_day() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_regulation_whose_units_state_no_day_says_so() {
     const UNDATED: &str = r#"{"bron":1,"grade":"authority","as_of":"2026-09-23","as_known_on":"2026-09-23",
- "data":[{"regulation_id":"BWBR0005537","regulation_title":"Algemene wet bestuursrecht","type":"wet","label":"2026-08-15_0","units":4,"dated":0,"acts":["stb-1994-1","stb-2021-2"],"decrees":[]}],
+ "data":[{"stage":"consolidated","regulation_id":"BWBR0005537","regulation_title":"Algemene wet bestuursrecht","type":"wet","label":"2026-08-15_0","units":4,"dated":0,"acts":["stb-1994-1","stb-2021-2"],"decrees":[],"linked_decrees":[]}],
  "caveats":[{"kind":"not_in_bwb"}]}"#;
 
     let server = answering("GET", "/api/v1/upcoming", UNDATED).await;
@@ -3214,7 +3274,7 @@ async fn a_regulation_whose_units_state_no_day_says_so() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         stdout(&output),
-        "no day yet  BWBR0005537  2026-08-15_0  4 waiting  Algemene wet bestuursrecht  acts stb-1994-1, stb-2021-2  decrees -\n"
+        "no day yet  BWBR0005537  2026-08-15_0  4 waiting  Algemene wet bestuursrecht  acts stb-1994-1, stb-2021-2  decrees -  linked decrees -\n"
     );
 }
 
@@ -3240,6 +3300,92 @@ async fn law_upcoming_with_nothing_waiting_is_an_answer() {
         "{text}"
     );
     assert!(text.contains("what the BWB prints"), "{text}");
+}
+
+/// A row of stage `published` is an act the Staatsblad holds and the BWB
+/// consolidates nowhere. It carries no regulation, so the row says plainly
+/// that this is a publication and not a consolidated text, names it as cited,
+/// and lists its dossiers and the besluiten bron holds that name it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_published_row_says_it_is_not_consolidated_and_names_its_dossiers() {
+    const PUBLISHED: &str = "bron-upcoming-published-row.json";
+    let server = answering("GET", "/api/v1/upcoming", &fixture(PUBLISHED)).await;
+
+    let output = bron(&server, &["law", "upcoming"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        text,
+        "no day yet  stb-2026-56  published in the Staatsblad on 2026-03-13, not consolidated \
+         in the BWB  Wet tot vaststelling van het nieuwe Wetboek van Strafvordering  dossiers \
+         34608  linked decrees -\n"
+    );
+}
+
+/// The two stages sit in one list, in the order the service sent them, and
+/// `--json` prints the envelope exactly as sent regardless of the mix.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_mixes_both_stages_and_json_carries_them_as_sent() {
+    const MIXED: &str = "bron-upcoming-mixed-stages.json";
+    let sent = fixture(MIXED);
+    let server = answering("GET", "/api/v1/upcoming", &sent).await;
+
+    let output = bron(&server, &["law", "upcoming"]).await;
+    let text = stdout(&output);
+    let lines: Vec<&str> = text.lines().collect();
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[0].starts_with("2027-01-01  BWBR0000001"), "{lines:?}");
+    assert!(lines[1].contains("stb-2026-56"), "{lines:?}");
+    assert!(lines[1].contains("not consolidated"), "{lines:?}");
+    assert!(lines[2].starts_with("no day yet  BWBR0009616"), "{lines:?}");
+
+    let json = bron(&server, &["--json", "law", "upcoming"]).await;
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
+/// A stage this build has never heard of does not sink the rows beside it:
+/// the answer still exits ok, the row it cannot read says so in words rather
+/// than being silently dropped, and `--json` still carries it as sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stage_this_build_does_not_know_does_not_sink_the_answer() {
+    const UNKNOWN: &str = "bron-upcoming-unknown-stage.json";
+    let sent = fixture(UNKNOWN);
+    let server = answering("GET", "/api/v1/upcoming", &sent).await;
+
+    let output = bron(&server, &["law", "upcoming"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("BWBR0009616"), "{text}");
+    assert!(text.contains("stage deferred"), "{text}");
+    assert!(text.contains("not one this build knows"), "{text}");
+    assert!(text.contains("--json"), "{text}");
+
+    let json = bron(&server, &["--json", "law", "upcoming"]).await;
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
+/// `decrees_unmatched` names the recent besluiten bron could not link to an
+/// act, in words rather than as an unrecognised limit.
+#[tokio::test(flavor = "multi_thread")]
+async fn decrees_unmatched_names_the_besluiten_bron_could_not_link() {
+    const UNMATCHED: &str = "bron-upcoming-decrees-unmatched.json";
+    let server = answering("GET", "/api/v1/upcoming", &fixture(UNMATCHED)).await;
+
+    let output = bron(&server, &["law", "upcoming"]).await;
+    // With no rows to keep clean, the caveats stand on stdout, under the
+    // sentence that says nothing waits.
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("stb-2026-280 (2026-09-20)"), "{text}");
+    assert!(text.contains("cannot say what they commence"), "{text}");
+    assert!(!text.contains("no sentence for"), "{text}");
 }
 
 /// Every name the route declares reaches it, and nothing else: the service

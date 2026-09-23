@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use bron::service::{Ask, SearchData, SearchRequest, Service, Waiting};
+use bron::service::{Ask, SearchData, SearchRequest, Service, Upcoming, Waiting};
 use bron::sources::Client;
 use bron::wire::Caveat;
 use wiremock::matchers::{method, path};
@@ -686,19 +686,29 @@ async fn what_waits_to_apply_is_read_as_the_service_sent_it() {
     .await
     .expect("the service answered");
 
+    fn consolidated(row: &Upcoming) -> &bron::service::Consolidated {
+        match row {
+            Upcoming::Consolidated(row) => row,
+            other => panic!("expected a consolidated row, read {other:?}"),
+        }
+    }
     let rows = &answered.data;
     assert_eq!(rows.len(), 5);
-    assert_eq!(rows[0].regulation_id, "BWBR0035072");
+    let first = consolidated(&rows[0]);
+    assert_eq!(first.regulation_id, "BWBR0035072");
     assert_eq!(
-        rows[0].regulation_title.as_deref(),
+        first.regulation_title.as_deref(),
         Some("Regeling genetisch gemodificeerde organismen milieubeheer 2013")
     );
-    assert_eq!(rows[1].units, 13);
-    assert_eq!(rows[1].dated, 13);
-    assert_eq!(rows[1].label, "2026-09-03_0");
-    assert_eq!(rows[0].first_day, Some("2026-10-01".parse().unwrap()));
-    assert_eq!(rows[4].acts, vec!["stb-2022-186".to_string()]);
-    assert!(rows[4].decrees.is_empty());
+    assert_eq!(first.first_day, Some("2026-10-01".parse().unwrap()));
+    let second = consolidated(&rows[1]);
+    assert_eq!(second.units, 13);
+    assert_eq!(second.dated, 13);
+    assert_eq!(second.label, "2026-09-03_0");
+    let fifth = consolidated(&rows[4]);
+    assert_eq!(fifth.acts, vec!["stb-2022-186".to_string()]);
+    assert!(fifth.decrees.is_empty());
+    assert!(fifth.linked_decrees.is_empty());
 
     assert_eq!(answered.as_of, Some("2026-09-23".parse().unwrap()));
     assert_eq!(

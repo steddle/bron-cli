@@ -409,12 +409,55 @@ pub enum Caveat {
         units: BTreeMap<String, u32>,
     },
 
+    /// Inwerkingtredingsbesluiten published in the last 15 days that name no
+    /// act by `extref` or `ketenid`, so bron cannot say what they commence and
+    /// raises no [`Caveat::CommencementPending`] for them.
+    DecreesUnmatched { decrees: Vec<UnmatchedDecree> },
+
+    /// A besluit the Staatsblad published names, by `extref` or `ketenid`,
+    /// the act behind units this answer prints as not yet in force, and no
+    /// rendition the BWB holds names it as `commenced_by` yet.
+    ///
+    /// Whether its day has come stands in its own words, which bron does not
+    /// read. Raised only where a besluit names its act that way: its absence
+    /// does not mean no commencement is pending.
+    CommencementPending { decrees: Vec<PendingDecree> },
+
+    /// The publication was passed on and not kept. Its digest is of the bytes
+    /// bron read, not one `/blobs` can serve again.
+    PublicationNotHeld,
+
+    /// The publisher's own count of matches is an estimate, so walking a
+    /// search to its end can read a few hits more or fewer than it stated.
+    SourceTotalEstimated,
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
     /// with, so a reader sees what was said even where this build cannot put it
     /// in words.
     Unrecognised { stated: serde_json::Value },
+}
+
+/// One besluit [`Caveat::DecreesUnmatched`] names: published in the last 15
+/// days and naming no act bron can match.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct UnmatchedDecree {
+    /// The besluit, as `stb-2026-280`.
+    pub id: String,
+    pub published_on: NaiveDate,
+}
+
+/// One besluit [`Caveat::CommencementPending`] names: it names its act, and
+/// no rendition of that act's regulation has taken it in as `commenced_by`
+/// yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct PendingDecree {
+    /// The besluit, as `stb-2026-8`.
+    pub decree: String,
+    pub published_on: NaiveDate,
+    /// The act the besluit names, as `stb-2025-62`.
+    pub act: String,
 }
 
 impl Caveat {
@@ -536,6 +579,14 @@ impl Caveat {
             ArticlesNotCompared {
                 repeated: Vec<String>,
             },
+            DecreesUnmatched {
+                decrees: Vec<UnmatchedDecree>,
+            },
+            CommencementPending {
+                decrees: Vec<PendingDecree>,
+            },
+            PublicationNotHeld,
+            SourceTotalEstimated,
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -640,6 +691,10 @@ impl Caveat {
                 Self::TextOutsideArticles { expression, units }
             }
             Ok(Stated::ArticlesNotCompared { repeated }) => Self::ArticlesNotCompared { repeated },
+            Ok(Stated::DecreesUnmatched { decrees }) => Self::DecreesUnmatched { decrees },
+            Ok(Stated::CommencementPending { decrees }) => Self::CommencementPending { decrees },
+            Ok(Stated::PublicationNotHeld) => Self::PublicationNotHeld,
+            Ok(Stated::SourceTotalEstimated) => Self::SourceTotalEstimated,
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },

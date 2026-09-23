@@ -120,10 +120,48 @@ pub struct Feed {
     pub events: Vec<RegisterEvent>,
 }
 
+/// One row of what is adopted and does not yet apply, across the register.
+///
+/// `stage` says how far it has come. Read by hand rather than derived,
+/// because an internally tagged enum fails the whole list on one row it
+/// cannot name, and a stage this build has never heard of must not sink the
+/// rows beside it: it reads as [`Upcoming::Unknown`], the row whole, so the
+/// answer still stands and `--json` still carries it.
+#[derive(Debug)]
+pub enum Upcoming {
+    /// The BWB prints units of the regulation as waiting.
+    Consolidated(Consolidated),
+    /// The Staatsblad published the act and the BWB prints it nowhere.
+    Published(PublishedAct),
+    /// A stage this build has no name for.
+    Unknown(serde_json::Value),
+}
+
+impl<'de> serde::Deserialize<'de> for Upcoming {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "stage", rename_all = "snake_case")]
+        enum Stage {
+            Consolidated(Consolidated),
+            Published(PublishedAct),
+        }
+
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match serde_json::from_value(value.clone()) {
+            Ok(Stage::Consolidated(row)) => Self::Consolidated(row),
+            Ok(Stage::Published(row)) => Self::Published(row),
+            Err(_) => Self::Unknown(value),
+        })
+    }
+}
+
 /// One regulation whose rendition at the moment asked prints units it does
 /// not yet apply.
 #[derive(Debug, Deserialize)]
-pub struct Upcoming {
+pub struct Consolidated {
     pub regulation_id: String,
     pub regulation_title: Option<String>,
     /// The rendition the moment resolved to, whose units these are.
@@ -141,6 +179,38 @@ pub struct Upcoming {
     /// The besluiten the rendition names as commencing them, as
     /// `stb-2026-159`. Empty where it names none.
     pub decrees: Vec<String>,
+    /// Held besluiten that name one of `acts`, whether or not the BWB has
+    /// taken them in yet as `decrees`.
+    pub linked_decrees: Vec<LinkedDecree>,
+}
+
+/// An act the Staatsblad published from 2020 that no text the corpus holds
+/// names in `amended_by`, and no regulation in `established_by`. It states no
+/// day: whether it commences is what `linked_decrees` may say, in its own
+/// words, which bron does not read.
+#[derive(Debug, Deserialize)]
+pub struct PublishedAct {
+    /// The act, as `stb-2026-56`.
+    pub publication: String,
+    pub title: Option<String>,
+    /// The kind of act under the name the BWB gives it: `wet`, `rijkswet`,
+    /// `AMvB`, `rijksAMvB`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub published_on: NaiveDate,
+    /// The dossier the act states as its own, in its `<histnoot>`.
+    pub dossiers: Vec<Dossier>,
+    /// Held besluiten that name this act, whether or not the BWB has taken
+    /// them in yet.
+    pub linked_decrees: Vec<LinkedDecree>,
+}
+
+/// A held besluit that names one of a row's acts by `extref` or by the
+/// `ketenid` it shares with it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LinkedDecree {
+    /// The besluit, as `stb-2026-8`.
+    pub id: String,
 }
 
 /// Which moment to read the register's waiting units at, and how to narrow
