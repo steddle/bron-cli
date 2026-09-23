@@ -133,12 +133,13 @@ commenced. `law upcoming` lists the regulations that print them:
 
 ```
 $ bron law upcoming --from 2027-01-01 --to 2027-03-31 --limit 5
-2027-01-01  BWBR0031719  6 waiting  Regeling Waadi  acts stcrt-2026-6946  decrees stb-2026-159
-2027-01-01  BWBR0036578  9 waiting  Besluit allocatie arbeidskrachten door intermediairs  acts stb-2026-41  decrees stb-2026-159
-2027-01-01  BWBR0045371  1 waiting  Regeling uitvoering beveiliging burgerluchtvaart 2021  acts stcrt-2026-3063  decrees stcrt-2026-3063
-2027-01-01  BWBR0051774  4 waiting  Energieregeling  acts stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208  decrees stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208
-2027-01-01  BWBR0052069  1 waiting  Invoeringsregeling Energiewet  acts stcrt-2026-15354  decrees stcrt-2026-15354
+2027-01-01  BWBR0031719  2026-07-01_0  6 waiting  Regeling Waadi  acts stcrt-2026-6946  decrees stb-2026-159
+2027-01-01  BWBR0036578  2026-07-01_0  9 waiting  Besluit allocatie arbeidskrachten door intermediairs  acts stb-2026-41  decrees stb-2026-159
+2027-01-01  BWBR0045371  2026-04-01_0  1 waiting  Regeling uitvoering beveiliging burgerluchtvaart 2021  acts stcrt-2026-3063  decrees stcrt-2026-3063
+2027-01-01  BWBR0051774  2026-09-02_0  4 waiting  Energieregeling  acts stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208  decrees stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208
+2027-01-01  BWBR0052069  2026-07-01_0  1 waiting  Invoeringsregeling Energiewet  acts stcrt-2026-15354  decrees stcrt-2026-15354
 first column = the earliest day to come a waiting unit states, no day yet = none states one
+then the rendition read, how many units it prints as waiting, and how many of them state a day to come where not all do
 acts = the publications that produced the waiting text, decrees = the besluiten the rendition names as commencing it, - = it names none
 
 note: filtered over a window of 5, matches may be missing

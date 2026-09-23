@@ -12,7 +12,8 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::{
-    Article, Expression, Had, Lineage, Produced, Regulation, Relation, SearchData, SearchLid, name,
+    Article, Expression, Had, Lineage, Produced, Regulation, Relation, SearchData, SearchLid,
+    Upcoming, name,
 };
 use bron::wire::{AppealStatus, Body, Caveat, Envelope};
 
@@ -300,9 +301,19 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     named.join(", ")
                 }
             };
-            let units_width = rows
+            // A row whose units do not all state a day to come says how many
+            // do, so the first day is not read as every unit's.
+            let partly_dated = |row: &Upcoming| row.dated < row.units;
+            let units_width = rows.iter().map(|row| digits(row.units)).max().unwrap_or(1);
+            let dated_width = rows
                 .iter()
-                .map(|row| row.units.to_string().len())
+                .filter(|row| partly_dated(row))
+                .map(|row| ", ".len() + digits(row.dated) + " dated".len())
+                .max()
+                .unwrap_or(0);
+            let label_width = rows
+                .iter()
+                .map(|row| row.label.chars().count())
                 .max()
                 .unwrap_or(0);
 
@@ -310,9 +321,14 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 let day = row
                     .first_day
                     .map_or_else(|| NO_DAY.to_string(), |day| day.to_string());
+                let dated = if partly_dated(row) {
+                    format!(", {} dated", row.dated)
+                } else {
+                    String::new()
+                };
                 let mut line = format!(
-                    "{day}  {}  {:>units_width$} waiting",
-                    row.regulation_id, row.units
+                    "{day}  {}  {:<label_width$}  {:>units_width$} waiting{dated:<dated_width$}",
+                    row.regulation_id, row.label, row.units
                 );
                 if let Some(title) = &row.regulation_title {
                     let _ = write!(line, "  {title}");
@@ -330,6 +346,11 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 err,
                 "first column = the earliest day to come a waiting unit states, {NO_DAY} = none \
                  states one"
+            )?;
+            writeln!(
+                err,
+                "then the rendition read, how many units it prints as waiting, and how many of \
+                 them state a day to come where not all do"
             )?;
             writeln!(
                 err,
@@ -1178,6 +1199,11 @@ fn bound(as_of: Option<NaiveDate>, as_known_on: Option<NaiveDate>) -> Option<Str
         (None, Some(read_on)) => Some(format!("as the register showed on {read_on}")),
         (None, None) => None,
     }
+}
+
+/// How many decimal digits `n` prints as.
+fn digits(n: u32) -> usize {
+    n.checked_ilog10().map_or(1, |log| log as usize + 1)
 }
 
 fn window(from: NaiveDate, until: Option<NaiveDate>) -> String {

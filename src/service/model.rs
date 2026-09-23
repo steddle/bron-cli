@@ -128,8 +128,13 @@ pub struct Feed {
 pub struct Upcoming {
     pub regulation_id: String,
     pub regulation_title: Option<String>,
+    /// The rendition the moment resolved to, whose units these are.
+    pub label: String,
     /// How many units of every kind the rendition prints as not yet in force.
     pub units: u32,
+    /// How many of them state a day after the moment asked. The rest state
+    /// none, or one on or before it.
+    pub dated: u32,
     /// The earliest day to come a waiting unit states. Absent where none
     /// states one.
     pub first_day: Option<NaiveDate>,

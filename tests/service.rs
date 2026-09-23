@@ -688,6 +688,8 @@ async fn what_waits_to_apply_is_read_as_the_service_sent_it() {
         Some("Regeling genetisch gemodificeerde organismen milieubeheer 2013")
     );
     assert_eq!(rows[1].units, 13);
+    assert_eq!(rows[1].dated, 13);
+    assert_eq!(rows[1].label, "2026-09-03_0");
     assert_eq!(rows[0].first_day, Some("2026-10-01".parse().unwrap()));
     assert_eq!(rows[4].acts, vec!["stb-2022-186".to_string()]);
     assert!(rows[4].decrees.is_empty());

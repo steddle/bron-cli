@@ -3056,6 +3056,9 @@ fn fixture(name: &str) -> String {
 
 const UPCOMING: &str = "bron-upcoming-limit-5.json";
 const UPCOMING_2027_Q1: &str = "bron-upcoming-from-2027-01-01-to-2027-03-31-limit-5.json";
+/// `bron-upcoming-limit-5.json` with one edit: BWBR0035474 states a day for 1
+/// of its 13 waiting units rather than all 13.
+const UPCOMING_PARTLY_DATED: &str = "bron-upcoming-limit-5-edited-dated-below-units.json";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn law_upcoming_prints_the_envelope_the_service_sent() {
@@ -3092,11 +3095,11 @@ async fn law_upcoming_prints_one_row_per_regulation_and_its_notes_apart() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         stdout(&output),
-        "2026-10-01  BWBR0035072   1 waiting  Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052\n\
-         2026-10-01  BWBR0035474  13 waiting  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575\n\
-         2026-10-01  BWBR0045685  13 waiting  Regeling Europese EZ-, LVVN- en KGG-subsidies 2021  acts stcrt-2026-29272  decrees stcrt-2026-29272\n\
-         2026-10-01  BWBR0051172   3 waiting  Besluit Aanmeldprocedure Staatsexamen Nt2 2027  acts stcrt-2025-22378  decrees -\n\
-         2026-10-01  BWBR0046685   1 waiting  Wet kwaliteit incassodienstverlening  acts stb-2022-186  decrees -\n"
+        "2026-10-01  BWBR0035072  2026-07-01_0   1 waiting  Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052\n\
+         2026-10-01  BWBR0035474  2026-09-03_0  13 waiting  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575\n\
+         2026-10-01  BWBR0045685  2026-09-16_0  13 waiting  Regeling Europese EZ-, LVVN- en KGG-subsidies 2021  acts stcrt-2026-29272  decrees stcrt-2026-29272\n\
+         2026-10-01  BWBR0051172  2025-07-03_0   3 waiting  Besluit Aanmeldprocedure Staatsexamen Nt2 2027  acts stcrt-2025-22378  decrees -\n\
+         2026-10-01  BWBR0046685  2024-10-01_0   1 waiting  Wet kwaliteit incassodienstverlening  acts stb-2022-186  decrees -\n"
     );
     assert!(
         err.contains("the rendition names as commencing it"),
@@ -3106,6 +3109,29 @@ async fn law_upcoming_prints_one_row_per_regulation_and_its_notes_apart() {
     assert!(err.contains("note: 268 treaty(ies)"), "{err}");
     assert!(err.contains("what the BWB prints"), "{err}");
     assert!(!err.contains("no sentence for"), "{err}");
+}
+
+/// Where not every waiting unit states a day, the row says how many do, so
+/// the first day is not read as the day all of them apply. The column after
+/// it starts in one place on every row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_row_says_how_many_of_its_waiting_units_state_a_day() {
+    let server = answering("GET", "/api/v1/upcoming", &fixture(UPCOMING_PARTLY_DATED)).await;
+
+    let output = bron(&server, &["law", "upcoming", "--limit", "5"]).await;
+    let text = stdout(&output);
+    let lines: Vec<&str> = text.lines().collect();
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        lines[1],
+        "2026-10-01  BWBR0035474  2026-09-03_0  13 waiting, 1 dated  Regeling nationale EZ-, LVVN- en KGG-subsidies  acts stcrt-2026-31575  decrees stcrt-2026-31575"
+    );
+    assert_eq!(
+        lines[0],
+        "2026-10-01  BWBR0035072  2026-07-01_0   1 waiting           Regeling genetisch gemodificeerde organismen milieubeheer 2013  acts stcrt-2026-18052  decrees stcrt-2026-18052"
+    );
+    assert!(!lines[2].contains("dated"), "{text}");
 }
 
 /// A regulation whose waiting units state no day is listed as waiting with no
@@ -3124,7 +3150,7 @@ async fn a_regulation_whose_units_state_no_day_says_so() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         stdout(&output),
-        "no day yet  BWBR0005537  4 waiting  Algemene wet bestuursrecht  acts stb-1994-1, stb-2021-2  decrees -\n"
+        "no day yet  BWBR0005537  2026-08-15_0  4 waiting, 0 dated  Algemene wet bestuursrecht  acts stb-1994-1, stb-2021-2  decrees -\n"
     );
 }
 
