@@ -3233,7 +3233,7 @@ async fn a_regulation_whose_units_state_no_day_says_so() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         stdout(&output),
-        "no day yet  BWBR0005537  2026-08-15_0  4 waiting, 0 dated  Algemene wet bestuursrecht  acts stb-1994-1, stb-2021-2  decrees -\n"
+        "no day yet  BWBR0005537  2026-08-15_0  4 waiting  Algemene wet bestuursrecht  acts stb-1994-1, stb-2021-2  decrees -\n"
     );
 }
 

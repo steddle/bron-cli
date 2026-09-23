@@ -139,7 +139,7 @@ $ bron law upcoming --from 2027-01-01 --to 2027-03-31 --limit 5
 2027-01-01  BWBR0051774  2026-09-02_0  4 waiting  Energieregeling  acts stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208  decrees stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208
 2027-01-01  BWBR0052069  2026-07-01_0  1 waiting  Invoeringsregeling Energiewet  acts stcrt-2026-15354  decrees stcrt-2026-15354
 first column = the earliest day to come a waiting unit states, no day yet = none states one
-then the rendition read, how many units it prints as waiting, and how many of them state a day to come where not all do
+then the rendition read, how many units it prints as waiting, and how many of them state a day to come where some do and some do not
 acts = the publications that produced the waiting text, decrees = the besluiten the rendition names as commencing it, - = it names none
 
 note: filtered over a window of 5, matches may be missing

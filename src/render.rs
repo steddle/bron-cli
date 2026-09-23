@@ -301,9 +301,10 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     named.join(", ")
                 }
             };
-            // A row whose units do not all state a day to come says how many
-            // do, so the first day is not read as every unit's.
-            let partly_dated = |row: &Upcoming| row.dated < row.units;
+            // A row where some units state a day to come and some do not says
+            // how many do, so the first day is not read as every unit's. Where
+            // none does, `no day yet` already says so.
+            let partly_dated = |row: &Upcoming| 0 < row.dated && row.dated < row.units;
             let units_width = rows.iter().map(|row| digits(row.units)).max().unwrap_or(1);
             let dated_width = rows
                 .iter()
@@ -350,7 +351,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             writeln!(
                 err,
                 "then the rendition read, how many units it prints as waiting, and how many of \
-                 them state a day to come where not all do"
+                 them state a day to come where some do and some do not"
             )?;
             writeln!(
                 err,
