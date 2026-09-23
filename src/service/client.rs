@@ -145,7 +145,13 @@ impl Stated {
         let header = refusal
             .and_then(|refusal| refusal.asked_for)
             .map(|wait| wait.as_secs());
-        if self.retry_after.is_none()
+        // Whether the object names the key at all, since one that states
+        // `"retry_after": null` has stated it too, and a second key would
+        // make the object two answers.
+        let states_a_delay =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(sent.get())
+                .is_ok_and(|object| object.contains_key("retry_after"));
+        if !states_a_delay
             && let Some(seconds) = header
             && let Some(with) = with_retry_after(&sent, seconds)
         {
@@ -526,6 +532,16 @@ mod tests {
             r#"{"kind":"throttled","code":"rate_limited","message":"m","detail":[],"retry_after":30}"#
         );
         assert!(fault.to_string().contains("30s"), "{fault}");
+
+        let null = r#"{"kind":"source","message":"m","retry_after":null}"#;
+        assert_eq!(
+            stated(null, Some(&refusal(Some(30))))
+                .statement()
+                .unwrap()
+                .sent
+                .get(),
+            null
+        );
 
         let unasked = stated(r#"{"kind":"source","message":"m"}"#, Some(&refusal(None)));
         assert_eq!(
