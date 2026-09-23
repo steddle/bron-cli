@@ -3279,10 +3279,11 @@ async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
     );
 }
 
-/// A window that runs backwards is refused before it is asked, as the
-/// service would refuse it: a usage failure, exit 1.
+/// A window that runs backwards, and a limit outside the 1 to 500 the route
+/// takes, are refused before they are asked, as the service would refuse
+/// them: a usage failure, exit 1.
 #[tokio::test(flavor = "multi_thread")]
-async fn law_upcoming_refuses_a_window_that_runs_backwards() {
+async fn law_upcoming_refuses_what_the_route_would_refuse_before_asking() {
     let server = MockServer::start().await;
 
     let output = bron(
@@ -3302,10 +3303,13 @@ async fn law_upcoming_refuses_a_window_that_runs_backwards() {
 
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert_eq!(envelope["error"]["kind"], "usage");
-    assert!(server.received_requests().await.unwrap().is_empty());
 
-    let zero = bron(&server, &["law", "upcoming", "--limit", "0"]).await;
-    assert_eq!(zero.status.code(), Some(1), "{zero:?}");
+    for limit in ["0", "501"] {
+        let refused = bron(&server, &["law", "upcoming", "--limit", limit]).await;
+        assert_eq!(refused.status.code(), Some(1), "{limit}: {refused:?}");
+    }
+
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 /// A failure the service states keeps its kind: a question it refuses exits
