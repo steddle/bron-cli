@@ -69,8 +69,14 @@ pub enum Fault {
     /// like [`Fault::Upstream`], and named for its status rather than called
     /// an unusable answer, because none was given: a 504 is asked again later
     /// or narrowed, never filed as a contract bug.
-    #[error("{0}")]
-    NoAnswer(String),
+    ///
+    /// `retry_after` is the delay a `Retry-After` header named, in seconds,
+    /// which `--json` carries because no envelope did.
+    #[error("{sentence}")]
+    NoAnswer {
+        sentence: String,
+        retry_after: Option<u64>,
+    },
 
     /// bron could not do its own part on this machine.
     ///
@@ -84,10 +90,11 @@ pub enum Fault {
     /// A failure the service stated, and what it stated about it.
     ///
     /// `fault` is the same failure in the kinds bron exits on, so the exit
-    /// code, the tag and the sentence a person reads are its. `statement` is
-    /// the service's word, kept as sent and never read here: a code this build
-    /// has never heard of crosses like any other. Only a stated failure is
-    /// built this way, which is what keeps a code off `network` and `local`.
+    /// code and the sentence a person reads are its. `statement` is the
+    /// service's word, and `--json` prints its error object as it arrived: its
+    /// kind, a code this build has never heard of, a field the service adds
+    /// later. Only a stated failure is built this way, which is what keeps a
+    /// code off `network` and `local`.
     #[error("{fault}")]
     Stated {
         fault: Box<Fault>,
@@ -95,16 +102,22 @@ pub enum Fault {
     },
 }
 
-/// What the service stated about a failure, as it sent it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the service stated about a failure.
+///
+/// `sent` is its error object as it arrived, which is what `--json` prints.
+/// The fields beside it are read out of that object for the exit code and the
+/// sentence a person reads.
+#[derive(Debug, Clone)]
 pub struct Statement {
+    /// The service's kind as sent: `throttled`, `corpus` and `source` among
+    /// them, which bron exits on as upstream.
+    pub kind: String,
     /// Which failure it is, finer than the kind. Absent where the service
     /// stated none.
     pub code: Option<String>,
     pub message: String,
     pub detail: Vec<String>,
-    /// The seconds its `Retry-After` asked a caller to wait, where it asked.
-    pub retry_after: Option<u64>,
+    pub sent: Box<serde_json::value::RawValue>,
 }
 
 impl Fault {
@@ -114,20 +127,22 @@ impl Fault {
             Self::Usage(_) => exit::USAGE,
             Self::NotFound(_) => exit::NOT_FOUND,
             Self::Network { .. } => exit::NETWORK,
-            Self::Upstream { .. } | Self::Unanswered(_) | Self::NoAnswer(_) => exit::UPSTREAM,
+            Self::Upstream { .. } | Self::Unanswered(_) | Self::NoAnswer { .. } => exit::UPSTREAM,
             Self::Local(_) => exit::LOCAL,
             Self::Stated { fault, .. } => fault.exit_byte(),
         }
     }
 
-    /// Stable machine-readable tag. Part of the JSON contract, so renaming one
-    /// of these is a breaking change to every consumer.
+    /// The kind bron exits on. Part of the JSON contract for a failure bron
+    /// states itself, so renaming one of these is a breaking change to every
+    /// consumer; a failure the service stated carries the service's own kind
+    /// in [`Statement::kind`].
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Usage(_) => "usage",
             Self::NotFound(_) => "not_found",
             Self::Network { .. } => "network",
-            Self::Upstream { .. } | Self::Unanswered(_) | Self::NoAnswer(_) => "upstream",
+            Self::Upstream { .. } | Self::Unanswered(_) | Self::NoAnswer { .. } => "upstream",
             Self::Local(_) => "local",
             Self::Stated { fault, .. } => fault.kind(),
         }
@@ -138,6 +153,14 @@ impl Fault {
     pub fn stated_code(&self) -> Option<&str> {
         self.statement()
             .and_then(|statement| statement.code.as_deref())
+    }
+
+    /// The delay a `Retry-After` named where no envelope carried the failure.
+    pub fn retry_after(&self) -> Option<u64> {
+        match self {
+            Self::NoAnswer { retry_after, .. } => *retry_after,
+            _ => None,
+        }
     }
 
     /// What the service stated about this failure, where it stated it.

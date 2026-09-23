@@ -918,8 +918,9 @@ async fn failing(
 }
 
 /// A 503 carries the delay the service named and, where its body is the
-/// envelope, the code and the message the service stated, as it stated them.
-/// The delay stands in a header, so `--json` carries it as `retry_after`.
+/// envelope, its kind, code and message as it stated them. Where the body
+/// states no delay and the header does, `--json` carries it as `retry_after`,
+/// once, after the service's own fields.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_service_unable_to_fetch_says_so_with_its_code_and_its_delay() {
     let (output, envelope, said) = failing(
@@ -931,12 +932,37 @@ async fn the_service_unable_to_fetch_says_so_with_its_code_and_its_delay() {
     let message = envelope["error"]["message"].as_str().unwrap();
 
     assert_eq!(output.status.code(), Some(4), "{output:?}");
-    assert_eq!(envelope["error"]["kind"], "upstream");
+    assert_eq!(envelope["error"]["kind"], "source");
     assert_eq!(envelope["error"]["code"], "source_unavailable");
     assert_eq!(message, "the register did not serve 2016-07-01_0");
-    assert_eq!(envelope["error"]["detail"], serde_json::json!([]));
-    assert_eq!(envelope["error"]["retry_after"], 60);
+    assert!(
+        stdout(&output).contains(
+            r#""error":{"kind":"source","code":"source_unavailable","message":"the register did not serve 2016-07-01_0","detail":[],"retry_after":60}}"#
+        ),
+        "{output:?}"
+    );
     assert!(said.contains("the service could not answer: "), "{said}");
+    assert!(said.contains("60s"), "{said}");
+}
+
+/// Where the body states the delay itself, its error object crosses as sent
+/// and the header's delay is not written beside it: one `retry_after`, the
+/// body's. A field this build has no name for crosses too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delay_the_body_states_crosses_as_sent_and_once() {
+    let error = r#"{"kind":"source","code":"source_unavailable","message":"the register did not serve 2016-07-01_0","detail":[],"retry_after":60,"later":true}"#;
+    let (output, _, said) = failing(
+        503,
+        Some("30"),
+        &format!(r#"{{"bron":1,"grade":"authority","error":{error}}}"#),
+    )
+    .await;
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        format!("{{\"bron\":1,\"grade\":\"authority\",\"error\":{error}}}\n")
+    );
     assert!(said.contains("60s"), "{said}");
 }
 
@@ -952,6 +978,7 @@ async fn a_spent_shared_budget_is_not_told_as_the_callers_own_limit() {
     .await;
 
     assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(envelope["error"]["kind"], "throttled");
     assert_eq!(envelope["error"]["code"], "fetch_budget_spent");
     assert!(said.contains("every caller shares"), "{said}");
     assert!(said.contains("30s"), "{said}");
@@ -969,6 +996,7 @@ async fn a_503_without_an_envelope_is_named_with_its_delay() {
     assert_eq!(output.status.code(), Some(4), "{output:?}");
     assert_eq!(envelope["error"]["kind"], "upstream");
     assert!(envelope["error"].get("code").is_none(), "{envelope}");
+    assert_eq!(envelope["error"]["retry_after"], 60);
     assert!(message.contains("503"), "{envelope}");
     assert!(message.contains("60s"), "{envelope}");
     assert!(!said.contains("envelope"), "{said}");
@@ -1043,7 +1071,7 @@ async fn a_failure_the_service_states_is_not_called_unusable() {
     .await;
 
     assert_eq!(output.status.code(), Some(4), "{output:?}");
-    assert_eq!(envelope["error"]["kind"], "upstream");
+    assert_eq!(envelope["error"]["kind"], "corpus");
     assert_eq!(envelope["error"]["code"], "rendition_too_large");
     assert!(
         said.contains("the service could not answer: BWBR0008691 rendition 2016-07-01_0 is longer than bron reads"),

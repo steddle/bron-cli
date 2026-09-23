@@ -100,22 +100,15 @@ impl Envelope<()> {
             as_of: None,
             as_known_on: None,
             data: None,
-            // A failure the service stated reads as it stated it; one bron
-            // states itself carries its own sentence and cause chain.
+            // A failure the service stated is its error object as it arrived;
+            // one bron states itself carries its own sentence and cause chain.
             error: Some(match fault.statement() {
-                Some(statement) => ErrorBody {
+                Some(statement) => ErrorBody::Stated(statement.sent.clone()),
+                None => ErrorBody::Own {
                     kind: fault.kind(),
-                    code: statement.code.clone(),
-                    message: statement.message.clone(),
-                    detail: statement.detail.clone(),
-                    retry_after: statement.retry_after,
-                },
-                None => ErrorBody {
-                    kind: fault.kind(),
-                    code: None,
                     message: fault.to_string(),
                     detail: fault.chain(),
-                    retry_after: None,
+                    retry_after: fault.retry_after(),
                 },
             }),
             caveats: Vec::new(),
@@ -123,24 +116,28 @@ impl Envelope<()> {
     }
 }
 
+/// A failure, in the `error` of the envelope.
 #[derive(Debug, Serialize)]
-pub struct ErrorBody {
-    /// Stable tag matching the exit code. Branch on this, not on the message.
-    pub kind: &'static str,
-    /// Which failure this is, in the service's word and as the service sent
-    /// it. Present only where the service stated the failure.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-    /// The service's message as sent where it stated the failure, else bron's
-    /// own sentence.
-    pub message: String,
-    /// The service's detail as sent where it stated the failure, else the
-    /// cause chain, outermost first.
-    pub detail: Vec<String>,
-    /// The seconds the service's `Retry-After` asked for, which the service
-    /// states in a header and not in its body. Present only where it asked.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_after: Option<u64>,
+#[serde(untagged)]
+pub enum ErrorBody {
+    /// A failure the service stated: its error object as it arrived, so its
+    /// kind, code, message and detail, and any field it adds later, read as
+    /// the API and the MCP give them.
+    Stated(Box<serde_json::value::RawValue>),
+    /// A failure bron states itself, which carries no code: presence says who
+    /// stated it.
+    Own {
+        /// Stable tag matching the exit code. Branch on this, not on the
+        /// message.
+        kind: &'static str,
+        message: String,
+        /// The cause chain, outermost first.
+        detail: Vec<String>,
+        /// The seconds a `Retry-After` header named where no envelope carried
+        /// the failure. Present only where one was named.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        retry_after: Option<u64>,
+    },
 }
 
 /// A stated limit on what an answer supports.
@@ -902,15 +899,19 @@ mod tests {
     /// service stated, so a failure bron states itself carries none.
     #[test]
     fn a_failure_carries_a_code_only_where_the_service_stated_one() {
+        let sent = r#"{"kind":"not_found","code":"regulation_not_found","message":"no regulation BWBR0000001","detail":[]}"#;
         let stated = Fault::not_found("law", "BWBR0000001").stated(crate::error::Statement {
+            kind: "not_found".into(),
             code: Some("regulation_not_found".into()),
             message: "no regulation BWBR0000001".into(),
             detail: Vec::new(),
-            retry_after: None,
+            sent: serde_json::value::RawValue::from_string(sent.into()).unwrap(),
         });
-        let json = serde_json::to_value(Envelope::failed(&stated)).unwrap();
-        assert_eq!(json["error"]["kind"], "not_found");
-        assert_eq!(json["error"]["code"], "regulation_not_found");
+        let json = serde_json::to_string(&Envelope::failed(&stated)).unwrap();
+        assert_eq!(
+            json,
+            format!(r#"{{"bron":1,"grade":"authority","error":{sent}}}"#)
+        );
 
         for ours in [
             Fault::usage("name a window"),
