@@ -610,7 +610,10 @@ pub struct Units<'a> {
     pub raw: bool,
     /// Narrow to what this rendition publishes and does not yet apply.
     pub not_commenced: bool,
-    pub limit: u32,
+    /// As the service reads `limit`: digits, or the literal `none` for the
+    /// whole set, since the rendition bounds this route. Sent as typed; the
+    /// service is the one that pages it or refuses the word.
+    pub limit: String,
     pub offset: u32,
 }
 

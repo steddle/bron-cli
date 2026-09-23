@@ -346,7 +346,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                         lang: lang.as_deref(),
                         raw: *raw,
                         not_commenced: *not_commenced,
-                        limit: *limit,
+                        limit: limit.to_query(),
                         offset: *offset,
                     },
                 )

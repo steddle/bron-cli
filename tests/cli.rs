@@ -1402,6 +1402,24 @@ async fn law_parts_prints_the_envelope_the_service_sent() {
     assert_eq!(stdout(&output), format!("{PARTS}\n"));
 }
 
+/// The rendition bounds `/parts`, so `none` is a limit the service takes: bron
+/// sends it as typed rather than refusing it as a word no integer parses as.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_sends_limit_none_as_typed() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/parts"))
+        .and(query_param("limit", "none"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(PARTS, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["law", "parts", "BWBR0001941", "--limit", "none"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+}
+
 /// A unit that prints no number is asked for by its place among its kind.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_parts_asks_for_a_unit_by_its_place() {

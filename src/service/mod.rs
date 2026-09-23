@@ -296,7 +296,7 @@ impl Service {
         let mut query = vec![
             ("as_of", ask.as_of.to_string()),
             ("rendered", "1".to_string()),
-            ("limit", ask.limit.to_string()),
+            ("limit", ask.limit.clone()),
             ("offset", ask.offset.to_string()),
         ];
 
