@@ -1647,6 +1647,10 @@ fn caveat_line(caveat: &Caveat) -> String {
             }
             format!("note: left out of the published acts: {}", named.join(", "))
         }
+        Caveat::FoundingActsUnread { regulations } => format!(
+            "note: {regulations} regulation(s) have not had their founding act read, so an act \
+             that founded one of them may be listed as published although the BWB prints it",
+        ),
         Caveat::DecreesUnmatched { decrees } => format!(
             "note: besluit(en) published in the last 15 days name no act by reference or by \
              chain, so bron cannot say what they commence: {}.",
@@ -1997,6 +2001,25 @@ mod tests {
 
         assert!(note.contains("45 budget acts"), "{note}");
         assert!(note.contains("3 a_kind_this_bron_predates"), "{note}");
+    }
+
+    /// A regulation whose WTI is unread is why a published row can list an
+    /// act the BWB does print, under a founding regulation bron has not read
+    /// yet: the note says so rather than the row silently overclaiming.
+    #[test]
+    fn founding_acts_unread_names_how_many_regulations() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "founding_acts_unread", "regulations": 2,
+        })));
+
+        assert!(
+            note.contains("2 regulation(s) have not had their founding act read"),
+            "{note}"
+        );
+        assert!(
+            note.contains("listed as published although the BWB prints it"),
+            "{note}"
+        );
     }
 
     /// Named besluiten, not a bare count: which ones bron could not link is

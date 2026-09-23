@@ -3347,8 +3347,13 @@ async fn an_answer_mixes_both_stages_and_json_carries_them_as_sent() {
     assert!(lines[1].contains("stb-2026-56"), "{lines:?}");
     assert!(lines[1].contains("not consolidated"), "{lines:?}");
     assert!(lines[2].starts_with("no day yet  BWBR0009616"), "{lines:?}");
-    // acts_left_out, alongside the two stages the rows themselves carry.
+    // acts_left_out and founding_acts_unread, alongside the two stages the
+    // rows themselves carry.
     assert!(err.contains("2 budget acts, 1 treaty approval"), "{err}");
+    assert!(
+        err.contains("2 regulation(s) have not had their founding act read"),
+        "{err}"
+    );
 
     let json = bron(&server, &["--json", "law", "upcoming"]).await;
     assert!(json.status.success(), "{json:?}");

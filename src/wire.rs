@@ -416,6 +416,11 @@ pub enum Caveat {
     /// by its own key rather than dropped.
     ActsLeftOut { counts: BTreeMap<String, u32> },
 
+    /// Regulations whose WTI bron has not read, so no `established_by` names
+    /// the act that founded each. While any is left, such an act can stand as
+    /// `published` though the BWB prints it.
+    FoundingActsUnread { regulations: u32 },
+
     /// Inwerkingtredingsbesluiten published in the last 15 days that name no
     /// act by `extref` or `ketenid`, so bron cannot say what they commence and
     /// raises no [`Caveat::CommencementPending`] for them.
@@ -589,6 +594,9 @@ impl Caveat {
             ActsLeftOut {
                 counts: BTreeMap<String, u32>,
             },
+            FoundingActsUnread {
+                regulations: u32,
+            },
             DecreesUnmatched {
                 decrees: Vec<UnmatchedDecree>,
             },
@@ -702,6 +710,9 @@ impl Caveat {
             }
             Ok(Stated::ArticlesNotCompared { repeated }) => Self::ArticlesNotCompared { repeated },
             Ok(Stated::ActsLeftOut { counts }) => Self::ActsLeftOut { counts },
+            Ok(Stated::FoundingActsUnread { regulations }) => {
+                Self::FoundingActsUnread { regulations }
+            }
             Ok(Stated::DecreesUnmatched { decrees }) => Self::DecreesUnmatched { decrees },
             Ok(Stated::CommencementPending { decrees }) => Self::CommencementPending { decrees },
             Ok(Stated::PublicationNotHeld) => Self::PublicationNotHeld,
