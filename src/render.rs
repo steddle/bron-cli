@@ -687,7 +687,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 )?;
             }
 
-            caveats(&without_withdrawn(&a.caveats, &a.data.parts), out)
+            caveats(&a.caveats, out)
         }
 
         Answer::Articles {
@@ -754,7 +754,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     out,
                 )?;
             }
-            caveats(&without_withdrawn(&a.caveats, articles), out)
+            caveats(&a.caveats, out)
         }
 
         Answer::Changes {
@@ -1426,37 +1426,6 @@ fn not_commenced(article: &Article) -> bool {
 /// What a person reads for a unit whose remark says it will not take effect,
 /// in place of when it applies.
 const WITHDRAWN: &str = "the register states this change will not take effect";
-
-/// The caveats of an answer about units, less the units the answer itself
-/// says will not take effect.
-///
-/// The service's `not_commenced` names every unit printed `nogniet` by number,
-/// a withdrawn one among them, and 'do not apply yet' is the promise its
-/// remark cancels. A number stays where any unit it names is not withdrawn.
-fn without_withdrawn(caveats: &[Caveat], units: &[Article]) -> Vec<Caveat> {
-    let withdrawn = |number: &str| {
-        let mut named = units
-            .iter()
-            .filter(|unit| unit.number.as_deref() == Some(number))
-            .peekable();
-        named.peek().is_some() && named.all(|unit| unit.withdrawn.is_some())
-    };
-
-    caveats
-        .iter()
-        .filter_map(|caveat| match caveat {
-            Caveat::NotCommenced { articles } => {
-                let articles: Vec<String> = articles
-                    .iter()
-                    .filter(|number| !withdrawn(number))
-                    .cloned()
-                    .collect();
-                (!articles.is_empty()).then_some(Caveat::NotCommenced { articles })
-            }
-            other => Some(other.clone()),
-        })
-        .collect()
-}
 
 /// Each remark the register prints on a unit, verbatim, at its byte range in
 /// the document `source:` names.

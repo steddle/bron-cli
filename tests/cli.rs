@@ -3593,12 +3593,13 @@ async fn decrees_unmatched_with_no_recent_besluit_states_the_count() {
 
 /// Answered by production on 2026-09-24 for artikel 6:2:15 Sv: printed
 /// `nogniet`, with the register's remark that the change will not take
-/// effect.
+/// effect, left out of `not_commenced` and counted in
+/// `units_withdrawn_by_remark`.
 const WITHDRAWN_ARTICLE: &str = "bron-articles-BWBR0001903-6-2-15.json";
 
 /// A unit whose remark says the change will not take effect reads as that,
-/// with the register's words at their range, and never as a provision that
-/// does not apply yet: not in its own lead line and not in the note.
+/// with the register's words at their range, and its lead line never says it
+/// does not apply yet. The note on it is the service's.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_withdrawn_unit_reads_as_the_register_states_it() {
     let sent = fixture(WITHDRAWN_ARTICLE);
@@ -3625,11 +3626,35 @@ async fn a_withdrawn_unit_reads_as_the_register_states_it() {
     );
     assert!(text.contains("published by stb-2017-82 (nieuw)"), "{text}");
     assert!(!text.contains("not yet applied"), "{text}");
-    assert!(!text.contains("do not apply yet"), "{text}");
+    assert!(
+        text.contains("1 unit(s) the rendition prints as not yet in force are left out"),
+        "{text}"
+    );
     assert!(!text.contains("no sentence for"), "{text}");
 
     let json = bron(&server, &["--json", "law", "show", "BWBR0001903"]).await;
     assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
+/// A caveat the service stated is printed as it stated it: bron names no
+/// unit out of `not_commenced`, whatever the units beside it say.
+#[tokio::test(flavor = "multi_thread")]
+async fn not_commenced_is_printed_as_the_service_stated_it() {
+    let mut sent: serde_json::Value = serde_json::from_str(&fixture(WITHDRAWN_ARTICLE)).unwrap();
+    sent["caveats"] = serde_json::json!([{"kind": "not_commenced", "articles": ["6:2:15"]}]);
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0001903/articles",
+        &sent.to_string(),
+    )
+    .await;
+
+    let text = stdout(&bron(&server, &["law", "show", "BWBR0001903"]).await);
+
+    assert!(
+        text.contains("article(s) 6:2:15 have not commenced"),
+        "{text}"
+    );
 }
 
 /// Each side of a comparison carries its own remarks, at their range in its
