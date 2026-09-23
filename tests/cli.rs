@@ -198,6 +198,52 @@ async fn law_show_sends_both_coordinates_too() {
     assert_eq!(output.status.code(), Some(2), "{output:?}");
 }
 
+/// `--lang` is the service's to judge: bron sends it as typed on every route
+/// that declares it, rather than refusing it locally as an unknown flag.
+#[tokio::test(flavor = "multi_thread")]
+async fn lang_reaches_every_route_that_declares_it() {
+    for (route, args) in [
+        (
+            "/api/v1/regulations/BWBR0001489/articles",
+            vec!["law", "show", "BWBR0001489", "--lang", "en"],
+        ),
+        (
+            "/api/v1/regulations/BWBR0001489/parts",
+            vec!["law", "parts", "BWBR0001489", "--lang", "en"],
+        ),
+        (
+            "/api/v1/regulations/BWBR0001489/changes",
+            vec![
+                "law",
+                "changes",
+                "BWBR0001489",
+                "--from",
+                "2020-01-01",
+                "--lang",
+                "en",
+            ],
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("lang", "en"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","message":"seen","detail":[]}}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let output = bron(&server, &args).await;
+
+        // The mock answers only where lang=en arrived; a not-found means the
+        // service was asked, not that it refused the language.
+        assert_eq!(output.status.code(), Some(2), "{route}: {output:?}");
+    }
+}
+
 /// A limit on what an answer supports reaches the reader whether or not this
 /// build has a sentence for it: its name and what it carried.
 #[tokio::test(flavor = "multi_thread")]

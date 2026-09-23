@@ -190,6 +190,12 @@ pub enum Law {
         #[arg(long, requires = "paragraph")]
         item: Option<String>,
 
+        /// A treaty's text in this language, as the register writes it, e.g.
+        /// en or nl. A number named without it answers the authentic text,
+        /// and the service says whether the language is one it prints.
+        #[arg(long)]
+        lang: Option<String>,
+
         /// Also carry the publisher's own bytes at every span.
         ///
         /// Without it an answer carries the offsets and the service's reading,
@@ -236,6 +242,11 @@ pub enum Law {
         /// text and the reference become the lid's.
         #[arg(long)]
         paragraph: Option<String>,
+
+        /// A treaty's text in this language, as the register writes it. See
+        /// `law show --lang`.
+        #[arg(long)]
+        lang: Option<String>,
 
         /// Only the units this rendition publishes and does not yet apply, of
         /// every kind: a waiting bijlage beside the waiting articles. Each
@@ -482,6 +493,11 @@ pub enum Law {
         /// article's, or with --kind a bijlage's.
         #[arg(long)]
         article: Option<String>,
+
+        /// A treaty's text in this language, as the register writes it. See
+        /// `law show --lang`.
+        #[arg(long)]
+        lang: Option<String>,
 
         /// The day the register is read on (zicht), which selects what it
         /// showed then. Both days of the comparison are resolved against it.

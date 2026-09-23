@@ -584,6 +584,9 @@ pub struct Ask<'a> {
     /// One lid number as printed. The service narrows the span, the text, the
     /// label and the Juriconnect reference to that lid.
     pub paragraph: Option<&'a str>,
+    /// A treaty's text in this language, as the register writes it, e.g. `en`
+    /// or `nl`. A number named without it answers the authentic text.
+    pub lang: Option<&'a str>,
     /// Ask for the publisher's own bytes at every span. Off by default, so no
     /// markup travels for an answer nobody will read it in.
     pub raw: bool,
@@ -602,6 +605,8 @@ pub struct Units<'a> {
     pub kind: Option<&'a str>,
     pub number: Option<&'a str>,
     pub position: Option<u32>,
+    /// A treaty's text in this language, as the register writes it. See [`Ask::lang`].
+    pub lang: Option<&'a str>,
     pub raw: bool,
     /// Narrow to what this rendition publishes and does not yet apply.
     pub not_commenced: bool,
@@ -647,6 +652,8 @@ pub struct Compare<'a> {
     pub as_known_on: Option<NaiveDate>,
     pub kind: Option<&'a str>,
     pub article: Option<&'a str>,
+    /// A treaty's text in this language, as the register writes it. See [`Ask::lang`].
+    pub lang: Option<&'a str>,
     pub all: bool,
     pub raw: bool,
 }

@@ -274,6 +274,9 @@ impl Service {
         if let Some(paragraph) = ask.paragraph {
             query.push(("paragraph", paragraph.to_string()));
         }
+        if let Some(lang) = ask.lang {
+            query.push(("lang", lang.to_string()));
+        }
         if ask.raw {
             query.push(("raw", "1".to_string()));
         }
@@ -311,6 +314,9 @@ impl Service {
         }
         if let Some(position) = ask.position {
             query.push(("position", position.to_string()));
+        }
+        if let Some(lang) = ask.lang {
+            query.push(("lang", lang.to_string()));
         }
         if ask.raw {
             query.push(("raw", "1".to_string()));
@@ -413,6 +419,9 @@ impl Service {
         }
         if let Some(article) = ask.article {
             query.push(("article", article.to_string()));
+        }
+        if let Some(lang) = ask.lang {
+            query.push(("lang", lang.to_string()));
         }
         if ask.all {
             query.push(("all", "1".to_string()));
