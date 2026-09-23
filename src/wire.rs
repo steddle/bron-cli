@@ -373,6 +373,16 @@ pub enum Caveat {
     /// their articles and no other units.
     ReadForArticles { renditions: Vec<String> },
 
+    /// `count` treaties print units as not yet in force and were left out of
+    /// a list of what waits to apply. What a treaty prints so is no
+    /// announcement: some treaties never enter into force.
+    TreatiesLeftOut { count: u32 },
+
+    /// The list holds what the BWB prints. An act the Staatsblad published
+    /// and the BWB does not print yet is not in it, and neither are EU
+    /// regulations, and nothing in the list can say which are missing.
+    NotInBwb,
+
     /// The rendition `expression` prints words that no unit holds: beside the
     /// units of a chapter or a bijlage that holds some, or under an element
     /// without the publisher's identity. `units` counts them per element.
@@ -499,6 +509,10 @@ impl Caveat {
             ReadForArticles {
                 renditions: Vec<String>,
             },
+            TreatiesLeftOut {
+                count: u32,
+            },
+            NotInBwb,
             TextOutsideArticles {
                 expression: String,
                 units: BTreeMap<String, u32>,
@@ -604,6 +618,8 @@ impl Caveat {
                 Self::RenditionsUnread { count, renditions }
             }
             Ok(Stated::ReadForArticles { renditions }) => Self::ReadForArticles { renditions },
+            Ok(Stated::TreatiesLeftOut { count }) => Self::TreatiesLeftOut { count },
+            Ok(Stated::NotInBwb) => Self::NotInBwb,
             Ok(Stated::TextOutsideArticles { expression, units }) => {
                 Self::TextOutsideArticles { expression, units }
             }

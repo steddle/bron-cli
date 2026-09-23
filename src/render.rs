@@ -1365,6 +1365,14 @@ fn caveat_line(caveat: &Caveat) -> String {
              articles and no other units.",
             renditions.join(", "),
         ),
+        Caveat::TreatiesLeftOut { count } => format!(
+            "note: {count} treaty(ies) print units as not yet in force and are not in this list. \
+             What a treaty prints so is no announcement: some treaties never enter into force."
+        ),
+        Caveat::NotInBwb => "note: this list holds what the BWB prints. An act the Staatsblad \
+                             published and the BWB does not print yet is not in it, and neither \
+                             are EU regulations."
+            .to_string(),
         // Every element, the aanhef too: the count is the service's, and naming
         // only some of it would be bron deciding which text matters.
         Caveat::TextOutsideArticles { expression, units } => format!(
@@ -1578,6 +1586,30 @@ mod tests {
             note.contains("covers their articles and no other units"),
             "{note}"
         );
+    }
+
+    /// A treaty's waiting text is left out of a list of what waits, and the
+    /// note counts them without calling what a treaty prints a date to come.
+    #[test]
+    fn treaties_left_out_are_counted_and_not_announced() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "treaties_left_out", "count": 268,
+        })));
+
+        assert!(note.contains("268 treaty(ies)"), "{note}");
+        assert!(note.contains("not in this list"), "{note}");
+        assert!(note.contains("no announcement"), "{note}");
+    }
+
+    /// What the list cannot hold is said in words, because nothing in the
+    /// rows can say it.
+    #[test]
+    fn not_in_bwb_says_what_the_list_cannot_hold() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({"kind": "not_in_bwb"})));
+
+        assert!(note.contains("what the BWB prints"), "{note}");
+        assert!(note.contains("Staatsblad"), "{note}");
+        assert!(note.contains("EU regulations"), "{note}");
     }
 
     /// The text answered is the authentic one, and the note says a translation
