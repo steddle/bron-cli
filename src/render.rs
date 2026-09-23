@@ -634,8 +634,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
             // Notes on the rows, so on stderr: the register's own remarks,
             // at their range in the entry's first rendition.
-            for row in &rows {
-                let (_, entry) = row;
+            for row @ (_, entry) in &rows {
                 if entry.withdrawn.is_some() {
                     writeln!(
                         err,
@@ -1671,11 +1670,28 @@ fn caveat_line(caveat: &Caveat) -> String {
              may have stopped at a bound before finding more, so texts that would rank may be \
              missing."
         ),
-        Caveat::CountsNotTaken { caveats } => format!(
-            "note: this search did not count {}, so none being reported says nothing about \
-             whether the corpus holds any.",
-            caveats.join(" or "),
-        ),
+        Caveat::CountsNotTaken { caveats } => {
+            // A phrase for the kinds the service names today; a kind it adds
+            // later is named by its own key rather than dropped.
+            const KNOWN: [(&str, &str); 2] = [
+                ("unrankable_texts", "texts no ranking reaches"),
+                ("texts_unindexed", "texts too long to index in full text"),
+            ];
+            let named: Vec<&str> = caveats
+                .iter()
+                .map(|key| {
+                    KNOWN
+                        .iter()
+                        .find(|(known, _)| known == key)
+                        .map_or(key.as_str(), |(_, phrase)| phrase)
+                })
+                .collect();
+            format!(
+                "note: this search did not count the {}, so none being reported says nothing \
+                 about whether the corpus holds any.",
+                named.join(" or "),
+            )
+        }
         Caveat::TextsUnindexed { scope, count } => format!(
             "note: {count} text(s) in the {scope} are too long to index for full text, so no \
              word in them finds them. They are answered by identifier.",
@@ -2241,8 +2257,18 @@ mod tests {
             "kind": "counts_not_taken", "caveats": ["unrankable_texts", "texts_unindexed"],
         })));
         assert!(
-            untaken.contains("did not count unrankable_texts or texts_unindexed"),
+            untaken.contains(
+                "did not count the texts no ranking reaches or texts too long to index in full text"
+            ),
             "{untaken}"
+        );
+
+        let later = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "counts_not_taken", "caveats": ["something_later"],
+        })));
+        assert!(
+            later.contains("did not count the something_later"),
+            "{later}"
         );
     }
 
