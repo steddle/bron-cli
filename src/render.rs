@@ -386,9 +386,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     // no future rendition, and neither does the Staatsblad.
                     Upcoming::Published(row) => {
                         let mut line = format!(
-                            "{NO_DAY}  {}  published in the Staatsblad on {}, not consolidated \
-                             in the BWB",
-                            row.publication, row.published_on
+                            "{NO_DAY}  {}  {}, published in the Staatsblad on {}, not \
+                             consolidated in the BWB",
+                            row.publication, row.kind, row.published_on
                         );
                         if let Some(title) = &row.title {
                             let _ = write!(line, "  {title}");
@@ -403,13 +403,13 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     }
                     // A stage this build has no name for does not sink the
                     // rows beside it. --json still carries it as the service
-                    // sent it.
+                    // sent it. No day column: this build does not know the
+                    // row's shape well enough to say it has none.
                     Upcoming::Unknown(value) => {
                         let stage = value.get("stage").and_then(|s| s.as_str()).unwrap_or("?");
                         writeln!(
                             out,
-                            "{NO_DAY}  stage {stage} is not one this build knows; upgrade bron \
-                             to read it, or read it with --json"
+                            "stage {stage}, which this build has no sentence for: {value}"
                         )?;
                     }
                 }
@@ -1618,6 +1618,35 @@ fn caveat_line(caveat: &Caveat) -> String {
                 .collect::<Vec<_>>()
                 .join(", "),
         ),
+        Caveat::ActsLeftOut { counts } => {
+            // Fixed order and phrase for the kinds the service names today;
+            // a kind it adds later is named by its own key rather than
+            // dropped.
+            const KNOWN: [(&str, &str, &str); 3] = [
+                ("budget", "budget act", "budget acts"),
+                ("treaty_approval", "treaty approval", "treaty approvals"),
+                (
+                    "constitution_first_reading",
+                    "first reading of a constitutional amendment",
+                    "first readings of a constitutional amendment",
+                ),
+            ];
+            let mut named: Vec<String> = KNOWN
+                .iter()
+                .filter_map(|(key, one, many)| {
+                    counts.get(*key).map(|count| {
+                        let word = if *count == 1 { one } else { many };
+                        format!("{count} {word}")
+                    })
+                })
+                .collect();
+            for (key, count) in counts {
+                if !KNOWN.iter().any(|(known, _, _)| known == key) {
+                    named.push(format!("{count} {key}"));
+                }
+            }
+            format!("note: left out of the published acts: {}", named.join(", "))
+        }
         Caveat::DecreesUnmatched { decrees } => format!(
             "note: besluit(en) published in the last 15 days name no act by reference or by \
              chain, so bron cannot say what they commence: {}.",
@@ -1939,6 +1968,35 @@ mod tests {
         });
 
         assert!(note.contains("2 of the 41"), "{note}");
+    }
+
+    /// The kinds print in a fixed order and each with its own phrase, plural
+    /// where its count reads more than one, whatever order the map holds
+    /// them in and whichever kinds it leaves out.
+    #[test]
+    fn acts_left_out_names_each_kind_in_order_with_its_own_phrase() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "acts_left_out",
+            "counts": {"treaty_approval": 1, "budget": 2},
+        })));
+
+        assert_eq!(
+            note,
+            "note: left out of the published acts: 2 budget acts, 1 treaty approval"
+        );
+    }
+
+    /// A kind this build has no phrase for is named by its own key rather
+    /// than dropped.
+    #[test]
+    fn acts_left_out_names_a_kind_it_has_no_phrase_for_by_its_own_key() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "acts_left_out",
+            "counts": {"budget": 45, "a_kind_this_bron_predates": 3},
+        })));
+
+        assert!(note.contains("45 budget acts"), "{note}");
+        assert!(note.contains("3 a_kind_this_bron_predates"), "{note}");
     }
 
     /// Named besluiten, not a bare count: which ones bron could not link is

@@ -409,6 +409,13 @@ pub enum Caveat {
         units: BTreeMap<String, u32>,
     },
 
+    /// Acts the Staatsblad published and the BWB prints nowhere that are
+    /// nothing to come, left out of the `published` stage and counted here by
+    /// kind: `budget`, `treaty_approval`, `constitution_first_reading`. A kind
+    /// with none is absent, and a kind this build has no phrase for is named
+    /// by its own key rather than dropped.
+    ActsLeftOut { counts: BTreeMap<String, u32> },
+
     /// Inwerkingtredingsbesluiten published in the last 15 days that name no
     /// act by `extref` or `ketenid`, so bron cannot say what they commence and
     /// raises no [`Caveat::CommencementPending`] for them.
@@ -579,6 +586,9 @@ impl Caveat {
             ArticlesNotCompared {
                 repeated: Vec<String>,
             },
+            ActsLeftOut {
+                counts: BTreeMap<String, u32>,
+            },
             DecreesUnmatched {
                 decrees: Vec<UnmatchedDecree>,
             },
@@ -691,6 +701,7 @@ impl Caveat {
                 Self::TextOutsideArticles { expression, units }
             }
             Ok(Stated::ArticlesNotCompared { repeated }) => Self::ArticlesNotCompared { repeated },
+            Ok(Stated::ActsLeftOut { counts }) => Self::ActsLeftOut { counts },
             Ok(Stated::DecreesUnmatched { decrees }) => Self::DecreesUnmatched { decrees },
             Ok(Stated::CommencementPending { decrees }) => Self::CommencementPending { decrees },
             Ok(Stated::PublicationNotHeld) => Self::PublicationNotHeld,

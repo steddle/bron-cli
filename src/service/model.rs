@@ -122,11 +122,14 @@ pub struct Feed {
 
 /// One row of what is adopted and does not yet apply, across the register.
 ///
-/// `stage` says how far it has come. Read by hand rather than derived,
-/// because an internally tagged enum fails the whole list on one row it
-/// cannot name, and a stage this build has never heard of must not sink the
-/// rows beside it: it reads as [`Upcoming::Unknown`], the row whole, so the
-/// answer still stands and `--json` still carries it.
+/// `stage` says how far it has come. Read by hand rather than derived, because
+/// an internally tagged enum fails the whole list on the first row whose tag
+/// it does not have a variant for, and a stage this build has never heard of
+/// must not sink the rows beside it: it reads as [`Upcoming::Unknown`], the
+/// row whole, so the answer still stands and `--json` still carries it. A
+/// stage this build does know that fails to match its own shape is a
+/// different fault: the service broke a contract this build understands, and
+/// is not read as one it merely predates.
 #[derive(Debug)]
 pub enum Upcoming {
     /// The BWB prints units of the regulation as waiting.
@@ -142,19 +145,18 @@ impl<'de> serde::Deserialize<'de> for Upcoming {
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(tag = "stage", rename_all = "snake_case")]
-        enum Stage {
-            Consolidated(Consolidated),
-            Published(PublishedAct),
-        }
-
         let value = serde_json::Value::deserialize(deserializer)?;
-        Ok(match serde_json::from_value(value.clone()) {
-            Ok(Stage::Consolidated(row)) => Self::Consolidated(row),
-            Ok(Stage::Published(row)) => Self::Published(row),
-            Err(_) => Self::Unknown(value),
-        })
+        let stage = value
+            .get("stage")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+
+        match stage.as_deref() {
+            Some("consolidated") => Consolidated::deserialize(value).map(Self::Consolidated),
+            Some("published") => PublishedAct::deserialize(value).map(Self::Published),
+            _ => Ok(Self::Unknown(value)),
+        }
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -207,7 +209,7 @@ pub struct PublishedAct {
 
 /// A held besluit that names one of a row's acts by `extref` or by the
 /// `ketenid` it shares with it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct LinkedDecree {
     /// The besluit, as `stb-2026-8`.
     pub id: String,

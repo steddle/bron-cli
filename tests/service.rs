@@ -663,16 +663,17 @@ fn waiting() -> Waiting<'static> {
 
 /// The list production answered on 2026-09-23, read as the service shaped
 /// it: a row that names no decree still reads, and every limit it stated
-/// arrives under its own name rather than as unrecognised.
+/// arrives under its own name rather than as unrecognised. Edited by hand to
+/// add `stage` and `linked_decrees`, which production did not carry yet.
 #[tokio::test(flavor = "multi_thread")]
 async fn what_waits_to_apply_is_read_as_the_service_sent_it() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/upcoming"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_raw(fixture("bron-upcoming-limit-5.json"), "application/json"),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            fixture("bron-upcoming-limit-5-edited-for-stage.json"),
+            "application/json",
+        ))
         .mount(&server)
         .await;
     let home = Home::new();
@@ -718,5 +719,44 @@ async fn what_waits_to_apply_is_read_as_the_service_sent_it() {
             Caveat::TreatiesLeftOut { count: 268 },
             Caveat::NotInBwb,
         ]
+    );
+}
+
+/// A row whose `stage` this build knows is held to that stage's own shape,
+/// not read as one it merely predates: a consolidated row missing
+/// `linked_decrees`, which the service always sends, is the service breaking
+/// a contract this build understands, and must not read as an unknown stage
+/// nor drop the whole answer's exit into something other than upstream.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_known_stage_that_does_not_match_its_own_shape_is_upstream() {
+    let body = r#"{"bron":1,"grade":"authority","as_of":"2026-09-23","as_known_on":"2026-09-23",
+ "data":[{"stage":"consolidated","regulation_id":"BWBR0009616","regulation_title":"Regeling BWBR0009616","label":"2026-01-01_0","units":1,"dated":0,"acts":[],"decrees":[]}],
+ "caveats":[]}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/upcoming"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+        .mount(&server)
+        .await;
+    let home = Home::new();
+    let base = server.uri();
+
+    let fault = off_thread(&home, move |client| {
+        Service::at(&base)
+            .upcoming(&client, &waiting())
+            .err()
+            .map(|e| (e.kind(), e.chain().join(" | ")))
+    })
+    .await
+    .expect("a broken consolidated row must not read as success");
+
+    assert_eq!(fault.0, "upstream");
+    assert!(fault.1.contains("linked_decrees"), "{}", fault.1);
+    // Not the message a stage this build has never heard of gets: the tag
+    // matched a variant, and that variant's own fields did not.
+    assert!(
+        !fault.1.contains("Upgrade to read what it says"),
+        "{}",
+        fault.1
     );
 }

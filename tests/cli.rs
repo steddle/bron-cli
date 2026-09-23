@@ -3178,10 +3178,15 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-const UPCOMING: &str = "bron-upcoming-limit-5.json";
-const UPCOMING_2027_Q1: &str = "bron-upcoming-from-2027-01-01-to-2027-03-31-limit-5.json";
-/// `bron-upcoming-limit-5.json` with one edit: BWBR0035474 states a day for 1
-/// of its 13 waiting units rather than all 13.
+/// The list production answered on 2026-09-23, edited by hand to add `stage`
+/// and `linked_decrees` to every row: production predates the Staatsblad lane,
+/// and no capture of it carries either.
+const UPCOMING: &str = "bron-upcoming-limit-5-edited-for-stage.json";
+/// The same edit, on the window production answered for 2027 Q1.
+const UPCOMING_2027_Q1: &str =
+    "bron-upcoming-from-2027-01-01-to-2027-03-31-limit-5-edited-for-stage.json";
+/// [`UPCOMING`] with a second edit: BWBR0035474 states a day for 1 of its 13
+/// waiting units rather than all 13.
 const UPCOMING_PARTLY_DATED: &str = "bron-upcoming-limit-5-edited-dated-below-units.json";
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3317,9 +3322,9 @@ async fn a_published_row_says_it_is_not_consolidated_and_names_its_dossiers() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         text,
-        "no day yet  stb-2026-56  published in the Staatsblad on 2026-03-13, not consolidated \
-         in the BWB  Wet tot vaststelling van het nieuwe Wetboek van Strafvordering  dossiers \
-         34608  linked decrees -\n"
+        "no day yet  stb-2026-56  wet, published in the Staatsblad on 2026-03-13, not \
+         consolidated in the BWB  Wet tot vaststelling van het nieuwe Wetboek van \
+         Strafvordering  dossiers 34608  linked decrees -\n"
     );
 }
 
@@ -3334,6 +3339,7 @@ async fn an_answer_mixes_both_stages_and_json_carries_them_as_sent() {
     let output = bron(&server, &["law", "upcoming"]).await;
     let text = stdout(&output);
     let lines: Vec<&str> = text.lines().collect();
+    let err = String::from_utf8_lossy(&output.stderr);
 
     assert!(output.status.success(), "{output:?}");
     assert_eq!(lines.len(), 3, "{lines:?}");
@@ -3341,6 +3347,8 @@ async fn an_answer_mixes_both_stages_and_json_carries_them_as_sent() {
     assert!(lines[1].contains("stb-2026-56"), "{lines:?}");
     assert!(lines[1].contains("not consolidated"), "{lines:?}");
     assert!(lines[2].starts_with("no day yet  BWBR0009616"), "{lines:?}");
+    // acts_left_out, alongside the two stages the rows themselves carry.
+    assert!(err.contains("2 budget acts, 1 treaty approval"), "{err}");
 
     let json = bron(&server, &["--json", "law", "upcoming"]).await;
     assert!(json.status.success(), "{json:?}");
@@ -3362,8 +3370,13 @@ async fn a_stage_this_build_does_not_know_does_not_sink_the_answer() {
     assert!(output.status.success(), "{output:?}");
     assert!(text.contains("BWBR0009616"), "{text}");
     assert!(text.contains("stage deferred"), "{text}");
-    assert!(text.contains("not one this build knows"), "{text}");
-    assert!(text.contains("--json"), "{text}");
+    assert!(text.contains("has no sentence for"), "{text}");
+    assert!(
+        text.contains("a stage this build has never heard of"),
+        "{text}"
+    );
+    assert!(!text.to_lowercase().contains("upgrade"), "{text}");
+    assert!(!text.contains("no day yet  stage"), "{text}");
 
     let json = bron(&server, &["--json", "law", "upcoming"]).await;
     assert!(json.status.success(), "{json:?}");
