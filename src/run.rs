@@ -9,7 +9,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
 use bron::error::{Fault, Outcome, from_source};
-use bron::ids::{BwbId, Ecli, PublicationId};
+use bron::ids::{Ecli, PublicationId};
 use bron::model::{AppealStatus, Direction, Relation};
 use bron::service::{self, Answered, Service};
 use bron::sources::{Client, FetchedCase, publications, rechtspraak};
@@ -222,25 +222,14 @@ fn run_find(
     quiet: bool,
     service: &Service,
 ) -> Outcome<Answer> {
-    if query.trim().is_empty() {
-        return Err(Fault::usage("say what to search for"));
-    }
-
     let (as_of, as_known_on) = moment.coordinates(today);
-
-    // Checked here, because a question put to something that is no identifier
-    // is a question the service answers about nothing.
-    let inside = regulation
-        .iter()
-        .map(|law| parse_id::<BwbId>(law).map(|law| law.into_string()))
-        .collect::<Outcome<Vec<_>>>()?;
 
     service
         .search(
             &client(quiet)?,
             &service::SearchRequest {
                 q: query.to_string(),
-                regulation: (!inside.is_empty()).then(|| inside.join(",")),
+                regulation: (!regulation.is_empty()).then(|| regulation.join(",")),
                 limit,
                 as_of,
                 as_known_on,
@@ -276,7 +265,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             .map(Answer::LawHits),
 
         Law::Amendments { id, limit, offset } => service
-            .amendments(&client, &parse_id(id)?, *limit, *offset)
+            .amendments(&client, id, *limit, *offset)
             .map(|answered| Answer::Amendments(Box::new(answered))),
 
         Law::Relations {
@@ -292,7 +281,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             service
                 .relations(
                     &client,
-                    &parse_id(id)?,
+                    id,
                     &service::Relating {
                         as_of,
                         as_known_on,
@@ -309,7 +298,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
         }
 
         Law::About { id } => service
-            .regulation(&client, &parse_id(id)?)
+            .regulation(&client, id)
             .map(|answered| Answer::About(Box::new(answered))),
 
         Law::History {
@@ -318,18 +307,10 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             kind,
             as_known_on,
         } => service
-            .history(
-                &client,
-                &parse_id(id)?,
-                article,
-                kind.as_deref(),
-                *as_known_on,
-            )
+            .history(&client, id, article, kind.as_deref(), *as_known_on)
             .map(|answered| Answer::History(Box::new(answered))),
 
-        Law::Versions { id } => service
-            .expressions(&client, &parse_id(id)?)
-            .map(Answer::Versions),
+        Law::Versions { id } => service.expressions(&client, id).map(Answer::Versions),
 
         Law::Parts {
             id,
@@ -348,7 +329,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             service
                 .parts(
                     &client,
-                    &parse_id(id)?,
+                    id,
                     &service::Units {
                         as_of,
                         as_known_on,
@@ -377,48 +358,29 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             regulation,
             limit,
             offset,
-        } => {
-            // Checked here rather than by clap, which can require a flag but
-            // cannot say that one of four is enough.
-            if from.is_none() && to.is_none() && known_from.is_none() && known_to.is_none() {
-                return Err(Fault::usage(
-                    "name a window: --from, --to, --known-from or --known-to".to_string(),
-                ));
-            }
-
-            ordered(*from, *to, "--from", "--to")?;
-            ordered(*known_from, *known_to, "--known-from", "--known-to")?;
-
-            let law = regulation.as_deref().map(parse_id).transpose()?;
-
-            service
-                .published(
-                    &client,
-                    &service::Published {
-                        from: *from,
-                        to: *to,
-                        known_from: *known_from,
-                        known_to: *known_to,
-                        kind: kind.as_deref(),
-                        regulation: law.as_ref(),
-                        limit: *limit,
-                        offset: *offset,
-                    },
-                )
-                .map(Answer::Published)
-        }
+        } => service
+            .published(
+                &client,
+                &service::Published {
+                    from: *from,
+                    to: *to,
+                    known_from: *known_from,
+                    known_to: *known_to,
+                    kind: kind.as_deref(),
+                    regulation: regulation.as_deref(),
+                    limit: *limit,
+                    offset: *offset,
+                },
+            )
+            .map(Answer::Published),
 
         Law::Feed {
             since,
             regulation,
             limit,
-        } => {
-            let law = regulation.as_deref().map(parse_id).transpose()?;
-
-            service
-                .feed(&client, *since, *limit, law.as_ref())
-                .map(Answer::Feed)
-        }
+        } => service
+            .feed(&client, *since, *limit, regulation.as_deref())
+            .map(Answer::Feed),
 
         Law::Upcoming {
             from,
@@ -428,7 +390,6 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             offset,
             moment,
         } => {
-            ordered(*from, *to, "--from", "--to")?;
             let (as_of, as_known_on) = moment.coordinates(today);
 
             service
@@ -456,34 +417,26 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             article,
             as_known_on,
             raw,
-        } => {
-            let law: BwbId = parse_id(id)?;
-            let to = to.unwrap_or(today);
-            if *from > to {
-                return Err(Fault::usage(format!("--from {from} is after --to {to}")));
-            }
-
-            service
-                .changes(
-                    &client,
-                    &law,
-                    &service::Compare {
-                        from: *from,
-                        to,
-                        as_known_on: *as_known_on,
-                        kind: kind.as_deref(),
-                        article: article.as_deref(),
-                        all: *all,
-                        raw: *raw,
-                    },
-                )
-                .map(|answered| Answer::Changes {
-                    from_url: served(service, &answered.data.from),
-                    to_url: served(service, &answered.data.to),
-                    answered: Box::new(answered),
-                    narrowed: kind.is_some() || article.is_some(),
-                })
-        }
+        } => service
+            .changes(
+                &client,
+                id,
+                &service::Compare {
+                    from: *from,
+                    to: to.unwrap_or(today),
+                    as_known_on: *as_known_on,
+                    kind: kind.as_deref(),
+                    article: article.as_deref(),
+                    all: *all,
+                    raw: *raw,
+                },
+            )
+            .map(|answered| Answer::Changes {
+                from_url: served(service, &answered.data.from),
+                to_url: served(service, &answered.data.to),
+                answered: Box::new(answered),
+                narrowed: kind.is_some() || article.is_some(),
+            }),
 
         Law::Show {
             id,
@@ -494,12 +447,11 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             raw,
             not_commenced,
         } => {
-            let law: BwbId = parse_id(id)?;
             let (as_of, as_known_on) = moment.coordinates(today);
 
             let answered = service.articles(
                 &client,
-                &law,
+                id,
                 &service::Ask {
                     as_of,
                     as_known_on,
@@ -516,6 +468,7 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
             // rendition is named, so it can still be fetched from the
             // publisher, and why it answered nothing is said where the service
             // said it.
+            let law = &answered.data.regulation_id;
             let expression = &answered.data.expression;
             if answered.data.articles.is_empty() {
                 let rendition = format!("{law} rendition {}", expression.label);
@@ -728,21 +681,6 @@ fn served(service: &Service, expression: &service::Expression) -> Option<String>
         .blob
         .as_deref()
         .and_then(|digest| service.blob_url(digest))
-}
-
-/// A window that runs backwards is a request nobody meant to make.
-fn ordered(
-    from: Option<NaiveDate>,
-    to: Option<NaiveDate>,
-    from_flag: &str,
-    to_flag: &str,
-) -> Outcome<()> {
-    match (from, to) {
-        (Some(from), Some(to)) if from > to => Err(Fault::usage(format!(
-            "{from_flag} {from} is after {to_flag} {to}"
-        ))),
-        _ => Ok(()),
-    }
 }
 
 fn parse_id<T: std::str::FromStr>(text: &str) -> Outcome<T>

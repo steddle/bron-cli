@@ -9,7 +9,9 @@
 
 use std::process::Output;
 
-use wiremock::matchers::{body_json, method, path, query_param};
+use wiremock::matchers::{
+    body_json, body_partial_json, method, path, query_param, query_param_is_missing,
+};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Runs `bron` against a mock service, off the runtime serving that mock.
@@ -299,28 +301,6 @@ async fn law_published_sends_both_windows_and_the_narrowing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn law_published_refuses_a_window_that_names_nothing_or_runs_backwards() {
-    let server = answering("GET", "/api/v1/expressions", PUBLISHED).await;
-
-    let none = bron(&server, &["law", "published", "--type", "wet"]).await;
-    assert_eq!(none.status.code(), Some(1), "{none:?}");
-
-    let backwards = bron(
-        &server,
-        &[
-            "law",
-            "published",
-            "--from",
-            "2026-09-01",
-            "--to",
-            "2026-01-01",
-        ],
-    )
-    .await;
-    assert_eq!(backwards.status.code(), Some(1), "{backwards:?}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn law_feed_prints_the_envelope_the_service_sent() {
     let server = answering("GET", "/api/v1/feed", FEED).await;
 
@@ -431,18 +411,19 @@ async fn a_failure_the_service_stated_carries_its_code_to_the_consumer() {
     assert!(!said.contains("regulation_not_found"), "{said}");
 }
 
-/// A refusal bron makes itself never reached the service, so no code is its to
-/// carry: presence says who stated the failure.
+/// A command line bron cannot parse never reaches the service, so no code is
+/// its to carry: presence says who stated the failure.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_bron_states_itself_carries_no_code() {
     let server = MockServer::start().await;
 
-    let output = bron(&server, &["--json", "law", "published"]).await;
+    let output = bron(&server, &["--json", "law", "published", "--limit", "many"]).await;
     let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
 
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert_eq!(envelope["error"]["kind"], "usage");
     assert!(envelope["error"].get("code").is_none(), "{envelope}");
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 /// One rendition's articles, shaped as the service shapes them. A label opens
@@ -750,8 +731,8 @@ async fn a_command_line_clap_refuses_is_the_envelope_under_json() {
     for args in [
         &["--json", "law", "show"][..],
         &["--json", "law", "show", "BWBR0005289", "--paragraph", "2"][..],
-        &["--json", "law", "changes", "BWBR0005289"][..],
-        &["law", "feed", "--json"][..],
+        &["--json", "law", "history", "BWBR0005289"][..],
+        &["law", "history", "--json", "BWBR0005289"][..],
     ] {
         let output = bron(&server, args).await;
         let envelope: serde_json::Value = serde_json::from_str(&stdout(&output))
@@ -777,12 +758,12 @@ async fn a_command_line_clap_refuses_is_the_envelope_under_json() {
 async fn a_command_line_clap_refuses_is_claps_message_without_json() {
     let server = MockServer::start().await;
 
-    let output = bron(&server, &["law", "feed"]).await;
+    let output = bron(&server, &["law", "history", "BWBR0005289"]).await;
     let said = String::from_utf8_lossy(&output.stderr);
 
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert!(output.stdout.is_empty(), "{output:?}");
-    assert!(said.contains("--since <SINCE>"), "{said}");
+    assert!(said.contains("--article <ARTICLE>"), "{said}");
     assert!(said.contains("Usage:"), "{said}");
 }
 
@@ -1370,32 +1351,6 @@ async fn law_parts_for_a_unit_the_rendition_does_not_print_is_not_found() {
     assert_eq!(envelope["error"]["code"], "part_not_found");
 }
 
-/// A number or a place is a number or a place among units of one kind, and
-/// the two name one unit two ways.
-#[tokio::test(flavor = "multi_thread")]
-async fn law_parts_refuses_a_number_or_a_place_without_a_kind() {
-    let server = MockServer::start().await;
-
-    for args in [
-        &["law", "parts", "BWBR0001941", "--number", "Ia"][..],
-        &["law", "parts", "BWBR0001941", "--position", "1"][..],
-        &[
-            "law",
-            "parts",
-            "BWBR0001941",
-            "--kind",
-            "bijlage",
-            "--number",
-            "Ia",
-            "--position",
-            "1",
-        ][..],
-    ] {
-        let output = bron(&server, args).await;
-        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
-    }
-}
-
 /// `law show` answers articles, and says so where a reader looks for it.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_show_says_it_answers_articles_only() {
@@ -1744,33 +1699,6 @@ async fn law_changes_says_the_counts_above_a_narrowed_list_are_the_whole_regulat
             text.lines()
                 .any(|l| l == format!("in the whole regulation: {counts}")),
             "{narrowing:?}: {text}"
-        );
-    }
-}
-
-/// The service takes neither a place nor a page of 0, and a command line that
-/// asks for one is refused before it reaches the service.
-#[tokio::test(flavor = "multi_thread")]
-async fn law_parts_refuses_a_place_or_a_limit_of_zero() {
-    let server = MockServer::start().await;
-
-    for args in [
-        &[
-            "law",
-            "parts",
-            "BWBR0001941",
-            "--kind",
-            "aanhef",
-            "--position",
-            "0",
-        ][..],
-        &["law", "parts", "BWBR0001941", "--limit", "0"][..],
-    ] {
-        let output = bron(&server, args).await;
-        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
-        assert!(
-            server.received_requests().await.unwrap().is_empty(),
-            "{args:?}"
         );
     }
 }
@@ -2584,16 +2512,14 @@ async fn bron_blob_for_a_digest_that_names_nothing_is_not_found() {
     assert_eq!(envelope["error"]["code"], "blob_not_found");
 }
 
-/// What is not a digest, and a span outside the document, are the caller's to
-/// fix, and the first never reaches the service.
+/// A span that is no byte range, or one outside the document bron hashed, is
+/// the caller's to fix: only bron holds those bytes, so only bron can say.
 #[tokio::test(flavor = "multi_thread")]
-async fn bron_blob_refuses_what_is_no_digest_and_a_span_outside_the_bytes() {
+async fn bron_blob_refuses_a_span_that_is_none_or_outside_the_bytes() {
     let digest = digest_of(DOCUMENT);
     let server = serving_blob(&digest, DOCUMENT).await;
 
     for args in [
-        &["blob", "../../etc/passwd"][..],
-        &["blob", &digest.to_uppercase()][..],
         &["blob", &digest, "--span", "30..19"][..],
         &["blob", &digest, "--span", "0..999"][..],
         &["blob", &digest, "--span", "nine"][..],
@@ -2602,18 +2528,6 @@ async fn bron_blob_refuses_what_is_no_digest_and_a_span_outside_the_bytes() {
         assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
         assert!(output.stdout.is_empty(), "{args:?}: {output:?}");
     }
-
-    let asked: Vec<String> = server
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .map(|request| request.url.path().to_string())
-        .collect();
-    assert!(
-        asked.iter().all(|path| path.ends_with(&digest)),
-        "{asked:?}"
-    );
 }
 
 /// `--json` answers what was checked, in bron's own envelope: the digest, the
@@ -3116,18 +3030,6 @@ async fn every_name_the_routes_declare_can_be_sent() {
     }
 }
 
-/// A BWB identifier that is not one is the caller's to fix, and never reaches
-/// the service as a question about nothing.
-#[tokio::test(flavor = "multi_thread")]
-async fn find_refuses_a_regulation_that_is_no_identifier() {
-    let server = MockServer::start().await;
-
-    let output = bron(&server, &["find", "daad", "--regulation", "Awb"]).await;
-
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(server.received_requests().await.unwrap().is_empty());
-}
-
 /// A response the service really sent, frozen under `tests/fixtures/`.
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -3362,32 +3264,6 @@ async fn law_upcoming_sends_every_name_its_route_declares_and_no_other() {
     );
 }
 
-/// A window that runs backwards is refused before it is asked, as the
-/// service would refuse it: a usage failure, exit 1.
-#[tokio::test(flavor = "multi_thread")]
-async fn law_upcoming_refuses_a_window_that_runs_backwards() {
-    let server = MockServer::start().await;
-
-    let output = bron(
-        &server,
-        &[
-            "--json",
-            "law",
-            "upcoming",
-            "--from",
-            "2027-03-31",
-            "--to",
-            "2027-01-01",
-        ],
-    )
-    .await;
-    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
-
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert_eq!(envelope["error"]["kind"], "usage");
-    assert!(server.received_requests().await.unwrap().is_empty());
-}
-
 /// A failure the service states keeps its kind: a question it refuses exits
 /// 1 with its code, and one it understood and could not answer exits 4.
 #[tokio::test(flavor = "multi_thread")]
@@ -3419,4 +3295,480 @@ async fn law_upcoming_failures_keep_the_kind_the_service_gave_them() {
         assert_eq!(output.status.code(), Some(exit), "{output:?}");
         assert_eq!(envelope["error"]["code"], code, "{envelope}");
     }
+}
+
+/// What a request has to carry for the mock to answer it: a name with a
+/// value, a name left out, or a field of a JSON body.
+enum Carries {
+    Param(&'static str, &'static str),
+    Missing(&'static str),
+    Body(serde_json::Value),
+}
+
+/// Runs `args` against a service that refuses the request as production does,
+/// on a mock that answers only where the request carries what `carries`
+/// names. The refusal is the service's: its kind, code and message reach
+/// `--json`, its message reaches a person, and the exit is the one `usage`
+/// maps to.
+async fn refused_by_the_service(
+    args: &[&str],
+    verb: &str,
+    route: &str,
+    carries: Vec<Carries>,
+    code: &str,
+    message: &str,
+) {
+    let server = MockServer::start().await;
+    let mut mock = Mock::given(method(verb)).and(path(route));
+    for carried in carries {
+        mock = match carried {
+            Carries::Param(name, value) => mock.and(query_param(name, value)),
+            Carries::Missing(name) => mock.and(query_param_is_missing(name)),
+            Carries::Body(fields) => mock.and(body_partial_json(fields)),
+        };
+    }
+    let body = serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "error": {"kind": "usage", "code": code, "message": message, "detail": []},
+    });
+    mock.respond_with(
+        ResponseTemplate::new(400).set_body_raw(body.to_string(), "application/json"),
+    )
+    .expect(2)
+    .mount(&server)
+    .await;
+
+    let json: Vec<&str> = ["--json"].iter().chain(args).copied().collect();
+    let output = bron(&server, &json).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+    assert_eq!(envelope["error"]["kind"], "usage", "{envelope}");
+    assert_eq!(envelope["error"]["code"], code, "{envelope}");
+    assert_eq!(envelope["error"]["message"], message, "{envelope}");
+
+    let human = bron(&server, args).await;
+    let said = String::from_utf8_lossy(&human.stderr);
+    assert_eq!(human.status.code(), Some(1), "{args:?}: {human:?}");
+    assert!(said.contains(message), "{said}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_without_a_window_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "published", "--type", "wet"],
+        "GET",
+        "/api/v1/expressions",
+        vec![
+            Carries::Param("type", "wet"),
+            Carries::Missing("in_force_from"),
+            Carries::Missing("in_force_to"),
+            Carries::Missing("visible_from"),
+            Carries::Missing("visible_to"),
+        ],
+        "missing_parameter",
+        "name a window: in_force_from, in_force_to, visible_from or visible_to, as YYYY-MM-DD",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_with_an_in_force_window_that_runs_backwards_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "published",
+            "--from",
+            "2026-09-01",
+            "--to",
+            "2026-01-01",
+        ],
+        "GET",
+        "/api/v1/expressions",
+        vec![
+            Carries::Param("in_force_from", "2026-09-01"),
+            Carries::Param("in_force_to", "2026-01-01"),
+        ],
+        "reversed_window",
+        "in_force_from 2026-09-01 is after in_force_to 2026-01-01",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_with_a_zicht_window_that_runs_backwards_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "published",
+            "--known-from",
+            "2026-09-01",
+            "--known-to",
+            "2026-01-01",
+        ],
+        "GET",
+        "/api/v1/expressions",
+        vec![
+            Carries::Param("visible_from", "2026-09-01"),
+            Carries::Param("visible_to", "2026-01-01"),
+        ],
+        "reversed_window",
+        "visible_from 2026-09-01 is after visible_to 2026-01-01",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_published_for_a_regulation_that_is_no_identifier_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "published",
+            "--from",
+            "2026-09-01",
+            "--regulation",
+            "Awb",
+        ],
+        "GET",
+        "/api/v1/expressions",
+        vec![Carries::Param("regulation", "Awb")],
+        "invalid_regulation_id",
+        "[Awb] is not a BWB identifier, e.g. BWBR0005289",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_feed_without_a_cursor_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "feed"],
+        "GET",
+        "/api/v1/feed",
+        vec![Carries::Missing("since")],
+        "missing_parameter",
+        "since is required: the cursor to walk from, and 0 for the whole log. GET /api/v1 states the head.",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_feed_for_a_regulation_that_is_no_identifier_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "feed", "--since", "0", "--regulation", "Awb"],
+        "GET",
+        "/api/v1/feed",
+        vec![
+            Carries::Param("since", "0"),
+            Carries::Param("regulation", "Awb"),
+        ],
+        "invalid_regulation_id",
+        "[Awb] is not a BWB identifier, e.g. BWBR0005289",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_with_a_window_that_runs_backwards_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "upcoming",
+            "--from",
+            "2027-02-01",
+            "--to",
+            "2027-01-01",
+        ],
+        "GET",
+        "/api/v1/upcoming",
+        vec![
+            Carries::Param("from", "2027-02-01"),
+            Carries::Param("to", "2027-01-01"),
+        ],
+        "reversed_window",
+        "from 2027-02-01 is after to 2027-01-01",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_upcoming_with_a_limit_of_zero_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "upcoming", "--limit", "0"],
+        "GET",
+        "/api/v1/upcoming",
+        vec![Carries::Param("limit", "0")],
+        "invalid_parameter",
+        "limit must be between 1 and 500",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_with_days_that_run_backwards_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "changes",
+            "BWBR0005289",
+            "--from",
+            "2020-01-01",
+            "--to",
+            "2019-01-01",
+        ],
+        "GET",
+        "/api/v1/regulations/BWBR0005289/changes",
+        vec![
+            Carries::Param("from", "2020-01-01"),
+            Carries::Param("to", "2019-01-01"),
+        ],
+        "reversed_window",
+        "from 2020-01-01 is after to 2019-01-01",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_without_an_earlier_day_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "changes", "BWBR0005289", "--to", "2020-01-01"],
+        "GET",
+        "/api/v1/regulations/BWBR0005289/changes",
+        vec![Carries::Param("to", "2020-01-01"), Carries::Missing("from")],
+        "missing_parameter",
+        "from must be a date as YYYY-MM-DD",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_with_a_number_and_no_kind_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "parts", "BWBR0001941", "--number", "Ia"],
+        "GET",
+        "/api/v1/regulations/BWBR0001941/parts",
+        vec![Carries::Param("number", "Ia"), Carries::Missing("kind")],
+        "invalid_parameter",
+        "number and position name a unit of one kind, so either needs kind, e.g. kind=bijlage&number=2",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_with_a_place_and_no_kind_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "parts", "BWBR0001941", "--position", "1"],
+        "GET",
+        "/api/v1/regulations/BWBR0001941/parts",
+        vec![Carries::Param("position", "1"), Carries::Missing("kind")],
+        "invalid_parameter",
+        "number and position name a unit of one kind, so either needs kind, e.g. kind=bijlage&number=2",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_with_a_number_and_a_place_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "bijlage",
+            "--number",
+            "Ia",
+            "--position",
+            "1",
+        ],
+        "GET",
+        "/api/v1/regulations/BWBR0001941/parts",
+        vec![
+            Carries::Param("number", "Ia"),
+            Carries::Param("position", "1"),
+        ],
+        "invalid_parameter",
+        "number and position are two ways to name one unit: send one",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_with_a_place_of_zero_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "law",
+            "parts",
+            "BWBR0001941",
+            "--kind",
+            "aanhef",
+            "--position",
+            "0",
+        ],
+        "GET",
+        "/api/v1/regulations/BWBR0001941/parts",
+        vec![Carries::Param("position", "0")],
+        "invalid_parameter",
+        "position must be a whole number from 1: the place of a unit among the units of its kind",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_with_a_limit_of_zero_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "parts", "BWBR0001941", "--limit", "0"],
+        "GET",
+        "/api/v1/regulations/BWBR0001941/parts",
+        vec![Carries::Param("limit", "0")],
+        "invalid_parameter",
+        "limit must be between 1 and 1000000, or none for the whole set",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_amendments_with_a_limit_of_zero_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "amendments", "BWBR0046553", "--limit", "0"],
+        "GET",
+        "/api/v1/regulations/BWBR0046553/amendments",
+        vec![Carries::Param("limit", "0")],
+        "invalid_parameter",
+        "limit must be between 1 and 500",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn law_relations_with_a_limit_of_zero_is_the_services_refusal() {
+    refused_by_the_service(
+        &["law", "relations", "BWBR0005289", "--limit", "0"],
+        "GET",
+        "/api/v1/regulations/BWBR0005289/relations",
+        vec![Carries::Param("limit", "0")],
+        "invalid_parameter",
+        "limit must be between 1 and 500",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn find_with_no_question_is_the_services_refusal() {
+    refused_by_the_service(
+        &["find"],
+        "POST",
+        "/api/v1/search",
+        vec![Carries::Body(serde_json::json!({"q": ""}))],
+        "missing_parameter",
+        "q must be the text to search for",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn find_in_a_regulation_that_is_no_identifier_is_the_services_refusal() {
+    refused_by_the_service(
+        &["find", "daad", "--regulation", "Awb"],
+        "POST",
+        "/api/v1/search",
+        vec![Carries::Body(
+            serde_json::json!({"q": "daad", "regulation": "Awb"}),
+        )],
+        "invalid_regulation_id",
+        "[Awb] is not a BWB identifier, e.g. BWBR0005289",
+    )
+    .await;
+}
+
+/// Every command that names a regulation in the path sends it as typed, and
+/// the service says whether it is one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_regulation_that_is_no_identifier_is_the_services_refusal_on_every_route() {
+    for (args, route) in [
+        (&["law", "about", "Awb"][..], "/api/v1/regulations/Awb"),
+        (
+            &["law", "versions", "Awb"][..],
+            "/api/v1/regulations/Awb/expressions",
+        ),
+        (
+            &["law", "show", "Awb"][..],
+            "/api/v1/regulations/Awb/articles",
+        ),
+        (
+            &["law", "parts", "Awb"][..],
+            "/api/v1/regulations/Awb/parts",
+        ),
+        (
+            &["law", "history", "Awb", "--article", "1"][..],
+            "/api/v1/regulations/Awb/articles/1/history",
+        ),
+        (
+            &["law", "changes", "Awb", "--from", "2020-01-01"][..],
+            "/api/v1/regulations/Awb/changes",
+        ),
+        (
+            &["law", "amendments", "Awb"][..],
+            "/api/v1/regulations/Awb/amendments",
+        ),
+        (
+            &["law", "relations", "Awb"][..],
+            "/api/v1/regulations/Awb/relations",
+        ),
+    ] {
+        refused_by_the_service(
+            args,
+            "GET",
+            route,
+            Vec::new(),
+            "invalid_regulation_id",
+            "[Awb] is not a BWB identifier, e.g. BWBR0005289",
+        )
+        .await;
+    }
+}
+
+/// The service reads a BWB identifier in any case, so the CLI sends one as
+/// typed and gets the answer the API gives. Text that holds a `/` stays one
+/// path segment and cannot reach another route.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_regulation_goes_out_as_typed_and_as_one_segment() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/bwbr0005537",
+        r#"{"bron":1,"grade":"authority","data":{"id":"BWBR0005537","title":"Algemene wet bestuursrecht","type":"wet","coverage":"history"}}"#,
+    )
+    .await;
+
+    let output = bron(&server, &["law", "about", "bwbr0005537"]).await;
+    assert!(output.status.success(), "{output:?}");
+
+    let _ = bron(&server, &["law", "about", "../feed"]).await;
+    let asked: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|request| request.url.path().to_string())
+        .collect();
+    assert_eq!(
+        asked,
+        [
+            "/api/v1/regulations/bwbr0005537",
+            "/api/v1/regulations/..%2Ffeed"
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bron_blob_for_what_is_no_digest_is_the_services_refusal() {
+    refused_by_the_service(
+        &["blob", "abc"],
+        "GET",
+        "/api/v1/blobs/abc",
+        Vec::new(),
+        "invalid_digest",
+        "[abc] is not a SHA-256 digest as 64 lowercase hex characters",
+    )
+    .await;
 }

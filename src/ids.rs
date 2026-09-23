@@ -4,9 +4,11 @@
 //! ECLI, a document number. Never a URL, which is an address that can change
 //! without the thing it addresses changing.
 //!
-//! Each type validates on the way in. That makes the difference between a lookup
-//! and a search visible at the call site: `BwbId::from_str("burgerlijk wetboek")`
-//! fails, so anything accepting free text is doing resolution, not retrieval.
+//! An ECLI and a publication id are asked of the publisher directly, so each type
+//! validates on the way in. That makes the difference between a lookup and a
+//! search visible at the call site: `Ecli::from_str("hoge raad")` fails, so
+//! anything accepting free text is doing resolution, not retrieval. A BWB id
+//! goes to the service as typed, and the service says whether it is one.
 
 use std::fmt;
 use std::str::FromStr;
@@ -66,32 +68,6 @@ macro_rules! string_id {
             }
         }
     };
-}
-
-/// A Basis Wetten Bestand identifier, e.g. `BWBR0005289`.
-///
-/// `BWBR` for regelingen, `BWBV` for verdragen.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BwbId(String);
-
-string_id!(BwbId, "BWB id");
-
-impl FromStr for BwbId {
-    type Err = InvalidId;
-
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let text = text.trim();
-        let valid = text.len() == 11
-            && text.is_char_boundary(4)
-            && matches!(&text[..4], "BWBR" | "BWBV")
-            && text[4..].bytes().all(|b| b.is_ascii_digit());
-
-        if valid {
-            Ok(Self(text.to_string()))
-        } else {
-            Err(InvalidId::new(Self::KIND, text))
-        }
-    }
 }
 
 /// A European Case Law Identifier, e.g. `ECLI:NL:HR:2019:1278`.
@@ -215,32 +191,6 @@ impl PublicationId {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn accepts_real_bwb_ids() {
-        assert_eq!(
-            "BWBR0005289".parse::<BwbId>().unwrap().as_str(),
-            "BWBR0005289"
-        );
-        assert!("BWBV0001234".parse::<BwbId>().is_ok());
-        assert!("  BWBR0005289  ".parse::<BwbId>().is_ok());
-    }
-
-    #[test]
-    fn rejects_free_text_as_a_bwb_id() {
-        // The point of the newtype: this is a search, and the type says so.
-        assert!("burgerlijk wetboek".parse::<BwbId>().is_err());
-        assert!("BWBR005289".parse::<BwbId>().is_err());
-        assert!("BWBX0005289".parse::<BwbId>().is_err());
-        assert!("BWBR000528X".parse::<BwbId>().is_err());
-        assert!("".parse::<BwbId>().is_err());
-    }
-
-    #[test]
-    fn bwb_rejection_is_not_a_panic_on_multibyte_input() {
-        assert!("Bä€".parse::<BwbId>().is_err());
-        assert!("日本語のテキストです".parse::<BwbId>().is_err());
-    }
 
     #[test]
     fn accepts_and_normalises_eclis() {

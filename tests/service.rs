@@ -14,7 +14,6 @@
 
 use std::path::PathBuf;
 
-use bron::ids::BwbId;
 use bron::service::{Ask, SearchData, SearchRequest, Service, Waiting};
 use bron::sources::Client;
 use bron::wire::Caveat;
@@ -47,8 +46,8 @@ where
         .unwrap()
 }
 
-fn law() -> BwbId {
-    "BWBR0008691".parse().unwrap()
+fn law() -> &'static str {
+    "BWBR0008691"
 }
 
 fn asking() -> Ask<'static> {
@@ -127,7 +126,7 @@ async fn a_withdrawn_rendition_is_named_all_the_way_to_the_caller() {
 
     let answered = off_thread(&home, move |client| {
         Service::at(&base)
-            .articles(&client, &law(), &asking())
+            .articles(&client, law(), &asking())
             .map_err(|e| e.to_string())
     })
     .await
@@ -177,7 +176,7 @@ async fn a_failure_keeps_the_kind_and_the_detail_the_service_gave_it() {
 
     let fault = off_thread(&home, move |client| {
         Service::at(&base)
-            .articles(&client, &law(), &asking())
+            .articles(&client, law(), &asking())
             .err()
             .map(|e| (e.kind(), e.to_string()))
     })
@@ -280,7 +279,7 @@ async fn a_refusal_from_the_service_says_how_long_it_asked_for() {
 
     let message = off_thread(&home, move |client| {
         Service::at(&base)
-            .articles(&client, &law(), &asking())
+            .articles(&client, law(), &asking())
             .err()
             .map(|e| e.chain().join(" | "))
     })

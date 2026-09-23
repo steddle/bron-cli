@@ -26,7 +26,6 @@ pub mod search;
 use chrono::NaiveDate;
 
 use crate::error::{Fault, Outcome};
-use crate::ids::BwbId;
 use crate::sources::Client;
 
 pub use client::Answered;
@@ -143,22 +142,22 @@ impl Service {
     }
 
     /// What the index knows about one regulation.
-    pub fn regulation(&self, client: &Client, law: &BwbId) -> Outcome<Answered<Regulation>> {
-        let url = format!("{}/api/v1/regulations/{law}", self.base);
+    pub fn regulation(&self, client: &Client, law: &str) -> Outcome<Answered<Regulation>> {
+        let url = self.route(&["regulations", law])?;
 
         self.read(client, client.get(&url))
     }
 
     /// Every rendition a regulation has ever had, held or not.
-    pub fn expressions(&self, client: &Client, law: &BwbId) -> Outcome<Answered<Vec<Expression>>> {
-        let url = format!("{}/api/v1/regulations/{law}/expressions", self.base);
+    pub fn expressions(&self, client: &Client, law: &str) -> Outcome<Answered<Vec<Expression>>> {
+        let url = self.route(&["regulations", law, "expressions"])?;
 
         self.read(client, client.get(&url).query(&[("limit", WHOLE)]))
     }
 
     /// Which renditions the register published inside a window, across laws.
     ///
-    /// A window is required and both axes may be named at once. The service
+    /// The service requires a window, and both axes may be named at once. It
     /// defaults nothing to today, so a window that has not happened answers
     /// empty rather than silently becoming a question about now.
     pub fn published(
@@ -199,14 +198,18 @@ impl Service {
     pub fn feed(
         &self,
         client: &Client,
-        since: u64,
+        since: Option<u64>,
         limit: u32,
-        regulation: Option<&BwbId>,
+        regulation: Option<&str>,
     ) -> Outcome<Answered<Feed>> {
         let url = format!("{}/api/v1/feed", self.base);
 
-        let mut query = vec![("since", since.to_string()), ("limit", limit.to_string())];
+        let mut query = vec![("limit", limit.to_string())];
 
+        // The service requires a cursor and says so where none is sent.
+        if let Some(since) = since {
+            query.push(("since", since.to_string()));
+        }
         if let Some(law) = regulation {
             query.push(("regulation", law.to_string()));
         }
@@ -249,10 +252,10 @@ impl Service {
     pub fn articles(
         &self,
         client: &Client,
-        law: &BwbId,
+        law: &str,
         ask: &Ask<'_>,
     ) -> Outcome<Answered<Articles>> {
-        let url = format!("{}/api/v1/regulations/{law}/articles", self.base);
+        let url = self.route(&["regulations", law, "articles"])?;
 
         let mut query = vec![
             ("as_of", ask.as_of.to_string()),
@@ -284,8 +287,8 @@ impl Service {
 
     /// The rendition a point in both windows resolves to, and the units of
     /// text asked of it.
-    pub fn parts(&self, client: &Client, law: &BwbId, ask: &Units<'_>) -> Outcome<Answered<Parts>> {
-        let url = format!("{}/api/v1/regulations/{law}/parts", self.base);
+    pub fn parts(&self, client: &Client, law: &str, ask: &Units<'_>) -> Outcome<Answered<Parts>> {
+        let url = self.route(&["regulations", law, "parts"])?;
 
         let mut query = vec![
             ("as_of", ask.as_of.to_string()),
@@ -323,11 +326,11 @@ impl Service {
     pub fn amendments(
         &self,
         client: &Client,
-        law: &BwbId,
+        law: &str,
         limit: u32,
         offset: u32,
     ) -> Outcome<Answered<Amendments>> {
-        let url = format!("{}/api/v1/regulations/{law}/amendments", self.base);
+        let url = self.route(&["regulations", law, "amendments"])?;
         let query = [("limit", limit.to_string()), ("offset", offset.to_string())];
 
         self.read(client, client.get(&url).query(&query))
@@ -337,10 +340,10 @@ impl Service {
     pub fn relations(
         &self,
         client: &Client,
-        law: &BwbId,
+        law: &str,
         ask: &Relating<'_>,
     ) -> Outcome<Answered<Relations>> {
-        let url = format!("{}/api/v1/regulations/{law}/relations", self.base);
+        let url = self.route(&["regulations", law, "relations"])?;
 
         let mut query = vec![
             ("as_of", ask.as_of.to_string()),
@@ -365,24 +368,14 @@ impl Service {
     pub fn history(
         &self,
         client: &Client,
-        law: &BwbId,
+        law: &str,
         number: &str,
         kind: Option<&str>,
         as_known_on: Option<NaiveDate>,
     ) -> Outcome<Answered<History>> {
-        // The number is the register's and stands in the path, so it is
-        // encoded as a path segment rather than pasted into one: `3:305a` is
-        // a number this register prints.
-        let mut url =
-            reqwest::Url::parse(&format!("{}/api/v1/regulations/{law}/articles", self.base))
-                .map_err(|e| Fault::Upstream {
-                    service: client::SERVICE,
-                    source: anyhow::anyhow!("{} is not an address: {e}", self.base),
-                })?;
-        if let Ok(mut path) = url.path_segments_mut() {
-            path.push(number).push("history");
-        }
-        let url = url.to_string();
+        // The number is the register's and stands in the path: `3:305a` is a
+        // number this register prints.
+        let url = self.route(&["regulations", law, "articles", number, "history"])?;
 
         let mut query = Vec::new();
         if let Some(kind) = kind {
@@ -401,17 +394,17 @@ impl Service {
     pub fn changes(
         &self,
         client: &Client,
-        law: &BwbId,
+        law: &str,
         ask: &Compare<'_>,
     ) -> Outcome<Answered<Changes>> {
-        let url = format!("{}/api/v1/regulations/{law}/changes", self.base);
+        let url = self.route(&["regulations", law, "changes"])?;
 
-        let mut query = vec![
-            ("from", ask.from.to_string()),
-            ("to", ask.to.to_string()),
-            ("rendered", "1".to_string()),
-        ];
+        let mut query = vec![("to", ask.to.to_string()), ("rendered", "1".to_string())];
 
+        // The service requires the earlier day and says so where none is sent.
+        if let Some(day) = ask.from {
+            query.push(("from", day.to_string()));
+        }
         if let Some(day) = ask.as_known_on {
             query.push(("as_known_on", day.to_string()));
         }
@@ -436,14 +429,11 @@ impl Service {
     /// Hashed here, from the bytes as they arrived, so what is handed on is
     /// what the digest names or nothing at all: bytes that hash to anything
     /// else are refused rather than quoted.
+    ///
+    /// Whether the text is a digest at all is the service's to say, as it
+    /// says for every route.
     pub fn blob(&self, client: &Client, digest: &str) -> Outcome<crate::sources::FetchedBytes> {
-        if !is_sha256_hex(digest) {
-            return Err(Fault::usage(format!(
-                "[{digest}] is not a SHA-256 digest as 64 lowercase hex characters"
-            )));
-        }
-
-        let url = format!("{}/api/v1/blobs/{digest}", self.base);
+        let url = self.route(&["blobs", digest])?;
         let fetched = self.read_raw(client, client.get(&url))?;
 
         if fetched.blob.to_string() != digest {
@@ -459,6 +449,23 @@ impl Service {
         }
 
         Ok(fetched)
+    }
+
+    /// The address of a route under `/api/v1`, each segment encoded as a path
+    /// segment. An identifier goes out as typed and the service says whether
+    /// it is one, so text that holds a `/` or a `?` cannot become another
+    /// route or a query.
+    fn route(&self, segments: &[&str]) -> Outcome<String> {
+        let mut url =
+            reqwest::Url::parse(&format!("{}/api/v1", self.base)).map_err(|e| Fault::Upstream {
+                service: client::SERVICE,
+                source: anyhow::anyhow!("{} is not an address: {e}", self.base),
+            })?;
+        if let Ok(mut path) = url.path_segments_mut() {
+            path.extend(segments);
+        }
+
+        Ok(url.to_string())
     }
 
     /// Where a blob is readable, for a digest that names one.

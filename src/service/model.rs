@@ -9,8 +9,6 @@
 use chrono::NaiveDate;
 use serde::Deserialize;
 
-use crate::ids::BwbId;
-
 /// A validity window, either of the two.
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Window {
@@ -481,7 +479,8 @@ pub struct Published<'a> {
     pub known_to: Option<NaiveDate>,
     /// The register's own word for a kind of regulation: wet, AMvB, zbo.
     pub kind: Option<&'a str>,
-    pub regulation: Option<&'a BwbId>,
+    /// A BWB identifier as typed. Whether it is one is the service's to say.
+    pub regulation: Option<&'a str>,
     pub limit: u32,
 }
 
@@ -559,7 +558,8 @@ pub struct Relating<'a> {
 /// Which two days to compare, and how to narrow the comparison.
 #[derive(Debug)]
 pub struct Compare<'a> {
-    pub from: NaiveDate,
+    /// Absent where the caller named none, which the service refuses.
+    pub from: Option<NaiveDate>,
     pub to: NaiveDate,
     /// The day the register is read on, which selects what it showed then.
     pub as_known_on: Option<NaiveDate>,

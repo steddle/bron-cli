@@ -224,12 +224,12 @@ pub enum Law {
         kind: Option<String>,
 
         /// The number the register prints for a unit of --kind, e.g. Ia.
-        #[arg(long, requires = "kind", conflicts_with = "position")]
+        #[arg(long)]
         number: Option<String>,
 
         /// The place of one unit among the units of --kind, from 1: how a unit
         /// that prints no number is asked for.
-        #[arg(long, requires = "kind", value_parser = clap::value_parser!(u32).range(1..))]
+        #[arg(long)]
         position: Option<u32>,
 
         /// One lid of that unit, as the register numbers it. The span, the
@@ -248,7 +248,7 @@ pub enum Law {
         #[arg(long)]
         raw: bool,
 
-        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..))]
+        #[arg(long, default_value_t = 20)]
         limit: u32,
 
         /// How many units to skip.
@@ -268,7 +268,7 @@ pub enum Law {
         /// BWB identifier, e.g. BWBR0046553.
         id: String,
 
-        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
+        #[arg(long, default_value_t = 50)]
         limit: u32,
 
         /// How many rows to skip.
@@ -294,7 +294,7 @@ pub enum Law {
         #[arg(long)]
         article: Option<String>,
 
-        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
+        #[arg(long, default_value_t = 50)]
         limit: u32,
 
         /// How many rows to skip.
@@ -392,9 +392,10 @@ pub enum Law {
     /// corpus that cursor belongs to. Keep both: an origin you do not recognise
     /// means the corpus was rebuilt and the number means something else now.
     Feed {
-        /// The cursor to walk from. 0 for the whole log.
+        /// The cursor to walk from. 0 for the whole log. The service refuses a
+        /// walk without one.
         #[arg(long)]
-        since: u64,
+        since: Option<u64>,
 
         /// Only this law, by its BWB identifier.
         #[arg(long)]
@@ -459,9 +460,10 @@ pub enum Law {
     Changes {
         id: String,
 
-        /// The earlier date, resolved against geldigheid.
+        /// The earlier date, resolved against geldigheid. The service refuses
+        /// a comparison without one.
         #[arg(long, value_name = "YYYY-MM-DD")]
-        from: NaiveDate,
+        from: Option<NaiveDate>,
 
         /// The later date. Defaults to today.
         #[arg(long, value_name = "YYYY-MM-DD")]
