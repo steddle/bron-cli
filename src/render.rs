@@ -572,7 +572,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             blob_url,
         } => {
             answered_by(
-                bound(a.as_of, a.as_known_on).as_deref(),
+                header(&a.data.parts, a.as_of, a.as_known_on).as_deref(),
                 &a.data.expression,
                 out,
             )?;
@@ -597,21 +597,11 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             item,
         } => {
             let articles = &a.data.articles;
-
-            // An answer holding only provisions not yet applied is bound to
-            // the rendition that publishes them, and 'as in force on' would
-            // say they apply.
-            let header = if !articles.is_empty() && articles.iter().all(not_commenced) {
-                Some(match a.as_of {
-                    Some(day) => {
-                        format!("published in the rendition current on {day}, and not yet applied")
-                    }
-                    None => "published and not yet applied".to_string(),
-                })
-            } else {
-                bound(a.as_of, a.as_known_on)
-            };
-            answered_by(header.as_deref(), &a.data.expression, out)?;
+            answered_by(
+                header(articles, a.as_of, a.as_known_on).as_deref(),
+                &a.data.expression,
+                out,
+            )?;
 
             for article in articles {
                 write_unit(
@@ -947,6 +937,27 @@ fn write_unit(
         }
     }
     writeln!(out)
+}
+
+/// The line an answer about units of text opens with.
+///
+/// An answer holding only provisions not yet applied is bound to the rendition
+/// that publishes them, and 'as in force on' would say they apply.
+fn header(
+    units: &[Article],
+    as_of: Option<NaiveDate>,
+    as_known_on: Option<NaiveDate>,
+) -> Option<String> {
+    if !units.is_empty() && units.iter().all(not_commenced) {
+        return Some(match as_of {
+            Some(day) => {
+                format!("published in the rendition current on {day}, and not yet applied")
+            }
+            None => "published and not yet applied".to_string(),
+        });
+    }
+
+    bound(as_of, as_known_on)
 }
 
 /// The line an answer about a rendition's text opens with, and under it which

@@ -237,6 +237,13 @@ pub enum Law {
         #[arg(long)]
         paragraph: Option<String>,
 
+        /// Only the units this rendition publishes and does not yet apply, of
+        /// every kind: a waiting bijlage beside the waiting articles. Each
+        /// names the day it applies where the register states one. See
+        /// `law show --not-commenced`.
+        #[arg(long)]
+        not_commenced: bool,
+
         /// Also carry the publisher's own bytes at every span. See `law show`.
         #[arg(long)]
         raw: bool,
@@ -409,8 +416,9 @@ pub enum Law {
     /// states, never an estimate.
     ///
     /// Treaties are left out and counted, and an act the BWB does not print
-    /// yet is not in the list. `law show ID --not-commenced` reads one
-    /// regulation's waiting articles.
+    /// yet is not in the list. `law parts ID --not-commenced` reads one
+    /// regulation's waiting units of every kind, and `law show ID
+    /// --not-commenced` its waiting articles.
     Upcoming {
         /// Only regulations with a waiting unit that states a day on or after
         /// this one. Without --from and --to, regulations whose units state

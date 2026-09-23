@@ -2138,6 +2138,89 @@ async fn law_parts_reads_a_unit_the_way_law_show_reads_an_article() {
     );
 }
 
+/// `--not-commenced` asks the service for the waiting units of every kind,
+/// and an answer holding only those is bound to the rendition that publishes
+/// them rather than said to be in force.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_asks_for_what_is_published_and_not_in_force() {
+    let waiting = PARTS
+        .replace(
+            r#"{"kind":"aanhef","position":1,"stam_id":"1","versie_id":"1","content_hash":"a61a","span":{"start":100,"end":400},
+    "paragraphs":[{"content_hash":"a61a","rendered":"Wij WILHELMINA, bij de gratie Gods.","span":{"start":100,"end":400}}]},
+   "#,
+            "",
+        )
+        .replace(
+            r#""kind":"bijlage","position":2,"#,
+            r#""kind":"bijlage","position":2,"status":"nogniet","in_force_from":"2027-01-01","amended_by":"stb-2026-300","effect":"wijziging","#,
+        );
+    assert!(!waiting.contains("aanhef"), "{waiting}");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/parts"))
+        .and(query_param("not_commenced", "1"))
+        .and(query_param("rendered", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(waiting, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["law", "parts", "BWBR0001941", "--not-commenced"]).await;
+    let text = stdout(&output);
+
+    // The mock answers only where the flag reached the service.
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.starts_with("published in the rendition current on 2026-09-19, and not yet applied\n"),
+        "{text}"
+    );
+    assert!(!text.contains("in force on"), "{text}");
+    assert!(!text.contains("in force through"), "{text}");
+    assert!(
+        text.contains("not yet applied, applies from 2027-01-01"),
+        "{text}"
+    );
+}
+
+/// Nothing waiting in a rendition is a not-found, and a rendition the parser
+/// has read for its articles alone cannot say what else waits: both keep the
+/// kind and the code the service stated.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_not_commenced_failures_keep_the_kind_the_service_gave_them() {
+    for (status, body, exit, code) in [
+        (
+            404,
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"nothing_not_commenced","message":"BWBR0001941 rendition 2026-09-17_0 publishes nothing that does not yet apply","detail":[]}}"#,
+            2,
+            "nothing_not_commenced",
+        ),
+        (
+            503,
+            r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"rendition_read_for_articles","message":"BWBR0001941 rendition 2026-09-17_0 was read for its articles alone","detail":[]}}"#,
+            4,
+            "rendition_read_for_articles",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/regulations/BWBR0001941/parts"))
+            .and(query_param("not_commenced", "1"))
+            .respond_with(ResponseTemplate::new(status).set_body_raw(body, "application/json"))
+            .mount(&server)
+            .await;
+
+        let output = bron(
+            &server,
+            &["--json", "law", "parts", "BWBR0001941", "--not-commenced"],
+        )
+        .await;
+        let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+        assert_eq!(output.status.code(), Some(exit), "{output:?}");
+        assert_eq!(envelope["error"]["code"], code, "{envelope}");
+    }
+}
+
 /// A unit of a treaty says which language it stands in and whether that text
 /// is the authentic one, because a treaty can print one number twice.
 #[tokio::test(flavor = "multi_thread")]

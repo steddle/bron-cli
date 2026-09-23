@@ -522,6 +522,8 @@ pub struct Units<'a> {
     pub number: Option<&'a str>,
     pub position: Option<u32>,
     pub raw: bool,
+    /// Narrow to what this rendition publishes and does not yet apply.
+    pub not_commenced: bool,
     pub limit: u32,
     pub offset: u32,
 }

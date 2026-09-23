@@ -149,7 +149,9 @@ note: this list holds what the BWB prints. An act the Staatsblad published and t
 Every day on it is one the register states. Without `--from` and `--to` the
 list also holds regulations whose waiting provisions state no day, after the
 dated ones, the newest act first. Treaties are left out and counted.
-`law show ID --not-commenced` reads one regulation's waiting articles.
+`law parts ID --not-commenced` reads one regulation's waiting units of every
+kind, a waiting bijlage beside the articles, and `law show ID --not-commenced`
+its waiting articles alone.
 
 `--as-of` asks what was in force. `--as-known-on` asks what the register showed, which becomes a different question the moment something is published with retroactive effect. A moment is a point in both windows, so the two combine: `--as-of 2019-06-01 --as-known-on 2020-01-01` is the text for conduct in June 2019 as the register had it on New Year's Day. `--as-known-on` alone names that day for both.
 
