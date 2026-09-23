@@ -1420,6 +1420,34 @@ async fn law_parts_sends_limit_none_as_typed() {
     assert!(output.status.success(), "{output:?}");
 }
 
+/// bron judges nothing the service judges: `NONE` is not the literal the
+/// service reads, but that is the service's call, not the parser's. It
+/// reaches the service as typed and comes back as the service's own refusal.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_sends_an_uppercase_limit_as_typed() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0001941/parts"))
+        .and(query_param("limit", "NONE"))
+        .respond_with(ResponseTemplate::new(400).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"usage","code":"invalid_parameter","message":"limit must be between 1 and 1000000, or none for the whole set","detail":[]}}"#,
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["--json", "law", "parts", "BWBR0001941", "--limit", "NONE"],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "invalid_parameter");
+}
+
 /// A unit that prints no number is asked for by its place among its kind.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_parts_asks_for_a_unit_by_its_place() {

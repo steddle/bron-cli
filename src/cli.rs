@@ -120,49 +120,6 @@ fn byte_range(text: &str) -> Result<(usize, usize), String> {
     Ok((start, end))
 }
 
-/// A page size for a route the corpus does not bound, or the literal word for
-/// its whole set.
-///
-/// `law parts` is one such route: the rendition bounds it, so `--limit none`
-/// asks for everything it prints. Whether the word is one this route takes is
-/// the service's to say; a caller sends it as typed and the service refuses it
-/// where it does not apply.
-#[derive(Debug, Clone, Copy)]
-pub enum Limit {
-    Rows(u32),
-    Whole,
-}
-
-impl Limit {
-    /// As the service reads `limit`: digits, or the literal `none`.
-    pub fn to_query(self) -> String {
-        match self {
-            Self::Rows(n) => n.to_string(),
-            Self::Whole => "none".to_string(),
-        }
-    }
-}
-
-impl std::fmt::Display for Limit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_query())
-    }
-}
-
-impl std::str::FromStr for Limit {
-    type Err = String;
-
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
-        if text == "none" {
-            return Ok(Self::Whole);
-        }
-
-        text.parse::<u32>()
-            .map(Self::Rows)
-            .map_err(|_| format!("[{text}] is not a whole number, or `none` for the whole set"))
-    }
-}
-
 #[derive(Debug, Subcommand)]
 pub enum Law {
     /// Searches by citeertitel. Returns candidates, not text.
@@ -303,8 +260,13 @@ pub enum Law {
         /// How many units to answer, or `none` for every one the rendition
         /// prints: the rendition bounds this route, so the service pages it
         /// only where asked.
-        #[arg(long, default_value_t = Limit::Rows(20))]
-        limit: Limit,
+        ///
+        /// Sent to the service exactly as typed. The rendition bounds this
+        /// route, as it bounds `law show`, so bron judges nothing about the
+        /// word: `none`, a negative number, a decimal all reach the service
+        /// and come back as its own `invalid_parameter` where they are wrong.
+        #[arg(long, default_value = "20")]
+        limit: String,
 
         /// How many units to skip.
         #[arg(long, default_value_t = 0)]
@@ -712,21 +674,22 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    /// `none` is the literal the service reads as the whole set; a caller who
-    /// means the rendition's own bijlage numbered 0 has to say so as `0`.
+    /// `law parts --limit` is a bare string, sent to the service exactly as
+    /// typed: bron judges nothing the service judges, so `NONE`, `1.5` and
+    /// `-1` all parse here and are the service's to refuse.
+    ///
+    /// `--limit=-1` rather than two tokens: clap reads a bare `-1` as an
+    /// unrecognised flag before the value parser ever sees it, which is a
+    /// property of how a negative-looking token is split from its flag, not
+    /// of what this parser accepts.
     #[test]
-    fn a_limit_reads_none_as_the_whole_set() {
-        assert_eq!("none".parse::<Limit>().unwrap().to_query(), "none");
-        assert_eq!("20".parse::<Limit>().unwrap().to_query(), "20");
-        assert!("whole".parse::<Limit>().is_err());
-    }
+    fn law_parts_accepts_any_limit_text() {
+        for limit in ["20", "none", "NONE", "1.5", "-1", "whole"] {
+            let flag = format!("--limit={limit}");
+            let result = Cli::try_parse_from(["bron", "law", "parts", "BWBR0001941", &flag]);
 
-    #[test]
-    fn law_parts_accepts_limit_none() {
-        let result =
-            Cli::try_parse_from(["bron", "law", "parts", "BWBR0001941", "--limit", "none"]);
-
-        assert!(result.is_ok(), "{result:?}");
+            assert!(result.is_ok(), "[{limit}]: {result:?}");
+        }
     }
 
     fn moment(as_of: Option<&str>, as_known_on: Option<&str>) -> Moment {
