@@ -52,7 +52,7 @@ pub enum Command {
     /// The parliamentary history behind a law: a kamerstukdossier as the act
     /// behind a text the service holds names it.
     #[command(subcommand)]
-    Dossier(Dossier),
+    Dossier(DossierCmd),
 
     /// Answers which article, from a question or from a citation.
     ///
@@ -625,7 +625,7 @@ pub enum Publication {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Dossier {
+pub enum DossierCmd {
     /// One kamerstukdossier by its number, e.g. 34608: the acts that name it
     /// and its papers oldest first, each with its kind and, on an amendement
     /// or a motie, what the Tweede Kamer decided.
@@ -641,13 +641,14 @@ pub enum Dossier {
         #[arg(long)]
         kind: Option<String>,
 
-        /// How many papers to answer. Sent to the service exactly as typed.
-        #[arg(long, default_value = "100")]
-        limit: String,
+        /// How many papers to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long)]
+        limit: Option<String>,
 
-        /// How many papers to skip. Sent to the service exactly as typed.
-        #[arg(long, default_value = "0")]
-        offset: String,
+        /// How many papers to skip; untyped, none. Sent exactly as typed.
+        #[arg(long)]
+        offset: Option<String>,
     },
 }
 

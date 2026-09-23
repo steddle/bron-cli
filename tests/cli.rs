@@ -4792,7 +4792,8 @@ async fn dossier_show_prints_the_envelope_the_service_sent() {
 }
 
 /// A paper per row on stdout, what the Tweede Kamer decided on it beside the
-/// kind; the dossier's head and every note go to stderr.
+/// kind; the dossier's head and every note go to stderr. Nothing untyped is
+/// sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn dossier_show_prints_papers_as_rows_and_the_rest_on_stderr() {
     let answer = publication_fixture("bron-dossier-34608.json");
@@ -4814,6 +4815,10 @@ async fn dossier_show_prints_papers_as_rows_and_the_rest_on_stderr() {
         "{err}"
     );
     assert!(err.contains("1 amendement(en) or motie(s)"), "{err}");
+
+    // Untyped, --limit and --offset are the service's to default.
+    let asked = server.received_requests().await.unwrap();
+    assert_eq!(asked[0].url.query(), None);
 }
 
 /// Every besluit the Tweede Kamer states stands on the paper's row, and a

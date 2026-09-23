@@ -1897,8 +1897,10 @@ fn caveat_line(caveat: &Caveat) -> String {
              1995, so its papers are scans in Staten-Generaal Digitaal, which bron does not read"
             .to_string(),
         Caveat::FateUnknown { papers } => format!(
-            "note: {papers} amendement(en) or motie(s) here have no besluit stated by the Tweede \
-             Kamer's open data, which holds none from before 2008; no fate is not 'verworpen'"
+            "note: {papers} amendement(en) or motie(s) here have no besluit stated in the Tweede \
+             Kamer's open data: not put to a vote, withdrawn, from before 2008 which it holds \
+             nothing about, or a paper the open data files under more than one dossier, which \
+             bron does not read. No besluit is not 'verworpen'."
         ),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")

@@ -15,7 +15,7 @@ use bron::service::{self, Answered, Service};
 use bron::sources::{Client, FetchedCase, rechtspraak};
 use bron::wire::{self, Caveat, Envelope};
 
-use crate::cli::{Case, Cli, CollectionArg, Command, Dossier, Law, Moment, Publication};
+use crate::cli::{Case, Cli, CollectionArg, Command, DossierCmd, Law, Moment, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -623,17 +623,23 @@ fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome
 
 // -- kamerstukdossiers ---------------------------------------------------
 
-fn run_dossier(cmd: &Dossier, quiet: bool, service: &Service) -> Outcome<Answer> {
+fn run_dossier(cmd: &DossierCmd, quiet: bool, service: &Service) -> Outcome<Answer> {
     let client = client(quiet)?;
 
     match cmd {
-        Dossier::Show {
+        DossierCmd::Show {
             dossier,
             kind,
             limit,
             offset,
         } => service
-            .dossier(&client, dossier, kind.as_deref(), limit, offset)
+            .dossier(
+                &client,
+                dossier,
+                kind.as_deref(),
+                limit.as_deref(),
+                offset.as_deref(),
+            )
             .map(|answered| Answer::Dossier(Box::new(answered))),
     }
 }

@@ -45,8 +45,6 @@ pub struct DossierRegulation {
 pub struct DossierPaper {
     /// As `kst-34608-12`; `publication show` answers it.
     pub id: String,
-    /// Its number in the dossier, `12`, or a letter for the Eerste Kamer.
-    pub number: String,
     /// Its kind, as the service reads it off the paper's own title:
     /// `memorie_van_toelichting`, `amendement`, `motie`. Kept as the string
     /// sent, so a kind this build has never heard of crosses untouched.
@@ -68,28 +66,31 @@ pub struct DossierPaper {
 pub struct Fate {
     /// As the Tweede Kamer words it: `Stemmen - aangenomen`.
     pub decision: String,
-    /// The zaak it was taken on, as `2018Z24529`.
-    pub zaak: String,
-    /// SHA-256 of the frozen answer that states it.
-    pub stated_in: String,
 }
 
 impl Service {
     /// One kamerstukdossier by its number. `kind`, `limit` and `offset` go to
-    /// the service exactly as typed; the service says what it takes.
+    /// the service exactly as typed and only where typed; the service says
+    /// what it takes, and its window is the default.
     pub fn dossier(
         &self,
         client: &Client,
         dossier: &str,
         kind: Option<&str>,
-        limit: &str,
-        offset: &str,
+        limit: Option<&str>,
+        offset: Option<&str>,
     ) -> Outcome<Answered<DossierPapers>> {
         let url = self.route(&["dossiers", dossier])?;
 
-        let mut query = vec![("limit", limit.to_string()), ("offset", offset.to_string())];
+        let mut query = Vec::new();
         if let Some(kind) = kind {
-            query.push(("kind", kind.to_string()));
+            query.push(("kind", kind));
+        }
+        if let Some(limit) = limit {
+            query.push(("limit", limit));
+        }
+        if let Some(offset) = offset {
+            query.push(("offset", offset));
         }
 
         self.read(client, client.get(&url).query(&query))

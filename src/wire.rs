@@ -472,8 +472,10 @@ pub enum Caveat {
     PapersBeforeDigital,
 
     /// Amendementen and moties in the answer that the Tweede Kamer's open
-    /// data states no besluit for: never put to a vote, withdrawn, or from
-    /// before 2008, which it holds nothing about. No fate is not 'verworpen'.
+    /// data states no besluit for: not put to a vote, withdrawn, from before
+    /// 2008, which it holds nothing about, or a paper the open data files
+    /// under more than one dossier, which bron does not read. No besluit is
+    /// not 'verworpen'.
     FateUnknown { papers: u32 },
 
     /// The service stated a limit this bron has no sentence for.
