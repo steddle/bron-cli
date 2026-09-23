@@ -421,10 +421,15 @@ pub enum Caveat {
     /// `published` though the BWB prints it.
     FoundingActsUnread { regulations: u32 },
 
-    /// Inwerkingtredingsbesluiten published in the last 15 days that name no
-    /// act by `extref` or `ketenid`, so bron cannot say what they commence and
-    /// raises no [`Caveat::CommencementPending`] for them.
-    DecreesUnmatched { decrees: Vec<UnmatchedDecree> },
+    /// Held inwerkingtredingsbesluiten that name no act by `extref` or
+    /// `ketenid`, so bron cannot say what they commence and raises no
+    /// [`Caveat::CommencementPending`] for them. `unlinked` counts those of
+    /// any age since the Staatsblad lane starts in 2020; `decrees` names the
+    /// ones published in the last 15 days, and is empty where none was.
+    DecreesUnmatched {
+        unlinked: u32,
+        decrees: Vec<UnmatchedDecree>,
+    },
 
     /// A besluit the Staatsblad published names, by `extref` or `ketenid`,
     /// the act behind units this answer prints as not yet in force, and no
@@ -598,6 +603,7 @@ impl Caveat {
                 regulations: u32,
             },
             DecreesUnmatched {
+                unlinked: u32,
                 decrees: Vec<UnmatchedDecree>,
             },
             CommencementPending {
@@ -713,7 +719,9 @@ impl Caveat {
             Ok(Stated::FoundingActsUnread { regulations }) => {
                 Self::FoundingActsUnread { regulations }
             }
-            Ok(Stated::DecreesUnmatched { decrees }) => Self::DecreesUnmatched { decrees },
+            Ok(Stated::DecreesUnmatched { unlinked, decrees }) => {
+                Self::DecreesUnmatched { unlinked, decrees }
+            }
             Ok(Stated::CommencementPending { decrees }) => Self::CommencementPending { decrees },
             Ok(Stated::PublicationNotHeld) => Self::PublicationNotHeld,
             Ok(Stated::SourceTotalEstimated) => Self::SourceTotalEstimated,

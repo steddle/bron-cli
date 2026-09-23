@@ -1706,15 +1706,25 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: {regulations} regulation(s) have not had their founding act read, so an act \
              that founded one of them may be listed as published although the BWB prints it",
         ),
-        Caveat::DecreesUnmatched { decrees } => format!(
-            "note: besluit(en) published in the last 15 days name no act by reference or by \
-             chain, so bron cannot say what they commence: {}.",
-            decrees
-                .iter()
-                .map(|d| format!("{} ({})", d.id, d.published_on))
-                .collect::<Vec<_>>()
-                .join(", "),
-        ),
+        Caveat::DecreesUnmatched { unlinked, decrees } => {
+            let mut note = format!(
+                "note: {unlinked} held besluit(en) since 2020 name no act by reference or by \
+                 chain, so bron cannot say what they commence."
+            );
+            if !decrees.is_empty() {
+                let _ = write!(
+                    note,
+                    " {} of them published in the last 15 days: {}.",
+                    decrees.len(),
+                    decrees
+                        .iter()
+                        .map(|d| format!("{} ({})", d.id, d.published_on))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+            }
+            note
+        }
         Caveat::CommencementPending { decrees } => format!(
             "note: a published besluit names the act behind a waiting unit, and no rendition \
              here names it as commenced yet. Whether its day has come stands in its own words, \
@@ -2077,17 +2087,38 @@ mod tests {
         );
     }
 
-    /// Named besluiten, not a bare count: which ones bron could not link is
-    /// what tells a reader whether to look one up by hand.
+    /// The count of every unlinked besluit, and the recent ones by name:
+    /// which ones bron could not link is what tells a reader whether to look
+    /// one up by hand.
     #[test]
-    fn decrees_unmatched_names_the_besluiten_and_when_they_were_published() {
+    fn decrees_unmatched_counts_every_besluit_and_names_the_recent_ones() {
         let note = caveat_line(&Caveat::stated(&serde_json::json!({
             "kind": "decrees_unmatched",
+            "unlinked": 262,
             "decrees": [{"id": "stb-2026-280", "published_on": "2026-09-20"}],
         })));
 
-        assert!(note.contains("stb-2026-280 (2026-09-20)"), "{note}");
+        assert!(note.contains("262 held besluit(en) since 2020"), "{note}");
         assert!(note.contains("cannot say what they commence"), "{note}");
+        assert!(
+            note.contains("1 of them published in the last 15 days: stb-2026-280 (2026-09-20)."),
+            "{note}"
+        );
+    }
+
+    /// The caveat stands wherever any besluit is unlinked, and with none of
+    /// them recent it states the count and lists nothing.
+    #[test]
+    fn decrees_unmatched_with_no_recent_besluit_states_the_count_alone() {
+        let note = caveat_line(&Caveat::stated(&serde_json::json!({
+            "kind": "decrees_unmatched",
+            "unlinked": 262,
+            "decrees": [],
+        })));
+
+        assert!(note.contains("262 held besluit(en) since 2020"), "{note}");
+        assert!(!note.contains("last 15 days"), "{note}");
+        assert!(!note.contains(": ."), "{note}");
     }
 
     /// The besluit, the act it names and when it was published: enough to

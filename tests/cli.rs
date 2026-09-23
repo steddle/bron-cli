@@ -3551,8 +3551,8 @@ async fn a_stage_this_build_does_not_know_does_not_sink_the_answer() {
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
-/// `decrees_unmatched` names the recent besluiten bron could not link to an
-/// act, in words rather than as an unrecognised limit.
+/// `decrees_unmatched` counts every besluit bron could not link to an act and
+/// names the recent ones, in words rather than as an unrecognised limit.
 #[tokio::test(flavor = "multi_thread")]
 async fn decrees_unmatched_names_the_besluiten_bron_could_not_link() {
     const UNMATCHED: &str = "bron-upcoming-decrees-unmatched.json";
@@ -3564,9 +3564,31 @@ async fn decrees_unmatched_names_the_besluiten_bron_could_not_link() {
     let text = stdout(&output);
 
     assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("262 held besluit(en) since 2020"), "{text}");
     assert!(text.contains("stb-2026-280 (2026-09-20)"), "{text}");
     assert!(text.contains("cannot say what they commence"), "{text}");
     assert!(!text.contains("no sentence for"), "{text}");
+}
+
+/// The caveat stands wherever a besluit is unlinked, also where none of them
+/// is recent: a person reads the count and no empty list, and `--json`
+/// carries the envelope as sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn decrees_unmatched_with_no_recent_besluit_states_the_count() {
+    let sent = fixture("bron-upcoming-decrees-unlinked-none-recent.json");
+    let server = answering("GET", "/api/v1/upcoming", &sent).await;
+
+    let output = bron(&server, &["law", "upcoming"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("262 held besluit(en) since 2020"), "{text}");
+    assert!(!text.contains("last 15 days"), "{text}");
+    assert!(!text.contains("no sentence for"), "{text}");
+
+    let json = bron(&server, &["--json", "law", "upcoming"]).await;
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), sent);
 }
 
 /// Every name the route declares reaches it, and nothing else: the service
