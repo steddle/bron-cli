@@ -4987,6 +4987,71 @@ async fn dossier_show_exits_on_the_code_the_service_states() {
     }
 }
 
+/// `papers_not_held` says how many of the papers the publisher lists the
+/// answer leaves out while bron reads them. The fixture is the production
+/// answer for 34608 with the caveat added by hand, in the shape `openapi.json`
+/// states: `papers` the count listed, `count` the count left out.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_says_how_many_papers_are_not_held_yet() {
+    let answer = publication_fixture("bron-dossier-34608-edited-papers-not-held.json");
+    let server = answering("GET", "/api/v1/dossiers/34608", &answer).await;
+
+    let output = bron(&server, &["dossier", "show", "34608"]).await;
+    let said = format!(
+        "{}{}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        said.contains(
+            "3 of the 41 paper(s) the publisher lists for this dossier are not held yet and are \
+             left out; bron is reading them."
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("no sentence for"), "{said}");
+
+    let json = bron(&server, &["--json", "dossier", "show", "34608"]).await;
+    assert_eq!(stdout(&json), format!("{answer}\n"));
+}
+
+/// `publications_left_out` says a page holds fewer hits than the publisher
+/// ranked, and that `next` still walks on. The fixture is a production page
+/// with the caveat added by hand, to the shape `{kind, count}`.
+#[tokio::test(flavor = "multi_thread")]
+async fn publication_search_says_how_many_hits_are_left_out() {
+    let page = publication_fixture(
+        "bron-publication-search-dossier-36195-edited-publications-left-out.json",
+    );
+    let server = answering("POST", "/api/v1/publications/search", &page).await;
+
+    let output = bron(&server, &["publication", "search", "--dossier", "36195"]).await;
+    let said = format!(
+        "{}{}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        said.contains(
+            "1 hit(s) on this page are of a kind bron does not open and are left out; the \
+             publisher's next page may still hold more."
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("no sentence for"), "{said}");
+
+    let json = bron(
+        &server,
+        &["--json", "publication", "search", "--dossier", "36195"],
+    )
+    .await;
+    assert_eq!(stdout(&json), format!("{page}\n"));
+}
+
 /// `publication search` posts the body the routes declares and reads its
 /// `next`: `tests/fixtures/bron-publication-search-dossier-36195.json` is a
 /// real page against production on 2026-09-23.

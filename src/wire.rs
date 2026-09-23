@@ -487,6 +487,16 @@ pub enum Caveat {
     /// not 'verworpen'.
     FateUnknown { papers: u32 },
 
+    /// The dossier was read whole and the corpus does not hold every paper
+    /// the publisher listed as its own: `count` of the `papers` it listed are
+    /// left out of the answer while they are read again.
+    PapersNotHeld { count: u32, papers: u32 },
+
+    /// Hits of a kind bron does not open, which decision F refuses or a
+    /// collection it has not measured, are left out of this page and counted.
+    /// `next` still walks on, past a page they emptied.
+    PublicationsLeftOut { count: u32 },
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -668,6 +678,13 @@ impl Caveat {
             FateUnknown {
                 papers: u32,
             },
+            PapersNotHeld {
+                count: u32,
+                papers: u32,
+            },
+            PublicationsLeftOut {
+                count: u32,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -790,6 +807,8 @@ impl Caveat {
             Ok(Stated::SourceTotalEstimated) => Self::SourceTotalEstimated,
             Ok(Stated::PapersBeforeDigital) => Self::PapersBeforeDigital,
             Ok(Stated::FateUnknown { papers }) => Self::FateUnknown { papers },
+            Ok(Stated::PapersNotHeld { count, papers }) => Self::PapersNotHeld { count, papers },
+            Ok(Stated::PublicationsLeftOut { count }) => Self::PublicationsLeftOut { count },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },

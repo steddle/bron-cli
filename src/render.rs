@@ -1908,6 +1908,14 @@ fn caveat_line(caveat: &Caveat) -> String {
              nothing about, or a paper the open data files under more than one dossier, which \
              bron does not read. No besluit is not 'verworpen'."
         ),
+        Caveat::PapersNotHeld { count, papers } => format!(
+            "note: {count} of the {papers} paper(s) the publisher lists for this dossier are not \
+             held yet and are left out; bron is reading them."
+        ),
+        Caveat::PublicationsLeftOut { count } => format!(
+            "note: {count} hit(s) on this page are of a kind bron does not open and are left \
+             out; the publisher's next page may still hold more."
+        ),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
