@@ -1046,6 +1046,66 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
             caveats(&a.caveats, err)
         }
+
+        Answer::Dossier(a) => {
+            let dossier = &a.data;
+
+            write!(err, "Kamerstukken {}", dossier.dossier)?;
+            if let Some(title) = &dossier.title {
+                write!(err, "  {title}")?;
+            }
+            writeln!(err)?;
+            for act in &dossier.acts {
+                let regulations: Vec<String> = act
+                    .regulations
+                    .iter()
+                    .map(|r| match &r.title {
+                        Some(title) => format!("{} {title}", r.regulation_id),
+                        None => r.regulation_id.clone(),
+                    })
+                    .collect();
+                writeln!(err, "  {}  {}", act.act, regulations.join(", "))?;
+            }
+
+            if dossier.papers.is_empty() {
+                writeln!(
+                    out,
+                    "No paper of dossier {} answers as asked.",
+                    dossier.dossier
+                )?;
+                return caveats(&a.caveats, out);
+            }
+
+            for paper in &dossier.papers {
+                let mut row = paper.id.clone();
+                if !paper.held {
+                    let _ = write!(row, "  {NOT_HELD}");
+                }
+                if let Some(day) = paper.published_on {
+                    let _ = write!(row, "  {day}");
+                }
+                let _ = write!(row, "  {}", paper.kind.as_deref().unwrap_or("-"));
+                // Absent on a kind nobody votes on; empty where the Tweede
+                // Kamer states no besluit, which is not a vote against.
+                match paper.fates.as_deref() {
+                    Some([]) => {
+                        let _ = write!(row, "  no besluit stated");
+                    }
+                    Some(fates) => {
+                        let decisions: Vec<&str> =
+                            fates.iter().map(|f| f.decision.as_str()).collect();
+                        let _ = write!(row, "  {}", decisions.join("; "));
+                    }
+                    None => {}
+                }
+                writeln!(out, "{row}")?;
+                if let Some(title) = &paper.title {
+                    writeln!(out, "  {title}")?;
+                }
+            }
+
+            caveats(&a.caveats, err)
+        }
     }
 }
 
@@ -1833,6 +1893,13 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::SourceTotalEstimated => "note: the publisher's own total is an estimate, so \
              walking this search to its end can read a few hits more or fewer than it stated"
             .to_string(),
+        Caveat::PapersBeforeDigital => "note: every act naming this dossier is from before \
+             1995, so its papers are scans in Staten-Generaal Digitaal, which bron does not read"
+            .to_string(),
+        Caveat::FateUnknown { papers } => format!(
+            "note: {papers} amendement(en) or motie(s) here have no besluit stated by the Tweede \
+             Kamer's open data, which holds none from before 2008; no fate is not 'verworpen'"
+        ),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }

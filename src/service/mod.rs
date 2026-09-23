@@ -20,6 +20,7 @@
 //! what the service is for.
 
 pub mod client;
+pub mod dossiers;
 pub mod model;
 pub mod publications;
 pub mod search;
@@ -28,6 +29,7 @@ use crate::error::{Fault, Outcome};
 use crate::sources::Client;
 
 pub use client::Answered;
+pub use dossiers::{DossierAct, DossierPaper, DossierPapers, DossierRegulation, Fate};
 pub use model::{
     Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Consolidated, Dossier,
     Expression, Feed, Had, History, Image, Lineage, LinkedDecree, Named, Paragraph, Parts,

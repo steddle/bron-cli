@@ -465,6 +465,17 @@ pub enum Caveat {
     /// search to its end can read a few hits more or fewer than it stated.
     SourceTotalEstimated,
 
+    /// Every act naming the dossier is from before 1995, where the
+    /// publisher's digital Kamerstuk collection starts, so no paper answers.
+    /// Its papers are scans in Staten-Generaal Digitaal, which bron does not
+    /// read.
+    PapersBeforeDigital,
+
+    /// Amendementen and moties in the answer that the Tweede Kamer's open
+    /// data states no besluit for: never put to a vote, withdrawn, or from
+    /// before 2008, which it holds nothing about. No fate is not 'verworpen'.
+    FateUnknown { papers: u32 },
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -638,6 +649,10 @@ impl Caveat {
             },
             PublicationNotHeld,
             SourceTotalEstimated,
+            PapersBeforeDigital,
+            FateUnknown {
+                papers: u32,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -755,6 +770,8 @@ impl Caveat {
             Ok(Stated::CommencementPending { decrees }) => Self::CommencementPending { decrees },
             Ok(Stated::PublicationNotHeld) => Self::PublicationNotHeld,
             Ok(Stated::SourceTotalEstimated) => Self::SourceTotalEstimated,
+            Ok(Stated::PapersBeforeDigital) => Self::PapersBeforeDigital,
+            Ok(Stated::FateUnknown { papers }) => Self::FateUnknown { papers },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },

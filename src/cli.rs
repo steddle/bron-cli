@@ -49,6 +49,11 @@ pub enum Command {
     #[command(subcommand)]
     Publication(Publication),
 
+    /// The parliamentary history behind a law: a kamerstukdossier as the act
+    /// behind a text the service holds names it.
+    #[command(subcommand)]
+    Dossier(Dossier),
+
     /// Answers which article, from a question or from a citation.
     ///
     /// Distinct from `law search`, which resolves a citeertitel to a BWB id and
@@ -615,6 +620,33 @@ pub enum Publication {
 
         /// How many units to skip. Sent to the service exactly as typed.
         #[arg(long, default_value = "0", allow_negative_numbers = true)]
+        offset: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Dossier {
+    /// One kamerstukdossier by its number, e.g. 34608: the acts that name it
+    /// and its papers oldest first, each with its kind and, on an amendement
+    /// or a motie, what the Tweede Kamer decided.
+    ///
+    /// Read a paper itself with `publication show`. A dossier no held text's
+    /// act names is not found (exit 2).
+    Show {
+        dossier: String,
+
+        /// Only papers of this kind, as the service names it:
+        /// memorie_van_toelichting, nota_van_wijziging, amendement, motie,
+        /// memorie_van_antwoord and more. Sent exactly as typed.
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// How many papers to answer. Sent to the service exactly as typed.
+        #[arg(long, default_value = "100")]
+        limit: String,
+
+        /// How many papers to skip. Sent to the service exactly as typed.
+        #[arg(long, default_value = "0")]
         offset: String,
     },
 }

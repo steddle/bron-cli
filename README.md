@@ -153,6 +153,18 @@ dated ones, the newest act first. Treaties are left out and counted.
 kind, a waiting bijlage beside the articles, and `law show ID --not-commenced`
 its waiting articles alone.
 
+An act names the kamerstukdossier it came through, and `dossier show` reads
+that dossier's papers, oldest first, with what the Tweede Kamer decided on
+each amendement and motie:
+
+```
+$ bron dossier show 34608 --kind amendement --limit 2
+kst-34608-12  2018-12-21  amendement  Stemmen - aangenomen
+  Amendement van het lid Van Gent c.s. over aanscherping van de vereiste nauwe band met de Nederlandse rechtssfeer
+kst-34608-13  2018-12-21  amendement  Stemmen - aangenomen
+  Amendement van het lid Van Gent c.s. over verbetering van het overgangsrecht
+```
+
 `--as-of` asks what was in force. `--as-known-on` asks what the register showed, which becomes a different question the moment something is published with retroactive effect. A moment is a point in both windows, so the two combine: `--as-of 2019-06-01 --as-known-on 2020-01-01` is the text for conduct in June 2019 as the register had it on New Year's Day. `--as-known-on` alone names that day for both. Both go to the service exactly as typed; name neither and the service reads today, and every answer states the moment it resolved.
 
 ## Machine use

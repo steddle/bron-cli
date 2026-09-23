@@ -15,7 +15,7 @@ use bron::service::{self, Answered, Service};
 use bron::sources::{Client, FetchedCase, rechtspraak};
 use bron::wire::{self, Caveat, Envelope};
 
-use crate::cli::{Case, Cli, CollectionArg, Command, Law, Moment, Publication};
+use crate::cli::{Case, Cli, CollectionArg, Command, Dossier, Law, Moment, Publication};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -75,6 +75,7 @@ pub enum Answer {
     Appeal(Envelope<wire::AppealStatus>),
     PublicationHits(Answered<service::PublicationSearch>),
     Publication(Box<Answered<service::Publication>>),
+    Dossier(Box<Answered<service::DossierPapers>>),
     Blob {
         envelope: Envelope<Box<wire::Blob>>,
         /// The bytes handed over, the whole document or the span cut from
@@ -114,6 +115,7 @@ impl Answer {
             Self::Appeal(e) => write(out, e),
             Self::PublicationHits(a) => sent(out, &a.envelope),
             Self::Publication(a) => sent(out, &a.envelope),
+            Self::Dossier(a) => sent(out, &a.envelope),
             Self::Blob { envelope, .. } => write(out, envelope),
         }
     }
@@ -131,6 +133,7 @@ pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
         Command::Law(law) => run_law(law, quiet, &service),
         Command::Case(case) => run_case(case, quiet),
         Command::Publication(pub_) => run_publication(pub_, quiet, &service),
+        Command::Dossier(dossier) => run_dossier(dossier, quiet, &service),
         Command::Find {
             query,
             regulation,
@@ -615,6 +618,23 @@ fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome
         } => service
             .publication(&client, id, limit, offset, *rendered, *raw)
             .map(|answered| Answer::Publication(Box::new(answered))),
+    }
+}
+
+// -- kamerstukdossiers ---------------------------------------------------
+
+fn run_dossier(cmd: &Dossier, quiet: bool, service: &Service) -> Outcome<Answer> {
+    let client = client(quiet)?;
+
+    match cmd {
+        Dossier::Show {
+            dossier,
+            kind,
+            limit,
+            offset,
+        } => service
+            .dossier(&client, dossier, kind.as_deref(), limit, offset)
+            .map(|answered| Answer::Dossier(Box::new(answered))),
     }
 }
 

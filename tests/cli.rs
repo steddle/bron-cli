@@ -4751,6 +4751,128 @@ async fn publication_show_outside_scope_exits_on_its_code() {
     assert_eq!(envelope["error"]["code"], "publication_outside_scope");
 }
 
+// -- kamerstukdossiers ----------------------------------------------------
+
+/// `dossier show` is one call to the service, and `--kind`, `--limit` and
+/// `--offset` go as typed: `tests/fixtures/bron-dossier-34608.json` is a real
+/// answer of the service's `/v1/dossiers` over a clone of the production
+/// corpus, captured on 2026-09-24.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_prints_the_envelope_the_service_sent() {
+    let answer = publication_fixture("bron-dossier-34608.json");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dossiers/34608"))
+        .and(query_param("kind", "amendement"))
+        .and(query_param("limit", "5"))
+        .and(query_param("offset", "x"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(answer.clone(), "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "dossier",
+            "show",
+            "34608",
+            "--kind",
+            "amendement",
+            "--limit",
+            "5",
+            "--offset",
+            "x",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{answer}\n"));
+}
+
+/// A paper per row on stdout, what the Tweede Kamer decided on it beside the
+/// kind; the dossier's head and every note go to stderr.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_prints_papers_as_rows_and_the_rest_on_stderr() {
+    let answer = publication_fixture("bron-dossier-34608.json");
+    let server = answering("GET", "/api/v1/dossiers/34608", &answer).await;
+
+    let output = bron(&server, &["dossier", "show", "34608"]).await;
+    let text = stdout(&output);
+    let err = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("kst-34608-3  2016-11-17  memorie_van_toelichting\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("kst-34608-12  2018-12-21  amendement  Stemmen - aangenomen\n"),
+        "{text}"
+    );
+    assert!(!text.contains("Kamerstukken 34608"), "{text}");
+    assert!(
+        err.contains("Kamerstukken 34608  Wijziging van het Burgerlijk Wetboek"),
+        "{err}"
+    );
+    assert!(err.contains("stb-2019-130  BWBR0005291"), "{err}");
+    assert!(err.contains("3 amendement(en) or motie(s)"), "{err}");
+}
+
+/// A dossier of acts from before 1995 answers no paper, and says why.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_of_papers_before_digital_says_so() {
+    let server = answering(
+        "GET",
+        "/api/v1/dossiers/19529",
+        r#"{"bron":1,"grade":"authority","data":{"dossier":"19529","acts":[{"act":"stb-1990-90","regulations":[{"regulation_id":"BWBR0005289"}]}],"papers":[]},"caveats":[{"kind":"papers_before_digital"}]}"#,
+    )
+    .await;
+
+    let output = bron(&server, &["dossier", "show", "19529"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("No paper of dossier 19529"), "{text}");
+    assert!(text.contains("Staten-Generaal Digitaal"), "{text}");
+}
+
+/// A dossier no held text's act names is not found, and a value that is no
+/// dossier number is the service's to refuse: bron pre-validates neither.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_exits_on_the_code_the_service_states() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dossiers/99999"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"dossier_not_named","message":"no act behind a held text names dossier [99999]","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/dossiers/34608-IX"))
+        .respond_with(ResponseTemplate::new(400).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"usage","code":"invalid_dossier_number","message":"[34608-IX] is no kamerstukdossier number, which reads as 34608","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    for (dossier, exit, code) in [
+        ("99999", 2, "dossier_not_named"),
+        ("34608-IX", 1, "invalid_dossier_number"),
+    ] {
+        let output = bron(&server, &["--json", "dossier", "show", dossier]).await;
+        let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+        assert_eq!(output.status.code(), Some(exit), "{output:?}");
+        assert_eq!(envelope["error"]["code"], code);
+    }
+}
+
 /// `publication search` posts the body the routes declares and reads its
 /// `next`: `tests/fixtures/bron-publication-search-dossier-36195.json` is a
 /// real page against production on 2026-09-23.
