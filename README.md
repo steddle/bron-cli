@@ -127,11 +127,34 @@ means something else now. Both go to stderr, so a script reads rows on stdout
 and takes its cursor from `--json`. An empty walk exits 0, because nothing
 happened is an answer.
 
+The register publishes no rendition ahead, so what it holds of the future
+stands inside the renditions in force, as provisions printed as not yet
+commenced. `law upcoming` lists the regulations that print them:
+
+```
+$ bron law upcoming --from 2027-01-01 --to 2027-03-31 --limit 5
+2027-01-01  BWBR0031719  6 waiting  Regeling Waadi  acts stcrt-2026-6946  decrees stb-2026-159
+2027-01-01  BWBR0036578  9 waiting  Besluit allocatie arbeidskrachten door intermediairs  acts stb-2026-41  decrees stb-2026-159
+2027-01-01  BWBR0045371  1 waiting  Regeling uitvoering beveiliging burgerluchtvaart 2021  acts stcrt-2026-3063  decrees stcrt-2026-3063
+2027-01-01  BWBR0051774  4 waiting  Energieregeling  acts stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208  decrees stcrt-2025-37730, stcrt-2026-15354, stcrt-2026-28208
+2027-01-01  BWBR0052069  1 waiting  Invoeringsregeling Energiewet  acts stcrt-2026-15354  decrees stcrt-2026-15354
+first column = the earliest day to come a waiting unit states, no day yet = none states one
+acts = the publications that produced the waiting text, decrees = the besluiten the rendition names as commencing it, - = it names none
+
+note: filtered over a window of 5, matches may be missing
+note: this list holds what the BWB prints. An act the Staatsblad published and the BWB does not print yet is not in it, and neither are EU regulations.
+```
+
+Every day on it is one the register states. Without `--from` and `--to` the
+list also holds regulations whose waiting provisions state no day, after the
+dated ones, the newest act first. Treaties are left out and counted.
+`law show ID --not-commenced` reads one regulation's waiting articles.
+
 `--as-of` asks what was in force. `--as-known-on` asks what the register showed, which becomes a different question the moment something is published with retroactive effect. A moment is a point in both windows, so the two combine: `--as-of 2019-06-01 --as-known-on 2020-01-01` is the text for conduct in June 2019 as the register had it on New Year's Day. `--as-known-on` alone names that day for both.
 
 ## Machine use
 
-Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law parts`, `law changes`, `law published` and `law feed` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code. A failure bron states itself carries none, so presence says who stated it.
+Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law parts`, `law changes`, `law published`, `law feed` and `law upcoming` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code. A failure bron states itself carries none, so presence says who stated it.
 
 ```
 $ bron --json find 6:162 BW
@@ -175,6 +198,7 @@ Nothing is kept. bron writes one thing between runs, its share of the per-host r
 
 - Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date, and renditions the publisher has withdrawn named rather than quietly served.
 - Content-addressed provenance. Each document is named by the SHA-256 of its own bytes, and every article and lid carries a byte range into it, so a reader can fetch those bytes and cut the quotation again, with `bron blob` or with any tool that hashes.
+- What is coming. `bron law upcoming` lists the regulations that already print provisions they do not yet apply, with the first day to come where the register states one and the acts and besluiten behind them.
 - The life of one article. `bron law history` answers every text it has had, each with the window it applied in and the act that produced it, from the renditions the corpus holds.
 - What the register states around a law. `bron law about` says how much of it is held, `bron law relations` what rests on it and what cites it, and `bron law amendments` what the act that established it did elsewhere.
 - Amendment diffs. `bron law changes` compares a law between two dates unit by unit, its bijlagen and aanhef beside its articles, and matches them on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
