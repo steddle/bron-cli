@@ -58,12 +58,17 @@ pub enum Answer {
         /// Where the rendition's document is served, for the source line a
         /// reader fetches. Absent where the service holds no text for it.
         blob_url: Option<String>,
+        /// The article the question named, so an answer with none can say
+        /// what was asked.
+        number: Option<String>,
         /// The lid the question named, which the service narrowed the answer
         /// to. Carried so a heading says which lid where the service's label
         /// for the article is absent and cannot.
         paragraph: Option<String>,
         /// The item a person asked to read. See [`item`].
         item: Option<String>,
+        /// Whether the question asked only for what is not yet applied.
+        not_commenced: bool,
     },
     CaseHits(Envelope<Vec<wire::CaseHit>>),
     Case(Envelope<Box<wire::Case>>),
@@ -462,55 +467,13 @@ fn run_law(law_cmd: &Law, today: NaiveDate, quiet: bool, service: &Service) -> O
                 },
             )?;
 
-            // A rendition that resolved and answered nothing. The service
-            // raises no fault for text it does not hold or did not parse, and
-            // a bare 'no articles' would have a caller stop looking: the
-            // rendition is named, so it can still be fetched from the
-            // publisher, and why it answered nothing is said where the service
-            // said it.
-            let law = &answered.data.regulation_id;
-            let expression = &answered.data.expression;
-            if answered.data.articles.is_empty() {
-                let rendition = format!("{law} rendition {}", expression.label);
-
-                return Err(match (&expression.blob, &expression.unread_because) {
-                    (None, _) => Fault::not_found("text held for", rendition),
-                    (Some(_), Some(because)) => {
-                        Fault::not_found("articles parsed from", format!("{rendition} ({because})"))
-                    }
-                    (Some(_), None) => {
-                        let what = match (wanted, not_commenced) {
-                            (Some(number), _) => format!("article {number} of {rendition}"),
-                            (None, true) => {
-                                format!("provisions of {rendition} published and not in force")
-                            }
-                            (None, false) => format!("articles of {rendition}"),
-                        };
-                        Fault::not_found("stored", what)
-                    }
-                });
-            }
-
-            // Refused here whichever way the answer prints, so an item nobody
-            // prints is one exit code rather than two.
-            if let Some(letter) = letter
-                && let Some(article) = answered
-                    .data
-                    .articles
-                    .iter()
-                    .find(|article| item(&article.text(), letter).is_none())
-            {
-                return Err(Fault::not_found(
-                    "item",
-                    format!("{letter} of {law} {}", article.name()),
-                ));
-            }
-
             Ok(Answer::Articles {
                 blob_url: served(service, &answered.data.expression),
                 answered: Box::new(answered),
+                number: wanted.clone(),
                 paragraph: paragraph.clone(),
                 item: letter.clone(),
+                not_commenced: *not_commenced,
             })
         }
     }

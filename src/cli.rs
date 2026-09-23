@@ -170,14 +170,13 @@ pub enum Law {
         #[arg(long)]
         not_commenced: bool,
 
-        /// One lid of that article, as the register numbers it.
+        /// One lid, as the register numbers it: of --article, or of every
+        /// article that prints one.
         ///
-        /// Needs --article: a lid number alone is not an address, since every
-        /// article has a lid 1. The service answers the lid, so the span, the
-        /// Juriconnect reference and the label are the lid's: an answer about
-        /// lid 2 that cites the article's bytes is coarser than the claim it
-        /// supports.
-        #[arg(long, requires = "article")]
+        /// The service answers the lid, so the span, the Juriconnect reference
+        /// and the label are the lid's: an answer about lid 2 that cites the
+        /// article's bytes is coarser than the claim it supports.
+        #[arg(long)]
         paragraph: Option<String>,
 
         /// One item of that lid, as the register letters it: `a`, `b`, `2°`.
@@ -186,7 +185,8 @@ pub enum Law {
         /// answers: an item has no span of its own in this corpus, so the
         /// answer stays the lid's rather than naming an offset nobody
         /// measured. With --json the envelope is the lid as the service sent
-        /// it. An item nothing opens is refused either way.
+        /// it. Where a lid prints no such item, a person reads that it does
+        /// not.
         #[arg(long, requires = "paragraph")]
         item: Option<String>,
 

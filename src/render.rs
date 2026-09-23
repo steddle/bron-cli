@@ -594,10 +594,49 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
         Answer::Articles {
             answered: a,
             blob_url,
+            number,
             paragraph,
             item,
+            not_commenced,
         } => {
             let articles = &a.data.articles;
+
+            // An answer the service gave with no article in it, in one line:
+            // why there is none, said where the service said it, and where a
+            // rendition that holds text prints its other units.
+            if articles.is_empty() {
+                let law = &a.data.regulation_id;
+                let rendition = &a.data.expression;
+                let named = format!("{law} rendition {}", rendition.label);
+                let line = match (&rendition.blob, &rendition.unread_because) {
+                    (None, _) => {
+                        format!("The service holds no text of {named}, so it answers no articles.")
+                    }
+                    (Some(_), Some(because)) => format!(
+                        "{named} is held and was not parsed ({because}), so it answers no articles."
+                    ),
+                    (Some(_), None) => {
+                        let what = match (number, paragraph, not_commenced) {
+                            (Some(number), _, _) => format!("no article {number}"),
+                            (None, Some(lid), _) => format!("no article with a lid {lid}"),
+                            (None, None, true) => "no article it does not yet apply".to_string(),
+                            (None, None, false) => "no articles".to_string(),
+                        };
+                        let parts = if *not_commenced {
+                            format!(
+                                "`law parts {law} --not-commenced` answers its waiting units of \
+                                 every kind"
+                            )
+                        } else {
+                            format!("`law parts {law}` answers the other units it prints")
+                        };
+                        format!("{named} prints {what}; {parts}.")
+                    }
+                };
+                writeln!(out, "{line}")?;
+                return caveats(&a.caveats, out);
+            }
+
             answered_by(
                 header(articles, a.as_of, a.as_known_on).as_deref(),
                 &a.data.expression,
@@ -890,9 +929,10 @@ fn write_unit(
 
     let text = unit.text();
     let text = match narrowed.item {
-        Some(letter) => crate::run::item(&text, letter)
-            .unwrap_or_default()
-            .to_string(),
+        Some(letter) => crate::run::item(&text, letter).map_or_else(
+            || format!("This lid prints no item {letter}."),
+            str::to_string,
+        ),
         None => text,
     };
 

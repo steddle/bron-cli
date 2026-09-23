@@ -730,7 +730,6 @@ async fn a_command_line_clap_refuses_is_the_envelope_under_json() {
 
     for args in [
         &["--json", "law", "show"][..],
-        &["--json", "law", "show", "BWBR0005289", "--paragraph", "2"][..],
         &["--json", "law", "history", "BWBR0005289"][..],
         &["law", "history", "--json", "BWBR0005289"][..],
     ] {
@@ -1855,40 +1854,35 @@ async fn an_item_cuts_what_a_person_reads_and_not_the_envelope() {
     assert_eq!(stdout(&json), format!("{ARTICLE}\n"));
 }
 
-/// An item that is not there is exit 2, as a lid that is not there is, and it
-/// is refused whichever way the answer is printed.
+/// An item is a cut of what a person reads, and no route answers one. Where
+/// the lid prints no such item a person reads that it does not, and `--json`
+/// is the lid the service sent, exit 0 either way.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_item_that_does_not_exist_is_not_found() {
+async fn an_item_the_lid_does_not_print_is_said_in_words() {
     let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", ARTICLE).await;
+    let asked = [
+        "law",
+        "show",
+        "BWBR0005289",
+        "--article",
+        "3",
+        "--paragraph",
+        "2",
+        "--item",
+        "z",
+    ];
 
-    for args in [
-        &[
-            "law",
-            "show",
-            "BWBR0005289",
-            "--article",
-            "3",
-            "--paragraph",
-            "2",
-            "--item",
-            "z",
-        ][..],
-        &[
-            "--json",
-            "law",
-            "show",
-            "BWBR0005289",
-            "--article",
-            "3",
-            "--paragraph",
-            "2",
-            "--item",
-            "z",
-        ][..],
-    ] {
-        let output = bron(&server, args).await;
-        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
-    }
+    let human = bron(&server, &asked).await;
+    assert_eq!(human.status.code(), Some(0), "{human:?}");
+    assert!(
+        stdout(&human).contains("This lid prints no item z."),
+        "{human:?}"
+    );
+
+    let json: Vec<&str> = ["--json"].iter().chain(&asked).copied().collect();
+    let output = bron(&server, &json).await;
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(stdout(&output), format!("{ARTICLE}\n"));
 }
 
 /// The heading of a lid answer says which lid, whether or not the service's
@@ -1924,8 +1918,9 @@ async fn a_lid_answer_says_which_lid_even_without_a_label() {
 }
 
 /// A rendition whose text the service does not hold has no article to answer,
-/// and the rendition resolved: saying 'no stored articles' would have a caller
-/// stop looking, where the publisher still serves that rendition.
+/// and the rendition resolved: the service answers that with an empty list,
+/// and so does `--json`. A person reads which rendition and why, where the
+/// publisher still serves it.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_show_names_the_rendition_whose_text_is_not_held() {
     let unheld = serde_json::json!({
@@ -1953,15 +1948,20 @@ async fn law_show_names_the_rendition_whose_text_is_not_held() {
     .await;
 
     let output = bron(&server, &["law", "show", "BWBR0008691"]).await;
-    let said = String::from_utf8(output.stderr.clone()).unwrap();
 
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    assert!(said.contains("2014-07-01_0"), "{said}");
-    assert!(said.contains("text held for"), "{said}");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        "The service holds no text of BWBR0008691 rendition 2014-07-01_0, so it answers no articles.\n"
+    );
+
+    let json = bron(&server, &["--json", "law", "show", "BWBR0008691"]).await;
+    assert_eq!(json.status.code(), Some(0), "{json:?}");
+    assert_eq!(stdout(&json), format!("{unheld}\n"));
 }
 
 /// A rendition the service holds and could not parse has no article to answer
-/// either, and says which rendition and why rather than reading as a law with
+/// either, and a person reads which rendition and why rather than a law with
 /// no articles in it.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_show_says_why_a_held_rendition_answered_no_article() {
@@ -1992,11 +1992,12 @@ async fn law_show_says_why_a_held_rendition_answered_no_article() {
     .await;
 
     let output = bron(&server, &["law", "show", "BWBR0008691"]).await;
-    let said = String::from_utf8(output.stderr.clone()).unwrap();
 
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    assert!(said.contains("2019-01-01_0"), "{said}");
-    assert!(said.contains("too_large"), "{said}");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        "BWBR0008691 rendition 2019-01-01_0 is held and was not parsed (too_large), so it answers no articles.\n"
+    );
 }
 
 /// The address printed under a span is built from what the service called the
@@ -3801,4 +3802,91 @@ async fn a_stated_failure_carries_its_message_and_its_detail_as_sent() {
         ),
         "{said}"
     );
+}
+
+/// A lid without an article is lid N of every article that prints one, as
+/// the API and the MCP answer it, and a person reads each as any list of
+/// articles.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_asks_for_one_lid_of_every_article() {
+    let two = ARTICLE.replace(
+        r#"]}]},
+ "caveats""#,
+        r#"]},{"kind":"artikel","position":4,"number":"4","label":"Artikel 4","stam_id":"2760034","span":{"start":3000,"end":4000},"paragraphs":[{"number":"2","rendered":"Het tweede lid van artikel 4.","span":{"start":3100,"end":3200}}]}]},
+ "caveats""#,
+    );
+    assert_ne!(two, ARTICLE);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0005289/articles"))
+        .and(query_param("paragraph", "2"))
+        .and(query_param_is_missing("number"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(two, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["law", "show", "BWBR0005289", "--paragraph", "2"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.lines().any(|l| l == "Artikel 3"), "{text}");
+    assert!(text.lines().any(|l| l == "Artikel 4"), "{text}");
+    assert!(text.contains("2. Het tweede lid van artikel 4."), "{text}");
+}
+
+/// A rendition that is held and read and prints no article is an answer:
+/// `--json` is the empty list as sent, and a person reads in one line that it
+/// prints none and where its other units are.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rendition_that_prints_no_articles_says_so_and_points_at_its_parts() {
+    let none = serde_json::json!({
+        "bron": 1,
+        "grade": "authority",
+        "as_of": "2026-09-23",
+        "as_known_on": "2026-09-23",
+        "data": {
+            "regulation_id": "BWBR0045754",
+            "expression": {
+                "regulation_id": "BWBR0045754",
+                "label": "2026-09-11_0",
+                "in_force": {"from": "2026-09-11"},
+                "withdrawn": false,
+                "held": true,
+                "upstream_hash_check": "matches",
+                "blob": EARLIER_BLOB,
+            },
+            "articles": [],
+        },
+    })
+    .to_string();
+    let server = answering("GET", "/api/v1/regulations/BWBR0045754/articles", &none).await;
+
+    let json = bron(&server, &["--json", "law", "show", "BWBR0045754"]).await;
+    assert_eq!(json.status.code(), Some(0), "{json:?}");
+    assert_eq!(stdout(&json), format!("{none}\n"));
+
+    for (flags, line) in [
+        (
+            &[][..],
+            "BWBR0045754 rendition 2026-09-11_0 prints no articles; `law parts BWBR0045754` answers the other units it prints.\n",
+        ),
+        (
+            &["--not-commenced"][..],
+            "BWBR0045754 rendition 2026-09-11_0 prints no article it does not yet apply; `law parts BWBR0045754 --not-commenced` answers its waiting units of every kind.\n",
+        ),
+        (
+            &["--paragraph", "9"][..],
+            "BWBR0045754 rendition 2026-09-11_0 prints no article with a lid 9; `law parts BWBR0045754` answers the other units it prints.\n",
+        ),
+    ] {
+        let args: Vec<&str> = ["law", "show", "BWBR0045754"]
+            .iter()
+            .chain(flags)
+            .copied()
+            .collect();
+        let output = bron(&server, &args).await;
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {output:?}");
+        assert_eq!(stdout(&output), line, "{args:?}");
+    }
 }
