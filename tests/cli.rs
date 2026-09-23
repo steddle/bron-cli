@@ -3329,29 +3329,27 @@ async fn every_name_the_routes_declare_can_be_sent() {
     }
 }
 
-/// Production's answer for artikel 6:162 BW lid 2 on 2026-09-24, edited by
-/// hand to add the `provenance_of_article` caveat the service is about to
-/// state on an answer narrowed to one lid.
-const LID_WITH_ARTICLE_PROVENANCE: &str =
-    "bron-articles-BWBR0005289-162-lid-2-edited-provenance.json";
+/// Production's answer for artikel 3:305a BW lid 3 on 2026-09-24: narrowed
+/// to one lid, with the `provenance_of_article` caveat.
+const LID_WITH_ARTICLE_PROVENANCE: &str = "bron-articles-BWBR0005291-305a-lid-3.json";
 
 /// The fields the register records per article are said to be the
 /// article's, not the lid's, in words and not as a limit without a sentence.
 #[tokio::test(flavor = "multi_thread")]
 async fn provenance_of_article_says_the_fields_describe_the_article() {
     let sent = fixture(LID_WITH_ARTICLE_PROVENANCE);
-    let server = answering("GET", "/api/v1/regulations/BWBR0005289/articles", &sent).await;
+    let server = answering("GET", "/api/v1/regulations/BWBR0005291/articles", &sent).await;
 
     let output = bron(
         &server,
         &[
             "law",
             "show",
-            "BWBR0005289",
+            "BWBR0005291",
             "--article",
-            "162",
+            "305a",
             "--paragraph",
-            "2",
+            "3",
         ],
     )
     .await;
@@ -3360,14 +3358,15 @@ async fn provenance_of_article_says_the_fields_describe_the_article() {
     assert!(output.status.success(), "{output:?}");
     assert!(
         text.contains(
-            "these fields describe article(s) 162, not the lid: amended_by, dossiers, \
-             in_force_from, effect, remarks. The register records provenance per article."
+            "these fields describe article(s) 305a, not the lid: amended_by, dossiers, \
+             commenced_by, in_force_from, effect, remarks. The register records provenance per \
+             article."
         ),
         "{text}"
     );
     assert!(!text.contains("no sentence for"), "{text}");
 
-    let json = bron(&server, &["--json", "law", "show", "BWBR0005289"]).await;
+    let json = bron(&server, &["--json", "law", "show", "BWBR0005291"]).await;
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
@@ -4417,6 +4416,24 @@ async fn law_feed_with_a_negative_cursor_is_the_services_refusal() {
         vec![Carries::Param("since", "-1")],
         "invalid_parameter",
         "since must be a whole number from 0",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_with_a_negative_limit_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "dossier", "show", "34608", "--limit", "-1", "--offset", "-1",
+        ],
+        "GET",
+        "/api/v1/dossiers/34608",
+        vec![
+            Carries::Param("limit", "-1"),
+            Carries::Param("offset", "-1"),
+        ],
+        "invalid_parameter",
+        "limit must be between 1 and 1000",
     )
     .await;
 }

@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::Outcome;
 use crate::sources::Client;
 
-use super::Service;
 use super::client::Answered;
 use super::model::Span;
+use super::{Service, window};
 
 /// What a search over the officiële publicaties asks for. Mirrors the
 /// service's own body: at least one of `q`, `collection` and `dossier`, which
@@ -143,12 +143,7 @@ impl Service {
         let url = self.route(&["publications", id])?;
 
         let mut query = Vec::new();
-        if let Some(limit) = limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, limit, offset);
         if rendered {
             query.push(("rendered", "1"));
         }

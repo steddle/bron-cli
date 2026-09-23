@@ -126,12 +126,7 @@ impl Service {
         let url = format!("{}/api/v1/regulations", self.base);
 
         let mut query = vec![("q", ask.query)];
-        if let Some(limit) = ask.limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = ask.offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, ask.limit, ask.offset);
 
         if let Some(kind) = ask.kind {
             query.push(("type", kind));
@@ -175,12 +170,7 @@ impl Service {
         let url = format!("{}/api/v1/expressions", self.base);
 
         let mut query = Vec::new();
-        if let Some(limit) = ask.limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = ask.offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, ask.limit, ask.offset);
 
         for (name, day) in [
             ("in_force_from", ask.from),
@@ -215,9 +205,7 @@ impl Service {
         let url = format!("{}/api/v1/feed", self.base);
 
         let mut query = Vec::new();
-        if let Some(limit) = limit {
-            query.push(("limit", limit));
-        }
+        window(&mut query, limit, None);
 
         // The service requires a cursor and says so where none is sent.
         if let Some(since) = since {
@@ -236,12 +224,7 @@ impl Service {
         let url = format!("{}/api/v1/upcoming", self.base);
 
         let mut query = Vec::new();
-        if let Some(limit) = ask.limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = ask.offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, ask.limit, ask.offset);
 
         if let Some(day) = ask.as_of {
             query.push(("as_of", day));
@@ -314,12 +297,7 @@ impl Service {
         let url = self.route(&["regulations", law, "parts"])?;
 
         let mut query = vec![("rendered", "1")];
-        if let Some(limit) = ask.limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = ask.offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, ask.limit, ask.offset);
 
         if let Some(date) = ask.as_of {
             query.push(("as_of", date));
@@ -363,12 +341,7 @@ impl Service {
         let url = self.route(&["regulations", law, "amendments"])?;
 
         let mut query = Vec::new();
-        if let Some(limit) = limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, limit, offset);
 
         self.read(client, client.get(&url).query(&query))
     }
@@ -383,12 +356,7 @@ impl Service {
         let url = self.route(&["regulations", law, "relations"])?;
 
         let mut query = Vec::new();
-        if let Some(limit) = ask.limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = ask.offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, ask.limit, ask.offset);
 
         if let Some(day) = ask.as_of {
             query.push(("as_of", day));
@@ -539,6 +507,21 @@ impl Service {
     /// name a document rather than whatever arrived in that field.
     pub fn blob_url(&self, digest: &str) -> Option<String> {
         is_sha256_hex(digest).then(|| format!("{}/api/v1/blobs/{digest}", self.base))
+    }
+}
+
+/// Puts a page on a query: each of `limit` and `offset` only where the caller
+/// typed it, so the service's own window is the default.
+fn window<'a>(
+    query: &mut Vec<(&'static str, &'a str)>,
+    limit: Option<&'a str>,
+    offset: Option<&'a str>,
+) {
+    if let Some(limit) = limit {
+        query.push(("limit", limit));
+    }
+    if let Some(offset) = offset {
+        query.push(("offset", offset));
     }
 }
 

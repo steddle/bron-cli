@@ -651,11 +651,11 @@ pub enum DossierCmd {
 
         /// How many papers to answer; untyped, the service's window. Sent
         /// exactly as typed.
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         limit: Option<String>,
 
         /// How many papers to skip; untyped, none. Sent exactly as typed.
-        #[arg(long)]
+        #[arg(long, allow_negative_numbers = true)]
         offset: Option<String>,
     },
 }

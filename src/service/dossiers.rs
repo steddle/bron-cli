@@ -11,8 +11,8 @@ use serde::Deserialize;
 use crate::error::Outcome;
 use crate::sources::Client;
 
-use super::Service;
 use super::client::Answered;
+use super::{Service, window};
 
 /// One kamerstukdossier, its acts and its papers.
 #[derive(Debug, Deserialize)]
@@ -86,12 +86,7 @@ impl Service {
         if let Some(kind) = kind {
             query.push(("kind", kind));
         }
-        if let Some(limit) = limit {
-            query.push(("limit", limit));
-        }
-        if let Some(offset) = offset {
-            query.push(("offset", offset));
-        }
+        window(&mut query, limit, offset);
 
         self.read(client, client.get(&url).query(&query))
     }
