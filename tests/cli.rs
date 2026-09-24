@@ -3373,11 +3373,14 @@ async fn provenance_of_article_says_the_fields_describe_the_article() {
 /// Production's ranking for 'schadevergoeding bij onrechtmatige daad' at a
 /// window of 3 on 2026-09-24, folded by hand as the service now folds it:
 /// artikel 6:162 BW lid 1, which ranked as a hit of its own, stands under
-/// its article in `leden`.
+/// its article in `leden`. The article and its lid are each given one other
+/// place, in the rendition before, so the answer holds `also` on both.
 const RANKING_WITH_LEDEN: &str = "bron-search-onrechtmatige-daad-limit-3-edited-leden.json";
 
 /// A unit's other leden that ranked are rows under it, each with its own
-/// distance and finder, and not hits of their own.
+/// distance and finder, and not hits of their own. They follow the unit's own
+/// other places, and each lid's places follow it, so no `also` row reads as
+/// another text's.
 #[tokio::test(flavor = "multi_thread")]
 async fn find_prints_the_leden_that_ranked_under_their_unit() {
     let sent = fixture(RANKING_WITH_LEDEN);
@@ -3396,10 +3399,20 @@ async fn find_prints_the_leden_that_ranked_under_their_unit() {
         .iter()
         .position(|row| row.contains("article") && row.contains("BWBR0005289"))
         .expect("the article's row");
-    assert!(rows[article + 1].contains("same unit"), "{text}");
-    assert!(rows[article + 1].contains("lid 1"), "{text}");
-    assert!(rows[article + 1].contains("0.387"), "{text}");
-    assert!(rows[article + 1].contains("vector"), "{text}");
+    let [place, lid, lid_place] = [1, 2, 3].map(|below| rows[article + below]);
+    assert!(
+        place.contains("also") && place.contains("article"),
+        "{text}"
+    );
+    assert!(place.contains("2025-07-01_0"), "{text}");
+    assert!(lid.contains("same unit") && lid.contains("lid 1"), "{text}");
+    assert!(lid.contains("0.387") && lid.contains("vector"), "{text}");
+    assert!(
+        lid_place.contains("also") && lid_place.contains("lid 1"),
+        "{text}"
+    );
+    assert!(lid_place.contains("2025-07-01_0"), "{text}");
+    assert!(rows[article + 4].contains("BWBR0028749"), "{text}");
 
     let json = bron(&server, &["--json", "find", "schadevergoeding"]).await;
     assert_eq!(stdout(&json), format!("{sent}\n"));

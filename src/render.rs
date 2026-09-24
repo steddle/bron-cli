@@ -12,8 +12,8 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::{
-    Article, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Produced, Regulation,
-    Relation, Remark, SearchData, SearchLid, Upcoming, name,
+    Article, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Place, Produced,
+    Regulation, Relation, Remark, SearchData, SearchLid, Upcoming, name,
 };
 use bron::wire::{AppealStatus, Caveat, Envelope};
 
@@ -122,6 +122,15 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                         };
                         writeln!(out, "{}", row.line())?;
 
+                        // The same words in other places, each named as the
+                        // hit is, so a text sitting in two regulations is not
+                        // read as found once.
+                        write_places(&hit.also, out)?;
+                        let unnamed = (hit.places as usize).saturating_sub(1 + hit.also.len());
+                        if unnamed > 0 {
+                            writeln!(out, "{:>5}  and {unnamed} more place(s)", "")?;
+                        }
+
                         // The unit's other leden that ranked, in rank order,
                         // under the unit rather than as hits of their own.
                         for lid in &hit.leden {
@@ -143,34 +152,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                                 name: &hit_name,
                             };
                             writeln!(out, "{}", row.line())?;
-                        }
-
-                        // The same words in other places, each named as the
-                        // hit is, so a text sitting in two regulations is not
-                        // read as found once.
-                        for place in &hit.also {
-                            let place_unit = unit_of(&place.unit, place.lid.as_ref());
-                            let place_name = name(
-                                place.label.as_deref(),
-                                place.number.as_deref(),
-                                &place.kind,
-                                None,
-                            );
-                            // No distance and no finder: neither is stated of
-                            // another place, only of the hit.
-                            let row = HitRow {
-                                source: "also",
-                                unit: &place_unit,
-                                regulation: &place.regulation_id,
-                                expression: &place.expression,
-                                name: &place_name,
-                                ..HitRow::default()
-                            };
-                            writeln!(out, "{}", row.line())?;
-                        }
-                        let unnamed = (hit.places as usize).saturating_sub(1 + hit.also.len());
-                        if unnamed > 0 {
-                            writeln!(out, "{:>5}  and {unnamed} more place(s)", "")?;
+                            write_places(&lid.also, out)?;
                         }
                     }
                 }
@@ -1362,6 +1344,32 @@ fn rendition_legend(renditions: &[Expression], err: &mut impl Write) -> io::Resu
 
 /// Which unit a text was found as: a numbered lid, a lid the register numbers
 /// not, or the whole article.
+/// The other places the text above sits, each named as a hit is.
+///
+/// No distance and no finder: neither is stated of another place, only of
+/// the text that ranked.
+fn write_places(places: &[Place], out: &mut impl Write) -> io::Result<()> {
+    for place in places {
+        let place_unit = unit_of(&place.unit, place.lid.as_ref());
+        let place_name = name(
+            place.label.as_deref(),
+            place.number.as_deref(),
+            &place.kind,
+            None,
+        );
+        let row = HitRow {
+            source: "also",
+            unit: &place_unit,
+            regulation: &place.regulation_id,
+            expression: &place.expression,
+            name: &place_name,
+            ..HitRow::default()
+        };
+        writeln!(out, "{}", row.line())?;
+    }
+    Ok(())
+}
+
 fn unit_of(unit: &str, lid: Option<&SearchLid>) -> String {
     match lid.and_then(|lid| lid.number.as_ref()) {
         Some(number) => format!("lid {number}"),

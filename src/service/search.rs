@@ -156,6 +156,9 @@ pub struct RankedLid {
     #[serde(default)]
     pub distance: Option<f64>,
     pub found_by: Vec<String>,
+    /// The other places this lid's text sits, as on a hit.
+    #[serde(default)]
+    pub also: Vec<Place>,
 }
 
 /// Another place a hit's text sits.
