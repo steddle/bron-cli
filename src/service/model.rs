@@ -548,6 +548,9 @@ pub struct Dossier {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Paragraph {
     pub number: Option<String>,
+    /// On the later side of a comparison: the number the same words carried
+    /// on the earlier side, where the lid was renumbered.
+    pub renumbered_from: Option<String>,
     /// The service's reading of the bytes at `span`, present only where
     /// `rendered=1` asked for it.
     pub rendered: Option<String>,
@@ -708,6 +711,7 @@ mod tests {
     fn paragraph(number: Option<&str>, text: &str) -> Paragraph {
         Paragraph {
             number: number.map(str::to_string),
+            renumbered_from: None,
             rendered: Some(text.to_string()),
             raw: None,
             jci: None,

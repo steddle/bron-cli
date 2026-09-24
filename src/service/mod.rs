@@ -40,7 +40,7 @@ pub use publications::{
     Manifestation, Publication, PublicationDossier, PublicationHit, PublicationQuery,
     PublicationSearch, PublicationUnit,
 };
-pub use search::{Cited, Place, SearchData, SearchHit, SearchLid, SearchRequest};
+pub use search::{Cited, Place, RankedLid, SearchData, SearchHit, SearchLid, SearchRequest};
 
 /// Where the service lives. Overrides [`DEFAULT`].
 const ENV: &str = "BRON_MIRROR";

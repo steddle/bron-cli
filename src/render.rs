@@ -122,6 +122,29 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                         };
                         writeln!(out, "{}", row.line())?;
 
+                        // The unit's other leden that ranked, in rank order,
+                        // under the unit rather than as hits of their own.
+                        for lid in &hit.leden {
+                            let lid_unit = lid
+                                .number
+                                .as_ref()
+                                .map_or_else(|| "lid".to_string(), |n| format!("lid {n}"));
+                            let lid_distance = lid
+                                .distance
+                                .map_or_else(|| "    -".to_string(), |d| format!("{d:.3}"));
+                            let lid_found_by = lid.found_by.join("+");
+                            let row = HitRow {
+                                distance: &lid_distance,
+                                source: "same unit",
+                                unit: &lid_unit,
+                                regulation: &hit.regulation_id,
+                                expression: &hit.expression,
+                                found_by: &lid_found_by,
+                                name: &hit_name,
+                            };
+                            writeln!(out, "{}", row.line())?;
+                        }
+
                         // The same words in other places, each named as the
                         // hit is, so a text sitting in two regulations is not
                         // read as found once.
@@ -846,6 +869,13 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     (Some(from), None) => writeln!(out, "           span {} (from)", span(from))?,
                     (None, Some(to)) => writeln!(out, "           span {} (to)", span(to))?,
                     (None, None) => {}
+                }
+                // A lid the later side prints under another number with the
+                // same words, which the service matched on the text.
+                for lid in change.to.iter().flat_map(|to| &to.paragraphs) {
+                    if let (Some(number), Some(was)) = (&lid.number, &lid.renumbered_from) {
+                        writeln!(out, "           lid {number} was lid {was}, word for word")?;
+                    }
                 }
                 // Each side's remarks stand in that side's document.
                 for (side, unit) in [("from", &change.from), ("to", &change.to)] {

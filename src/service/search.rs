@@ -141,6 +141,21 @@ pub struct SearchHit {
     /// The other places, up to 20 in all.
     #[serde(default)]
     pub also: Vec<Place>,
+    /// The unit's other leden whose own text ranked, in the order they
+    /// ranked. The hit is the unit's best-ranked text, so each unit is named
+    /// once.
+    #[serde(default)]
+    pub leden: Vec<RankedLid>,
+}
+
+/// One more lid of a hit's unit that ranked.
+#[derive(Debug, Deserialize)]
+pub struct RankedLid {
+    pub number: Option<String>,
+    /// Absent where the lid's text has no vector.
+    #[serde(default)]
+    pub distance: Option<f64>,
+    pub found_by: Vec<String>,
 }
 
 /// Another place a hit's text sits.

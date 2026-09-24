@@ -3370,6 +3370,80 @@ async fn provenance_of_article_says_the_fields_describe_the_article() {
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
+/// Production's ranking for 'schadevergoeding bij onrechtmatige daad' at a
+/// window of 3 on 2026-09-24, folded by hand as the service now folds it:
+/// artikel 6:162 BW lid 1, which ranked as a hit of its own, stands under
+/// its article in `leden`.
+const RANKING_WITH_LEDEN: &str = "bron-search-onrechtmatige-daad-limit-3-edited-leden.json";
+
+/// A unit's other leden that ranked are rows under it, each with its own
+/// distance and finder, and not hits of their own.
+#[tokio::test(flavor = "multi_thread")]
+async fn find_prints_the_leden_that_ranked_under_their_unit() {
+    let sent = fixture(RANKING_WITH_LEDEN);
+    let server = answering("POST", "/api/v1/search", &sent).await;
+
+    let output = bron(
+        &server,
+        &["find", "schadevergoeding bij onrechtmatige daad"],
+    )
+    .await;
+    let text = stdout(&output);
+    let rows: Vec<&str> = text.lines().collect();
+
+    assert!(output.status.success(), "{output:?}");
+    let article = rows
+        .iter()
+        .position(|row| row.contains("article") && row.contains("BWBR0005289"))
+        .expect("the article's row");
+    assert!(rows[article + 1].contains("same unit"), "{text}");
+    assert!(rows[article + 1].contains("lid 1"), "{text}");
+    assert!(rows[article + 1].contains("0.387"), "{text}");
+    assert!(rows[article + 1].contains("vector"), "{text}");
+
+    let json = bron(&server, &["--json", "find", "schadevergoeding"]).await;
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
+/// Production's comparison of artikel 3:305a BW between 2019-06-01 and
+/// 2020-06-01 on 2026-09-24, with `renumbered_from` added by hand to lid 7 of
+/// the later side: production states it only where a lid moved.
+const CHANGES_WITH_RENUMBERED_LID: &str =
+    "bron-changes-BWBR0005291-305a-2019-06-01-to-2020-06-01-edited-renumbered.json";
+
+/// A lid whose words stand under another number on the later side reads as
+/// moved, in words.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_changes_says_a_lid_was_renumbered_word_for_word() {
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/BWBR0005291/changes",
+        &fixture(CHANGES_WITH_RENUMBERED_LID),
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "changes",
+            "BWBR0005291",
+            "--from",
+            "2019-06-01",
+            "--to",
+            "2020-06-01",
+            "--article",
+            "305a",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(text.contains("lid 7 was lid 6, word for word"), "{text}");
+    assert_eq!(text.matches("word for word").count(), 1, "{text}");
+}
+
 /// A bare question sends no page: the service's window is the default, so the
 /// CLI and the MCP answer the same question alike. `law show` and `law
 /// versions` are the exception, asking for the whole set with `limit=none`.
