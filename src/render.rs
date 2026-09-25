@@ -1219,13 +1219,7 @@ fn write_unit(
     write_remarks(unit.remarks.as_deref().unwrap_or_default(), "", out)?;
     if let Some(act) = &unit.amended_by {
         let effect = unit.effect.as_deref().unwrap_or("wijziging");
-        // A withdrawn change was still published by its act; it never put
-        // anything in force.
-        if not_commenced(unit) || unit.withdrawn.is_some() {
-            write!(out, "published by {act} ({effect})")?;
-        } else {
-            write!(out, "in force through {act} ({effect})")?;
-        }
+        write!(out, "published by {act} ({effect})")?;
         if let Some(dossiers) = &unit.dossiers
             && !dossiers.is_empty()
         {
@@ -1237,6 +1231,14 @@ fn write_unit(
             write!(out, ", dossier {numbers}")?;
         }
         writeln!(out)?;
+    }
+    // A withdrawn change was still published by its act; it never put
+    // anything in force.
+    if let Some(besluit) = &unit.commenced_by
+        && !not_commenced(unit)
+        && unit.withdrawn.is_none()
+    {
+        writeln!(out, "in force through {besluit}")?;
     }
     // bron's reading and not the publisher's, so each line says so and
     // carries the digest and span a reader checks it against.

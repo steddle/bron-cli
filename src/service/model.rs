@@ -425,6 +425,7 @@ pub struct Article {
     /// `amended_by`. Absent where the rendition has not been read for them,
     /// empty where it was and states none.
     pub dossiers: Option<Vec<Dossier>>,
+    pub commenced_by: Option<String>,
     pub effect: Option<String>,
     pub status: Option<String>,
     /// The language of the treaty text the unit stands in, and whether that
@@ -792,6 +793,7 @@ mod tests {
             stam_id: "1".into(),
             amended_by: None,
             dossiers: None,
+            commenced_by: None,
             effect: None,
             status: None,
             lang: None,

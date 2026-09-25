@@ -3464,6 +3464,26 @@ async fn law_show_prints_the_amendementen_that_change_an_article_as_bron_s_readi
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
+/// The act that changed an article and the besluit that put the change in
+/// force are two publications, and each line names its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_names_the_besluit_that_put_an_article_in_force_apart_from_its_act() {
+    let sent = fixture(ARTICLE_WITH_AMENDMENTS);
+    let server = answering("GET", "/api/v1/regulations/BWBR0005290/articles", &sent).await;
+
+    let output = bron(&server, &["law", "show", "BWBR0005290", "--article", "232"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "published by stb-2023-480 (wijziging), dossier 36195\nin force through stb-2024-152\n"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("in force through stb-2023-480"), "{text}");
+}
+
 /// Production's ranking for 'schadevergoeding bij onrechtmatige daad' at a
 /// window of 3 on 2026-09-24, folded by hand as the service now folds it:
 /// artikel 6:162 BW lid 1, which ranked as a hit of its own, stands under

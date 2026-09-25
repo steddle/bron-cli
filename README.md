@@ -47,12 +47,13 @@ Artikel 119a
 source: c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3 (349072..361267)
 https://bron.steddle.com/api/v1/blobs/c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3
 jci1.3:c:BWBR0005289&boek=6&titeldeel=1&afdeling=11&artikel=119a&z=2019-04-01&g=2019-04-01
-in force through stb-2017-170 (wijziging)
+published by stb-2017-170 (wijziging), dossier 34559
+in force through stb-2017-171
 ```
 
 `law show` answers articles. What a rendition prints beside them, the aanhef, a bijlage, the closing formula, is `law parts`: `bron law parts BWBR0001941 --kind bijlage --number Ia`, or `--position` for a unit that prints no number.
 
-Every answer ends with the digest of the document it was read from, where those bytes can be fetched, the byte range inside them, and the act that put that text in force. `bron blob` makes that check one command: it fetches the document, hashes the bytes as they arrive, refuses any that hash to something else, and hands over what the digest names, or the span cut from it.
+Every answer ends with the digest of the document it was read from, where those bytes can be fetched, the byte range inside them, the act that published that text and the one that put it in force. `bron blob` makes that check one command: it fetches the document, hashes the bytes as they arrive, refuses any that hash to something else, and hands over what the digest names, or the span cut from it.
 
 ```
 $ bron blob c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3 --span 349072..361267
