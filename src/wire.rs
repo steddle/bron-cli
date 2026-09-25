@@ -420,6 +420,25 @@ pub enum Caveat {
         fields: Vec<String>,
     },
 
+    /// The answer carries `passages` for `articles`: bron read which passage
+    /// of the parliamentary papers explains each out of the passage's heading
+    /// and the bill's formula, and no publisher states it. `readings` are the
+    /// versions of that reading.
+    MachineReading {
+        articles: Vec<String>,
+        readings: Vec<u32>,
+    },
+
+    /// A toelichting of the dossier behind each of `articles` was read and no
+    /// passage of it names the article, which is not that the legislator said
+    /// nothing about it.
+    PassageNotRead { articles: Vec<String> },
+
+    /// A passage of the memorie van toelichting for each of `articles`
+    /// explains a place in the bill the act prints in other words: not the
+    /// text in force.
+    ExplainsEarlierText { articles: Vec<String> },
+
     /// `count` units printed as not yet in force are left out of what waits,
     /// because the register's own remark on each says the change will not
     /// take effect.
@@ -605,6 +624,16 @@ impl Caveat {
                 articles: Vec<String>,
                 fields: Vec<String>,
             },
+            MachineReading {
+                articles: Vec<String>,
+                readings: Vec<u32>,
+            },
+            PassageNotRead {
+                articles: Vec<String>,
+            },
+            ExplainsEarlierText {
+                articles: Vec<String>,
+            },
             WordsUnsearched {
                 words: Vec<String>,
             },
@@ -729,6 +758,11 @@ impl Caveat {
             Ok(Stated::ProvenanceOfArticle { articles, fields }) => {
                 Self::ProvenanceOfArticle { articles, fields }
             }
+            Ok(Stated::MachineReading { articles, readings }) => {
+                Self::MachineReading { articles, readings }
+            }
+            Ok(Stated::PassageNotRead { articles }) => Self::PassageNotRead { articles },
+            Ok(Stated::ExplainsEarlierText { articles }) => Self::ExplainsEarlierText { articles },
             Ok(Stated::WordsUnsearched { words }) => Self::WordsUnsearched { words },
             Ok(Stated::PlacesRead {
                 bound,

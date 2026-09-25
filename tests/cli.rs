@@ -3370,6 +3370,60 @@ async fn provenance_of_article_says_the_fields_describe_the_article() {
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
+/// Production's answer for artikel 7:271 BW as in force on 2024-08-01, asked
+/// on 2026-09-25: the memorie van toelichting's passage on onderdeel B of the
+/// Wet vaste huurcontracten, read through the bill, whose words the
+/// Staatsblad prints otherwise after the amendementen.
+const ARTICLE_WITH_PASSAGES: &str = "bron-articles-BWBR0005290-271-passages.json";
+
+/// A passage bron read is printed as bron's reading, with the paper's
+/// citation, the digest and span it rests on, the bill's formula it went
+/// through and that it explains an earlier text, and the caveats in words.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_prints_the_passages_that_explain_an_article_as_bron_s_reading() {
+    let sent = fixture(ARTICLE_WITH_PASSAGES);
+    let server = answering("GET", "/api/v1/regulations/BWBR0005290/articles", &sent).await;
+
+    let output = bron(&server, &["law", "show", "BWBR0005290", "--article", "271"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "explained in Kamerstukken II 2021/22, 36195, nr. 3 (bron's reading): \
+             b0de7efd6ae84c8adcdf8e6d25ffb33f0749ff8b73acacdb50c8e3634d1324af (61395..63412)"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "  through the bill kst-36195-2: \
+             564d0ed1e4adebd93315ff11ae63ed2fb151545dd1f881153d8479e0e4e25727 (2698..2749)"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("  explains the bill's words, which stb-2023-480 prints otherwise"),
+        "{text}"
+    );
+    assert!(
+        text.contains("(reading 3), which no publisher states"),
+        "{text}"
+    );
+    assert!(
+        text.contains("explains the bill's words at a place the act prints otherwise"),
+        "{text}"
+    );
+    assert!(!text.contains("no sentence for"), "{text}");
+
+    let json = bron(
+        &server,
+        &["--json", "law", "show", "BWBR0005290", "--article", "271"],
+    )
+    .await;
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
 /// Production's ranking for 'schadevergoeding bij onrechtmatige daad' at a
 /// window of 3 on 2026-09-24, folded by hand as the service now folds it:
 /// artikel 6:162 BW lid 1, which ranked as a hit of its own, stands under

@@ -1238,6 +1238,30 @@ fn write_unit(
         }
         writeln!(out)?;
     }
+    // bron's reading and not the publisher's, so each line says so and
+    // carries the digest and span a reader checks it against.
+    for passage in unit.passages.as_deref().unwrap_or_default() {
+        let paper = passage.citation.as_deref().unwrap_or(&passage.paper);
+        writeln!(
+            out,
+            "explained in {paper} (bron's reading): {} ({}..{})",
+            passage.stated_in, passage.span.start, passage.span.end
+        )?;
+        if let Some(through) = &passage.through {
+            writeln!(
+                out,
+                "  through the bill {}: {} ({}..{})",
+                through.paper, through.stated_in, through.span.start, through.span.end
+            )?;
+        }
+        if let Some(earlier) = &passage.earlier_text {
+            writeln!(
+                out,
+                "  explains the bill's words, which {} prints otherwise",
+                earlier.publication
+            )?;
+        }
+    }
     writeln!(out)
 }
 
@@ -1857,6 +1881,27 @@ fn caveat_line(caveat: &Caveat) -> String {
              provenance per article.",
             articles.join(", "),
             fields.join(", "),
+        ),
+        Caveat::MachineReading { articles, readings } => format!(
+            "note: the passages shown for article(s) {} are bron's reading of the parliamentary \
+             papers' headings and the bill's formulas (reading {}), which no publisher states; \
+             each is quoted by digest and span, so it can be checked against the paper.",
+            articles.join(", "),
+            readings
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        Caveat::PassageNotRead { articles } => format!(
+            "note: a toelichting of the dossier behind article(s) {} was read and gives it no \
+             passage of its own, which is not that the legislator said nothing about it.",
+            articles.join(", "),
+        ),
+        Caveat::ExplainsEarlierText { articles } => format!(
+            "note: a passage for article(s) {} explains the bill's words at a place the act \
+             prints otherwise, so it explains a text that is not the one in force.",
+            articles.join(", "),
         ),
         Caveat::UnitsWithdrawnByRemark { count } => format!(
             "note: {count} unit(s) the rendition prints as not yet in force are left out, because \

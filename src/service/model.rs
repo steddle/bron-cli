@@ -453,6 +453,10 @@ pub struct Article {
     /// Present only on a unit printed `nogniet` whose remark carries the
     /// register's fixed sentence for a change that never took effect.
     pub withdrawn: Option<Withdrawn>,
+    /// On `/articles`, the passages of the parliamentary papers bron read as
+    /// explaining the unit. Absent where no toelichting of its act's dossier
+    /// was read, empty where one was and none names it.
+    pub passages: Option<Vec<Passage>>,
     #[serde(default)]
     pub paragraphs: Vec<Paragraph>,
 }
@@ -536,6 +540,37 @@ pub fn name(
         (None, None, Some(position)) => format!("{kind} {position}"),
         (None, None, None) => kind.to_string(),
     }
+}
+
+/// A passage of a kamerstuk bron read as explaining a unit: a machine
+/// reading, at a span of the paper's own bytes.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Passage {
+    pub paper: String,
+    /// How a lawyer cites the paper. Absent where its metadata is not held.
+    pub citation: Option<String>,
+    pub stated_in: String,
+    pub span: Span,
+    /// The formula of the bill the passage's heading named, which names the
+    /// unit.
+    pub through: Option<PassagePlace>,
+    /// Where the act prints the place of the bill the passage explains in
+    /// other words.
+    pub earlier_text: Option<EarlierText>,
+}
+
+/// A span of one paper.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PassagePlace {
+    pub paper: String,
+    pub stated_in: String,
+    pub span: Span,
+}
+
+/// The act that prints a place of the bill in other words.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EarlierText {
+    pub publication: String,
 }
 
 /// A kamerstukdossier the BWB states for an act.
@@ -742,6 +777,7 @@ mod tests {
             images: Vec::new(),
             remarks: None,
             withdrawn: None,
+            passages: None,
             paragraphs: leden,
         }
     }
