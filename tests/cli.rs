@@ -5105,6 +5105,37 @@ async fn dossier_show_says_how_many_papers_are_not_held_yet() {
     assert_eq!(stdout(&json), format!("{answer}\n"));
 }
 
+/// Each paper prints the citation a lawyer writes, and a gewijzigd
+/// amendement's predecessor says what replaced it. The fixture is
+/// production's answer for 36195 on 2026-09-25, after citations and
+/// replacement chains shipped.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_prints_each_papers_citation_and_what_replaced_it() {
+    let answer = publication_fixture("bron-dossier-36195-cited.json");
+    let server = answering("GET", "/api/v1/dossiers/36195", &answer).await;
+
+    let output = bron(&server, &["dossier", "show", "36195"]).await;
+    let rows = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        rows.contains("  Kamerstukken II 2022/23, 36195, nr. 16\n"),
+        "{rows}"
+    );
+    assert!(
+        rows.contains("  Kamerstukken I 2022/23, 36195, D\n"),
+        "{rows}"
+    );
+    assert!(
+        rows.lines()
+            .any(|row| row.starts_with("kst-36195-8 ") && row.ends_with("replaced by kst-36195-16")),
+        "{rows}"
+    );
+
+    let json = bron(&server, &["--json", "dossier", "show", "36195"]).await;
+    assert_eq!(stdout(&json), format!("{answer}\n"));
+}
+
 /// `fates_not_read` says bron has not asked the Tweede Kamer about a
 /// dossier's amendementen yet, and such a paper prints no besluit at all,
 /// because 'no besluit stated' would say the Kamer answered. The fixture is

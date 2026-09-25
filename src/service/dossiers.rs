@@ -52,12 +52,21 @@ pub struct DossierPaper {
     pub kind: Option<String>,
     /// The paper's own words for itself.
     pub title: Option<String>,
+    /// How a lawyer cites it, `Kamerstukken II 2018/19, 34608, nr. 12`, as
+    /// the service builds it from the metadata it holds. Absent where it
+    /// holds none.
+    pub citation: Option<String>,
     pub published_on: Option<NaiveDate>,
     /// False where the service read the paper from the publisher for this
     /// answer and put it on its queue.
     pub held: bool,
+    /// The later paper of this dossier whose title says it replaces this
+    /// one; the besluit is taken on the last of a chain.
+    pub replaced_by: Option<String>,
     /// On an amendement or a motie, every besluit the Tweede Kamer's latest
-    /// answer states; empty where it states none. Absent on other kinds.
+    /// answer states; empty where it states none. Absent on other kinds,
+    /// where bron has not asked the Kamer, and on a replaced paper it holds
+    /// no besluit for.
     pub fates: Option<Vec<Fate>>,
 }
 

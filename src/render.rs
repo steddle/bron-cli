@@ -1111,9 +1111,15 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     }
                     None => {}
                 }
+                if let Some(later) = &paper.replaced_by {
+                    let _ = write!(row, "  replaced by {later}");
+                }
                 writeln!(out, "{row}")?;
                 if let Some(title) = &paper.title {
                     writeln!(out, "  {title}")?;
+                }
+                if let Some(citation) = &paper.citation {
+                    writeln!(out, "  {citation}")?;
                 }
             }
 
