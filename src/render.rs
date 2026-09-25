@@ -1097,8 +1097,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     let _ = write!(row, "  {day}");
                 }
                 let _ = write!(row, "  {}", paper.kind.as_deref().unwrap_or("-"));
-                // Absent on a kind nobody votes on; empty where the Tweede
-                // Kamer states no besluit, which is not a vote against.
+                // Absent on a kind nobody votes on and where bron has not
+                // asked the Tweede Kamer; empty where it states no besluit,
+                // which is not a vote against.
                 match paper.fates.as_deref() {
                     Some([]) => {
                         let _ = write!(row, "  no besluit stated");
@@ -1945,6 +1946,10 @@ fn caveat_line(caveat: &Caveat) -> String {
              Kamer's open data: not put to a vote, withdrawn, from before 2008 which it holds \
              nothing about, or a paper the open data files under more than one dossier, which \
              bron does not read. No besluit is not 'verworpen'."
+        ),
+        Caveat::FatesNotRead { papers } => format!(
+            "note: bron has not yet asked the Tweede Kamer about {papers} amendement(en) or \
+             motie(s) here, so no besluit is shown for them."
         ),
         Caveat::PapersNotHeld { count, papers } => format!(
             "note: {count} of the {papers} paper(s) the publisher lists for this dossier are not \

@@ -487,6 +487,11 @@ pub enum Caveat {
     /// not 'verworpen'.
     FateUnknown { papers: u32 },
 
+    /// Amendementen and moties of a dossier bron has not yet asked the
+    /// Tweede Kamer's open data about. Their `fates` is absent: no besluit is
+    /// answered, and none is said not to be stated.
+    FatesNotRead { papers: u32 },
+
     /// The dossier was read whole and the corpus does not hold every paper
     /// the publisher listed as its own: `count` of the `papers` it listed are
     /// left out of the answer while they are read again.
@@ -679,6 +684,9 @@ impl Caveat {
             FateUnknown {
                 papers: u32,
             },
+            FatesNotRead {
+                papers: u32,
+            },
             PapersNotHeld {
                 count: u32,
                 papers: u32,
@@ -808,6 +816,7 @@ impl Caveat {
             Ok(Stated::SourceTotalEstimated) => Self::SourceTotalEstimated,
             Ok(Stated::PapersBeforeDigital) => Self::PapersBeforeDigital,
             Ok(Stated::FateUnknown { papers }) => Self::FateUnknown { papers },
+            Ok(Stated::FatesNotRead { papers }) => Self::FatesNotRead { papers },
             Ok(Stated::PapersNotHeld { count, papers }) => Self::PapersNotHeld { count, papers },
             Ok(Stated::PublicationsLeftOut { count }) => Self::PublicationsLeftOut { count },
             Err(_) => Self::Unrecognised {

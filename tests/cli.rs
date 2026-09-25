@@ -5105,6 +5105,34 @@ async fn dossier_show_says_how_many_papers_are_not_held_yet() {
     assert_eq!(stdout(&json), format!("{answer}\n"));
 }
 
+/// `fates_not_read` says bron has not asked the Tweede Kamer about a
+/// dossier's amendementen yet, and such a paper prints no besluit at all,
+/// because 'no besluit stated' would say the Kamer answered. The fixture is
+/// production's answer for 36195 on 2026-09-25, before `bron:fates` first ran.
+#[tokio::test(flavor = "multi_thread")]
+async fn dossier_show_prints_no_besluit_where_the_tweede_kamer_was_not_asked() {
+    let answer = publication_fixture("bron-dossier-36195-fates-not-read.json");
+    let server = answering("GET", "/api/v1/dossiers/36195", &answer).await;
+
+    let output = bron(&server, &["dossier", "show", "36195"]).await;
+    let rows = stdout(&output);
+    let notes = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(rows.contains("kst-36195-16"), "{rows}");
+    assert!(!rows.contains("no besluit stated"), "{rows}");
+    assert!(
+        notes.contains(
+            "bron has not yet asked the Tweede Kamer about 21 amendement(en) or motie(s) here"
+        ),
+        "{notes}"
+    );
+    assert!(!notes.contains("no sentence for"), "{notes}");
+
+    let json = bron(&server, &["--json", "dossier", "show", "36195"]).await;
+    assert_eq!(stdout(&json), format!("{answer}\n"));
+}
+
 /// `publications_left_out` says a page holds fewer hits than the publisher
 /// ranked, and that `next` still walks on. The fixture is production's page
 /// for `Tesla` at a window of 8 on 2026-09-24: six hits, two left out.
