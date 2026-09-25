@@ -1262,6 +1262,40 @@ fn write_unit(
             )?;
         }
     }
+    for change in unit.amendments.as_deref().unwrap_or_default() {
+        let paper = change.citation.as_deref().unwrap_or(&change.paper);
+        writeln!(
+            out,
+            "changed by amendement {paper} (bron's reading): {} ({}..{})",
+            change.stated_in, change.span.start, change.span.end
+        )?;
+        if let Some(through) = &change.through {
+            writeln!(
+                out,
+                "  through the bill {}: {} ({}..{})",
+                through.paper, through.stated_in, through.span.start, through.span.end
+            )?;
+        }
+        match change.in_act {
+            Some(true) => writeln!(out, "  the act prints every word it puts in")?,
+            Some(false) => writeln!(out, "  the act does not print every word it puts in")?,
+            None => {}
+        }
+        let decided = change.decided_on.as_deref().unwrap_or(&change.paper);
+        match change.fates.as_deref() {
+            Some([]) => writeln!(out, "  no besluit stated on {decided}")?,
+            Some(fates) => writeln!(
+                out,
+                "  besluit on {decided}: {}",
+                fates
+                    .iter()
+                    .map(|fate| fate.decision.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?,
+            None => {}
+        }
+    }
     writeln!(out)
 }
 

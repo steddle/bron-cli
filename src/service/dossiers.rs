@@ -71,7 +71,7 @@ pub struct DossierPaper {
 }
 
 /// One besluit of the Tweede Kamer on a paper.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Fate {
     /// As the Tweede Kamer words it: `Stemmen - aangenomen`.
     pub decision: String,

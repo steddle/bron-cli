@@ -3424,6 +3424,46 @@ async fn law_show_prints_the_passages_that_explain_an_article_as_bron_s_reading(
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
+/// Production's answer for artikel 7:232 BW as in force on 2024-08-01, asked
+/// on 2026-09-25: amendement nr. 20 and its replacement nr. 31 of the Wet
+/// vaste huurcontracten, each read as changing the article and each found in
+/// the act, the besluit taken on nr. 31.
+const ARTICLE_WITH_AMENDMENTS: &str = "bron-articles-BWBR0005290-232-amendments.json";
+
+/// An amendement's change bron read is printed as bron's reading, with the
+/// paper's citation, the digest and range it rests on, and whether the act
+/// prints its words.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_prints_the_amendementen_that_change_an_article_as_bron_s_reading() {
+    let sent = fixture(ARTICLE_WITH_AMENDMENTS);
+    let server = answering("GET", "/api/v1/regulations/BWBR0005290/articles", &sent).await;
+
+    let output = bron(&server, &["law", "show", "BWBR0005290", "--article", "232"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "changed by amendement Kamerstukken II 2022/23, 36195, nr. 31 (bron's reading): \
+             cf1191078f129bf06b8434edced2ed923ff4566500b320e3ea8cb0aa13c269ed (1867..2122)"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("  the act prints every word it puts in"),
+        "{text}"
+    );
+    assert!(!text.contains("besluit on"), "{text}");
+    assert!(!text.contains("no sentence for"), "{text}");
+
+    let json = bron(
+        &server,
+        &["--json", "law", "show", "BWBR0005290", "--article", "232"],
+    )
+    .await;
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+}
+
 /// Production's ranking for 'schadevergoeding bij onrechtmatige daad' at a
 /// window of 3 on 2026-09-24, folded by hand as the service now folds it:
 /// artikel 6:162 BW lid 1, which ranked as a hit of its own, stands under

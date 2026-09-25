@@ -457,6 +457,10 @@ pub struct Article {
     /// explaining the unit. Absent where no toelichting of its act's dossier
     /// was read, empty where one was and none names it.
     pub passages: Option<Vec<Passage>>,
+    /// On `/articles`, the changes of amendementen bron read as reaching the
+    /// unit. Absent where no amendement of its act's dossier was read, empty
+    /// where they were and none reaches it.
+    pub amendments: Option<Vec<AmendmentChange>>,
     #[serde(default)]
     pub paragraphs: Vec<Paragraph>,
 }
@@ -557,6 +561,29 @@ pub struct Passage {
     /// Where the act prints the place of the bill the passage explains in
     /// other words.
     pub earlier_text: Option<EarlierText>,
+}
+
+/// A change an amendement proposes that bron read as reaching a unit: a
+/// machine reading, at a span of the amendement's own bytes.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AmendmentChange {
+    pub paper: String,
+    /// How a lawyer cites the amendement. Absent where its metadata is not
+    /// held.
+    pub citation: Option<String>,
+    pub stated_in: String,
+    pub span: Span,
+    /// The formula of the bill the change lands on.
+    pub through: Option<PassagePlace>,
+    /// Whether the act prints every word the change puts in. Absent where it
+    /// was not said.
+    pub in_act: Option<bool>,
+    /// The paper its chain of replacements ends in, which the Tweede Kamer
+    /// decides on.
+    pub decided_on: Option<String>,
+    /// The besluiten on that paper. Absent where bron has not asked the
+    /// Tweede Kamer, empty where it states none.
+    pub fates: Option<Vec<crate::service::Fate>>,
 }
 
 /// A span of one paper.
@@ -778,6 +805,7 @@ mod tests {
             remarks: None,
             withdrawn: None,
             passages: None,
+            amendments: None,
             paragraphs: leden,
         }
     }
