@@ -1919,9 +1919,11 @@ fn caveat_line(caveat: &Caveat) -> String {
             fields.join(", "),
         ),
         Caveat::MachineReading { articles, readings } => format!(
-            "note: the passages shown for article(s) {} are bron's reading of the parliamentary \
-             papers' headings and the bill's formulas (reading {}), which no publisher states; \
-             each is quoted by digest and span, so it can be checked against the paper.",
+            "note: the passages and amendementen shown for article(s) {} are bron's reading of \
+             the parliamentary papers' headings, the amendementen's places and the bill's \
+             formulas (reading {}), which no publisher states; a heading may number an article \
+             as the bill did, which the act can have given to another. Each is quoted by digest \
+             and span, so it can be checked against the paper.",
             articles.join(", "),
             readings
                 .iter()

@@ -3411,6 +3411,10 @@ async fn law_show_prints_the_passages_that_explain_an_article_as_bron_s_reading(
         "{text}"
     );
     assert!(
+        text.contains("a heading may number an article as the bill did"),
+        "{text}"
+    );
+    assert!(
         text.contains("explains the bill's words at a place the act prints otherwise"),
         "{text}"
     );
