@@ -2151,6 +2151,17 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: search over case law is still to come. This ranked the {count} ruling(s) \
              bron has read, not all case law: a ruling missing here may still exist."
         ),
+        Caveat::LinksNotShown => "note: the articles and rulings LiDO's computer recognised in \
+             this ruling are held and not shown until their accuracy is measured, so these are \
+             the publisher's relations alone"
+            .to_string(),
+        Caveat::LinksNotRead => "note: LiDO was not asked yet or did not answer what this ruling \
+             cites, so the articles and rulings it cites are missing, and their absence says nothing"
+            .to_string(),
+        Caveat::LinksUnresolved { count } => format!(
+            "note: LiDO named {count} article(s) this ruling cites that bron cannot place in any \
+             text it holds, so they are left out"
+        ),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
@@ -2749,6 +2760,58 @@ mod tests {
             err.contains("None says whether an appeal was lodged"),
             "{err}"
         );
+    }
+
+    /// The envelope production answered for ECLI:NL:HR:2026:1494 on
+    /// 2026-10-01: the publisher's relation, and the machine-read links held
+    /// back, said in words rather than as a key.
+    #[test]
+    fn case_relations_says_the_machine_read_links_are_held_back() {
+        let envelope: serde_json::Value = serde_json::from_str(
+            r#"{"bron":1,"grade":"authority","data":{"id":"ECLI:NL:HR:2026:1494","register":"rechtspraak","jurisdiction":"nl",
+              "relations":[{"kind":"cassatie","aanleg":"eerdereAanleg","to":{"scheme":"ecli","id":"ECLI:NL:GHDHA:2025:1555"},
+              "asserted":"publisher","stated_by":"rechtspraak","stated_in":"d856291936043cbfd968fcbf251c44dea02d8fd999fc4890eccde11f5cc20e06"}]},
+              "caveats":[{"kind":"links_not_shown"}]}"#,
+        )
+        .unwrap();
+        let relations: bron::service::DecisionRelations =
+            serde_json::from_value(envelope["data"].clone()).unwrap();
+        let mut answered = answered(relations);
+        answered.caveats = envelope["caveats"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(Caveat::stated)
+            .collect();
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(
+            &Answer::DecisionRelations(Box::new(answered)),
+            &mut out,
+            &mut err,
+        )
+        .unwrap();
+        let err = String::from_utf8(err).unwrap();
+
+        assert!(!err.contains("no sentence for"), "{err}");
+        assert!(err.contains("LiDO"), "{err}");
+        assert!(err.contains("the publisher's relations alone"), "{err}");
+    }
+
+    /// A limit on what LiDO answered names what is missing and why.
+    #[test]
+    fn the_links_caveats_say_what_is_missing() {
+        let read = super::caveat_line(&Caveat::stated(
+            &serde_json::json!({"kind": "links_not_read"}),
+        ));
+        let unresolved = super::caveat_line(&Caveat::stated(
+            &serde_json::json!({"kind": "links_unresolved", "count": 3}),
+        ));
+
+        assert!(!read.contains("no sentence for"), "{read}");
+        assert!(read.contains("not asked yet or did not answer"), "{read}");
+        assert!(!unresolved.contains("no sentence for"), "{unresolved}");
+        assert!(unresolved.contains("3 article(s)"), "{unresolved}");
     }
 
     /// A search hit built for a test: every field a caller does not care about

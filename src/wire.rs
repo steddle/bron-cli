@@ -522,6 +522,20 @@ pub enum Caveat {
     /// says nothing of whether one exists.
     SearchUpcoming { count: u32 },
 
+    /// The articles and rulings LiDO's computer recognised in a ruling's text
+    /// are held and left out until their accuracy has been measured, so the
+    /// relations answered are the publisher's alone.
+    LinksNotShown,
+
+    /// LiDO has not been asked what the ruling cites yet, or did not answer:
+    /// the articles and rulings it cites are missing, and their absence says
+    /// nothing.
+    LinksNotRead,
+
+    /// LiDO named `count` articles the ruling cites that bron could place in
+    /// no unit it holds, so they are left out.
+    LinksUnresolved { count: u32 },
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -726,6 +740,11 @@ impl Caveat {
             SearchUpcoming {
                 count: u32,
             },
+            LinksNotShown,
+            LinksNotRead,
+            LinksUnresolved {
+                count: u32,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -857,6 +876,9 @@ impl Caveat {
             Ok(Stated::PapersNotHeld { count, papers }) => Self::PapersNotHeld { count, papers },
             Ok(Stated::PublicationsLeftOut { count }) => Self::PublicationsLeftOut { count },
             Ok(Stated::SearchUpcoming { count }) => Self::SearchUpcoming { count },
+            Ok(Stated::LinksNotShown) => Self::LinksNotShown,
+            Ok(Stated::LinksNotRead) => Self::LinksNotRead,
+            Ok(Stated::LinksUnresolved { count }) => Self::LinksUnresolved { count },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
