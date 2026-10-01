@@ -517,6 +517,11 @@ pub enum Caveat {
     /// emptied.
     PublicationsLeftOut { count: u32 },
 
+    /// A search over rulings ranks the `count` rulings the service has read,
+    /// not the case law rechtspraak publishes: a ruling missing from the hits
+    /// says nothing of whether one exists.
+    SearchUpcoming { count: u32 },
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -718,6 +723,9 @@ impl Caveat {
             PublicationsLeftOut {
                 count: u32,
             },
+            SearchUpcoming {
+                count: u32,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -848,6 +856,7 @@ impl Caveat {
             Ok(Stated::FatesNotRead { papers }) => Self::FatesNotRead { papers },
             Ok(Stated::PapersNotHeld { count, papers }) => Self::PapersNotHeld { count, papers },
             Ok(Stated::PublicationsLeftOut { count }) => Self::PublicationsLeftOut { count },
+            Ok(Stated::SearchUpcoming { count }) => Self::SearchUpcoming { count },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },

@@ -7,7 +7,7 @@
 //! is carried here unread.
 
 use chrono::NaiveDate;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::Outcome;
 use crate::transport::Client;
@@ -121,7 +121,63 @@ pub struct Target {
     pub part: Option<String>,
 }
 
+/// A question over the rulings the service holds. Every field the caller
+/// typed is sent as typed and judged by the service; an untyped one is left
+/// out.
+#[derive(Debug, Serialize)]
+pub struct DecisionQuery<'a> {
+    pub q: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub court: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub form: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<&'a str>,
+}
+
+/// The rulings nearest a question, by identifier.
+#[derive(Debug, Deserialize)]
+pub struct DecisionSearch {
+    pub hits: Vec<DecisionHit>,
+}
+
+/// One ruling a question ranked, named by the run of its units that ranked
+/// first.
+#[derive(Debug, Deserialize)]
+pub struct DecisionHit {
+    pub ecli: String,
+    pub form: String,
+    pub court: Option<String>,
+    pub decided_on: Option<NaiveDate>,
+    pub paragraphs: OrdinalRange,
+    pub content_hashes: Vec<String>,
+    pub blob: String,
+    pub distance: f64,
+}
+
+/// A run of a ruling's units, by their ordinals.
+#[derive(Debug, Deserialize)]
+pub struct OrdinalRange {
+    pub from: u32,
+    pub to: u32,
+}
+
 impl Service {
+    /// The rulings the service holds, ranked against a question.
+    pub fn decision_search(
+        &self,
+        client: &Client,
+        ask: &DecisionQuery<'_>,
+    ) -> Outcome<Answered<DecisionSearch>> {
+        let url = self.route(&["decisions", "search"])?;
+
+        self.read(client, client.post(&url).json(ask))
+    }
+
     /// A ruling and its text, rendered. `limit` and `offset` page its units.
     pub fn decision(
         &self,

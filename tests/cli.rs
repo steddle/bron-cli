@@ -645,6 +645,47 @@ async fn find_sends_a_jurisdiction_as_typed() {
     assert!(output.status.success(), "{output:?}");
 }
 
+/// `case search` sends the question and every narrowing as typed in the body,
+/// and prints the service's envelope as sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_sends_the_question_in_the_body_and_prints_what_came_back() {
+    const HITS: &str = r#"{"bron":1,"grade":"authority","data":{"hits":[{"ecli":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Hoge Raad","decided_on":"2024-11-29","paragraphs":{"from":40,"to":42},"content_hashes":["a"],"blob":"d","distance":0.21}]},"caveats":[{"kind":"search_upcoming","count":7}]}"#;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/decisions/search"))
+        .and(body_partial_json(serde_json::json!({
+            "q": "huurprijs indexatie", "court": "Hoge Raad", "form": "ruling", "from": "2024-01-01", "limit": "5"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(HITS, "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "case",
+        "search",
+        "huurprijs",
+        "indexatie",
+        "--court",
+        "Hoge Raad",
+        "--form",
+        "ruling",
+        "--from",
+        "2024-01-01",
+        "--limit",
+        "5",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(String::from_utf8_lossy(&json.stdout).trim_end(), HITS);
+    assert!(
+        String::from_utf8_lossy(&human.stderr).contains("ranked the 7 ruling(s) bron has read"),
+        "{human:?}"
+    );
+}
+
 /// One rendition's articles, shaped as the service shapes them. A label opens
 /// with the day its rendition commenced.
 fn articles_of(as_of: &str, label: &str, blob: &str, text: &str) -> String {

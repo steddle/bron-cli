@@ -573,6 +573,40 @@ pub enum Case {
     /// appeal was or was not lodged: one that settled, was withdrawn or ended
     /// in an unpublished ruling leaves no relation behind.
     Relations { ecli: String },
+
+    /// The rulings the service holds, ranked against a question.
+    ///
+    /// The service ranks the rulings it has read, the ones someone asked for
+    /// by their ECLI, and not the case law rechtspraak publishes: search over
+    /// case law is still to come, and every answer says how many it ranked.
+    Search {
+        query: Vec<String>,
+
+        /// One court, as `case show` prints it, e.g. "Hoge Raad". Sent
+        /// exactly as typed.
+        #[arg(long)]
+        court: Option<String>,
+
+        /// Only rulings decided on this day or later, YYYY-MM-DD. Sent
+        /// exactly as typed.
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Only rulings decided on this day or earlier, YYYY-MM-DD. Sent
+        /// exactly as typed.
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Only rulings (`ruling`) or only conclusies (`opinion`). Sent
+        /// exactly as typed.
+        #[arg(long)]
+        form: Option<String>,
+
+        /// How many rulings to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

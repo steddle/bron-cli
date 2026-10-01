@@ -77,6 +77,7 @@ pub enum Answer {
         offset: Option<String>,
     },
     DecisionRelations(Box<Answered<service::DecisionRelations>>),
+    DecisionHits(Answered<service::DecisionSearch>),
     PublicationHits(Answered<service::PublicationSearch>),
     Publication(Box<Answered<service::Publication>>),
     Dossier(Box<Answered<service::DossierPapers>>),
@@ -116,6 +117,7 @@ impl Answer {
             Self::Articles { answered, .. } => sent(out, &answered.envelope),
             Self::Decision { answered, .. } => sent(out, &answered.envelope),
             Self::DecisionRelations(a) => sent(out, &a.envelope),
+            Self::DecisionHits(a) => sent(out, &a.envelope),
             Self::PublicationHits(a) => sent(out, &a.envelope),
             Self::Publication(a) => sent(out, &a.envelope),
             Self::Dossier(a) => sent(out, &a.envelope),
@@ -521,6 +523,27 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
         Case::Relations { ecli } => service
             .decision_relations(&client, ecli)
             .map(|answered| Answer::DecisionRelations(Box::new(answered))),
+
+        Case::Search {
+            query,
+            court,
+            from,
+            to,
+            form,
+            limit,
+        } => service
+            .decision_search(
+                &client,
+                &service::DecisionQuery {
+                    q: &query.join(" "),
+                    court: court.as_deref(),
+                    from: from.as_deref(),
+                    to: to.as_deref(),
+                    form: form.as_deref(),
+                    limit: limit.as_deref(),
+                },
+            )
+            .map(Answer::DecisionHits),
     }
 }
 

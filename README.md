@@ -222,7 +222,7 @@ Nothing is kept. bron writes nothing between runs, so every answer is fetched an
 - The life of one article. `bron law history` answers every text it has had, each with the window it applied in and the act that produced it, from the renditions the corpus holds.
 - What the register states around a law. `bron law about` says how much of it is held, `bron law relations` what rests on it and what cites it, and `bron law amendments` what the act that established it did elsewhere.
 - Amendment diffs. `bron law changes` compares a law between two dates unit by unit, its bijlagen and aanhef beside its articles, and matches them on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
-- Rulings by ECLI. `bron case show` answers a ruling or a conclusie paragraph by paragraph, each at its byte range, and `bron case relations` the conclusie and the instances before and after it, in the publisher's words and never as a finding that an appeal was or was not lodged.
+- Rulings by ECLI. `bron case show` answers a ruling or a conclusie paragraph by paragraph, each at its byte range, and `bron case relations` the conclusie and the instances before and after it, in the publisher's words and never as a finding that an appeal was or was not lodged. `bron case search` ranks the rulings the service has read against a question and names each by the run of paragraphs that ranked, saying how many rulings it covered: search over all case law is still to come.
 - Nothing kept between runs. bron writes nothing, so there is no store to migrate, verify or grow stale.
 
 ## Changelog

@@ -1109,6 +1109,51 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             writeln!(err, "\n{}", checked.url)
         }
 
+        Answer::DecisionHits(a) => {
+            for hit in &a.data.hits {
+                let mut row = format!("{}  {}", hit.ecli, hit.form);
+                if let Some(court) = &hit.court {
+                    let _ = write!(row, "  {court}");
+                }
+                if let Some(day) = hit.decided_on {
+                    let _ = write!(row, "  {day}");
+                }
+                writeln!(out, "{row}")?;
+
+                let units = if hit.paragraphs.from == hit.paragraphs.to {
+                    format!("unit {}", hit.paragraphs.from)
+                } else {
+                    format!("units {} to {}", hit.paragraphs.from, hit.paragraphs.to)
+                };
+                writeln!(
+                    out,
+                    "  {units}  --offset {}  distance {:.4}",
+                    hit.paragraphs.from.saturating_sub(1),
+                    hit.distance
+                )?;
+            }
+
+            let (cut, rest): (Vec<Caveat>, Vec<Caveat>) = a
+                .caveats
+                .iter()
+                .cloned()
+                .partition(|caveat| matches!(caveat, Caveat::Truncated { .. }));
+            let mut notes: Vec<String> = cut
+                .iter()
+                .map(|caveat| match caveat {
+                    Caveat::Truncated { window } => format!(
+                        "note: the {window} nearest rulings shown; more rank below them, which a higher --limit answers"
+                    ),
+                    other => caveat_line(other),
+                })
+                .collect();
+            notes.extend(rest.iter().map(caveat_line));
+            if !notes.is_empty() {
+                writeln!(err, "\n{}", notes.join("\n"))?;
+            }
+            Ok(())
+        }
+
         Answer::PublicationHits(a) => {
             for hit in &a.data.hits {
                 let mut row = hit.id.clone();
@@ -2102,6 +2147,10 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: {count} hit(s) on this page are of a kind bron does not open and are left \
              out; the publisher's next page may still hold more."
         ),
+        Caveat::SearchUpcoming { count } => format!(
+            "note: search over case law is still to come. This ranked the {count} ruling(s) \
+             bron has read, not all case law: a ruling missing here may still exist."
+        ),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
@@ -2627,6 +2676,46 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("filtered over a window"), "{text}");
+    }
+
+    /// A ruling a question ranked, by identifier and the run of units that
+    /// ranked, with where `case show` reads them; on stderr how few rulings
+    /// the ranking covered and that a cut list has more below it.
+    #[test]
+    fn case_search_names_each_ruling_and_says_what_it_searched() {
+        let hits: bron::service::DecisionSearch = serde_json::from_str(
+            r#"{"hits":[{"ecli":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","form":"ruling",
+              "court":"Hoge Raad","decided_on":"2024-11-29","paragraphs":{"from":40,"to":42},
+              "content_hashes":["a","b","c"],"blob":"d","distance":0.2134}]}"#,
+        )
+        .unwrap();
+        let mut answered = answered(hits);
+        answered.caveats = vec![
+            Caveat::Truncated { window: 1 },
+            Caveat::SearchUpcoming { count: 7 },
+        ];
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(&Answer::DecisionHits(answered), &mut out, &mut err).unwrap();
+        let (out, err) = (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        );
+
+        assert!(
+            out.contains("ECLI:NL:HR:2024:1780  ruling  Hoge Raad  2024-11-29"),
+            "{out}"
+        );
+        assert!(
+            out.contains("units 40 to 42  --offset 39  distance 0.2134"),
+            "{out}"
+        );
+        assert!(err.contains("the 1 nearest rulings shown"), "{err}");
+        assert!(
+            err.contains("ranked the 7 ruling(s) bron has read"),
+            "{err}"
+        );
+        assert!(!err.contains("filtered over a window"), "{err}");
     }
 
     /// The publisher's relations on stdout, one a row, and on stderr the one
