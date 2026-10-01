@@ -686,6 +686,103 @@ async fn case_search_sends_the_question_in_the_body_and_prints_what_came_back() 
     );
 }
 
+/// `law decisions` puts the article in the path and every narrowing in the
+/// query as typed, and prints the service's envelope as sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_decisions_sends_every_narrowing_as_typed_and_prints_what_came_back() {
+    const FOUND: &str = r#"{"bron":1,"grade":"authority","data":{"regulation_id":"BWBR0005290","register":"bwb","jurisdiction":"nl","number":"201","count":2,"courts":[{"court":"Parket bij de Hoge Raad","count":2}],"decisions":[{"ecli":"ECLI:NL:PHR:2026:506","register":"rechtspraak","jurisdiction":"nl","court":"Parket bij de Hoge Raad","decided_on":"2026-05-08","held":false,"rendition":"2026-01-01_0","links":[{"kind":"lx-referentie","asserted":"machine","in_force_from":"2026-01-01","visible_from":"2026-01-01","stated_by":"lido","stated_in":"ab"}],"later_field":1}]},"caveats":[{"kind":"rulings_found"},{"kind":"truncated","window":1}]}"#;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/regulations/BWBR0005290/articles/201/decisions",
+        ))
+        .and(query_param("court", "Parket bij de Hoge Raad"))
+        .and(query_param("from", "2026-01-01"))
+        .and(query_param("to", "abc"))
+        .and(query_param("limit", "1"))
+        .and(query_param("offset", "-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(FOUND, "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "law",
+        "decisions",
+        "BWBR0005290",
+        "--article",
+        "201",
+        "--court",
+        "Parket bij de Hoge Raad",
+        "--from",
+        "2026-01-01",
+        "--to",
+        "abc",
+        "--limit",
+        "1",
+        "--offset",
+        "-1",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{FOUND}\n"));
+    assert_eq!(
+        stdout(&human),
+        "2026-05-08  Parket bij de Hoge Raad  ECLI:NL:PHR:2026:506  version 2026-01-01_0\n",
+        "{human:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&human.stderr)
+            .starts_with("2 ruling(s) found for article 201 of BWBR0005290\n"),
+        "{human:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&human.stderr).contains("the rulings LiDO found"),
+        "{human:?}"
+    );
+}
+
+/// An untyped narrowing is left out, so the service's own window answers, and
+/// an article the regulation never printed is not found as the service said.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_decisions_leaves_out_what_was_not_typed_and_passes_on_a_fault() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/regulations/BWBR0005290/articles/999/decisions",
+        ))
+        .and(query_param_is_missing("court"))
+        .and(query_param_is_missing("from"))
+        .and(query_param_is_missing("to"))
+        .and(query_param_is_missing("limit"))
+        .and(query_param_is_missing("offset"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"article_not_found","message":"no article of BWBR0005290 [999]","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "law",
+            "decisions",
+            "BWBR0005290",
+            "--article",
+            "999",
+        ],
+    )
+    .await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "article_not_found");
+}
+
 /// One rendition's articles, shaped as the service shapes them. A label opens
 /// with the day its rendition commenced.
 fn articles_of(as_of: &str, label: &str, blob: &str, text: &str) -> String {

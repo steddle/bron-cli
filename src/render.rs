@@ -12,8 +12,8 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::{
-    Article, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Place, Produced,
-    Regulation, Relation, Remark, SearchData, SearchLid, Upcoming, name,
+    Article, CitingDecision, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Place,
+    Produced, Regulation, Relation, Remark, SearchData, SearchLid, Upcoming, name,
 };
 use bron::wire::Caveat;
 
@@ -1154,6 +1154,75 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             Ok(())
         }
 
+        Answer::ArticleDecisions {
+            answered: a,
+            offset,
+        } => {
+            let found = &a.data;
+
+            writeln!(
+                err,
+                "{} ruling(s) found for article {} of {}",
+                found.count, found.number, found.regulation_id
+            )?;
+
+            let court = |ruling: &CitingDecision| ruling.court.clone().unwrap_or_default();
+            let court_width = found
+                .decisions
+                .iter()
+                .map(|ruling| court(ruling).chars().count())
+                .max()
+                .unwrap_or(0);
+
+            for ruling in &found.decisions {
+                let day = ruling
+                    .decided_on
+                    .map(|day| day.to_string())
+                    .unwrap_or_default();
+                let mut row = format!(
+                    "{day:<10}  {:<court_width$}  {}",
+                    court(ruling),
+                    ruling.ecli
+                );
+                if let Some(rendition) = &ruling.rendition {
+                    let _ = write!(row, "  version {rendition}");
+                }
+                writeln!(out, "{row}")?;
+            }
+
+            // `truncated` on a paged list says where the next page starts, and
+            // `links_not_shown` is worded for one ruling's relations elsewhere.
+            let notes: Vec<String> = a
+                .caveats
+                .iter()
+                .map(|caveat| match caveat {
+                    Caveat::Truncated { window } => {
+                        // The service accepted the offset, so it is a whole number.
+                        let from = offset
+                            .as_deref()
+                            .and_then(|typed| typed.parse::<u64>().ok())
+                            .unwrap_or(0);
+                        format!(
+                            "note: rulings {} to {} of {} shown; read on with --offset {}",
+                            from + 1,
+                            from + found.decisions.len() as u64,
+                            found.count,
+                            from + u64::from(*window)
+                        )
+                    }
+                    Caveat::LinksNotShown => "note: the citations LiDO's computer recognised are \
+                         held and not shown until their accuracy is measured, so these are the \
+                         rulings whose own Wetsverwijzing names the article"
+                        .to_string(),
+                    other => caveat_line(other),
+                })
+                .collect();
+            if !notes.is_empty() {
+                writeln!(err, "\n{}", notes.join("\n"))?;
+            }
+            Ok(())
+        }
+
         Answer::PublicationHits(a) => {
             for hit in &a.data.hits {
                 let mut row = hit.id.clone();
@@ -2162,6 +2231,10 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: LiDO named {count} article(s) this ruling cites that bron cannot place in any \
              text it holds, so they are left out"
         ),
+        Caveat::RulingsFound => "note: these are the rulings LiDO found, by its computer's \
+             reading and the publisher's own Wetsverwijzingen. How many it misses or names \
+             wrongly is not measured, so a ruling missing here may still cite the article."
+            .to_string(),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
@@ -2812,6 +2885,71 @@ mod tests {
         assert!(read.contains("not asked yet or did not answer"), "{read}");
         assert!(!unresolved.contains("no sentence for"), "{unresolved}");
         assert!(unresolved.contains("3 article(s)"), "{unresolved}");
+    }
+
+    /// The rulings under an article, in the shape the service's
+    /// ArticleDecisionController answers: a ruling LiDO names no court, day
+    /// or rendition for carries none of those keys.
+    #[test]
+    fn law_decisions_counts_the_rulings_found_and_says_what_the_list_cannot() {
+        let envelope: serde_json::Value = serde_json::from_str(
+            r#"{"bron":1,"grade":"authority","data":{"regulation_id":"BWBR0005289","register":"bwb","jurisdiction":"nl",
+              "number":"162","count":12274,"courts":[{"court":"Rechtbank Rotterdam","count":1122}],
+              "decisions":[
+               {"ecli":"ECLI:NL:GHAMS:2026:2678","register":"rechtspraak","jurisdiction":"nl","court":"Gerechtshof Amsterdam",
+                "decided_on":"2026-09-22","held":false,"rendition":"2026-07-16_0",
+                "links":[{"kind":"rvr-referentie","asserted":"publisher","stated_by":"lido","stated_in":"ab"}]},
+               {"ecli":"ECLI:NL:XX:2015:1","register":"rechtspraak","jurisdiction":"nl","held":false,
+                "links":[{"kind":"rvr-referentie","asserted":"publisher","stated_by":"lido"}]}]},
+              "caveats":[{"kind":"rulings_found"},{"kind":"links_not_shown"},{"kind":"truncated","window":2}]}"#,
+        )
+        .unwrap();
+        let found: bron::service::ArticleDecisions =
+            serde_json::from_value(envelope["data"].clone()).unwrap();
+        let mut answered = answered(found);
+        answered.caveats = envelope["caveats"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(Caveat::stated)
+            .collect();
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(
+            &Answer::ArticleDecisions {
+                answered: Box::new(answered),
+                offset: Some("40".into()),
+            },
+            &mut out,
+            &mut err,
+        )
+        .unwrap();
+        let (out, err) = (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        );
+
+        assert_eq!(
+            out,
+            "2026-09-22  Gerechtshof Amsterdam  ECLI:NL:GHAMS:2026:2678  version 2026-07-16_0\n\
+             \x20                                  ECLI:NL:XX:2015:1\n"
+        );
+        assert!(!err.contains("no sentence for"), "{err}");
+        assert!(
+            err.starts_with("12274 ruling(s) found for article 162 of BWBR0005289\n"),
+            "{err}"
+        );
+        assert!(err.contains("the rulings LiDO found"), "{err}");
+        assert!(err.contains("is not measured"), "{err}");
+        assert!(
+            err.contains("own Wetsverwijzing names the article"),
+            "{err}"
+        );
+        assert!(!err.contains("this ruling"), "{err}");
+        assert!(
+            err.contains("rulings 41 to 42 of 12274 shown; read on with --offset 42"),
+            "{err}"
+        );
     }
 
     /// A search hit built for a test: every field a caller does not care about

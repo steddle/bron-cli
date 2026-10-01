@@ -31,8 +31,9 @@ use crate::transport::Client;
 
 pub use client::Answered;
 pub use decisions::{
-    Decision, DecisionHit, DecisionParagraph, DecisionParagraphs, DecisionQuery, DecisionRelation,
-    DecisionRelations, DecisionRendition, DecisionSearch, OrdinalRange, Target,
+    ArticleDecisions, Citing, CitingDecision, Decision, DecisionHit, DecisionParagraph,
+    DecisionParagraphs, DecisionQuery, DecisionRelation, DecisionRelations, DecisionRendition,
+    DecisionSearch, OrdinalRange, Target,
 };
 pub use dossiers::{DossierAct, DossierPaper, DossierPapers, DossierRegulation, Fate};
 pub use model::{

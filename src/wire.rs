@@ -536,6 +536,11 @@ pub enum Caveat {
     /// no unit it holds, so they are left out.
     LinksUnresolved { count: u32 },
 
+    /// The rulings answered are the ones LiDO found: its computer's reading
+    /// and the publisher's own Wetsverwijzingen. How many it misses or names
+    /// wrongly is not measured.
+    RulingsFound,
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -745,6 +750,7 @@ impl Caveat {
             LinksUnresolved {
                 count: u32,
             },
+            RulingsFound,
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -879,6 +885,7 @@ impl Caveat {
             Ok(Stated::LinksNotShown) => Self::LinksNotShown,
             Ok(Stated::LinksNotRead) => Self::LinksNotRead,
             Ok(Stated::LinksUnresolved { count }) => Self::LinksUnresolved { count },
+            Ok(Stated::RulingsFound) => Self::RulingsFound,
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },

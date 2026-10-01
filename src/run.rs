@@ -78,6 +78,12 @@ pub enum Answer {
     },
     DecisionRelations(Box<Answered<service::DecisionRelations>>),
     DecisionHits(Answered<service::DecisionSearch>),
+    ArticleDecisions {
+        answered: Box<Answered<service::ArticleDecisions>>,
+        /// The offset the question named, so a cut page can say where the next
+        /// one starts.
+        offset: Option<String>,
+    },
     PublicationHits(Answered<service::PublicationSearch>),
     Publication(Box<Answered<service::Publication>>),
     Dossier(Box<Answered<service::DossierPapers>>),
@@ -118,6 +124,7 @@ impl Answer {
             Self::Decision { answered, .. } => sent(out, &answered.envelope),
             Self::DecisionRelations(a) => sent(out, &a.envelope),
             Self::DecisionHits(a) => sent(out, &a.envelope),
+            Self::ArticleDecisions { answered, .. } => sent(out, &answered.envelope),
             Self::PublicationHits(a) => sent(out, &a.envelope),
             Self::Publication(a) => sent(out, &a.envelope),
             Self::Dossier(a) => sent(out, &a.envelope),
@@ -298,6 +305,32 @@ fn run_law(law_cmd: &Law, service: &Service) -> Outcome<Answer> {
                     article: article.clone(),
                 })
         }
+
+        Law::Decisions {
+            id,
+            article,
+            court,
+            from,
+            to,
+            limit,
+            offset,
+        } => service
+            .article_decisions(
+                &client,
+                id,
+                article,
+                &service::Citing {
+                    court: court.as_deref(),
+                    from: from.as_deref(),
+                    to: to.as_deref(),
+                    limit: limit.as_deref(),
+                    offset: offset.as_deref(),
+                },
+            )
+            .map(|answered| Answer::ArticleDecisions {
+                answered: Box::new(answered),
+                offset: offset.clone(),
+            }),
 
         Law::About { id } => service
             .regulation(&client, id)

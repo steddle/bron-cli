@@ -166,7 +166,66 @@ pub struct OrdinalRange {
     pub to: u32,
 }
 
+/// Which of the rulings that cite an article to answer. Every field the
+/// caller typed is sent as typed and judged by the service; an untyped one is
+/// left out.
+#[derive(Debug)]
+pub struct Citing<'a> {
+    pub court: Option<&'a str>,
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
+    pub limit: Option<&'a str>,
+    pub offset: Option<&'a str>,
+}
+
+/// The rulings LiDO found that cite one article, newest decided first.
+#[derive(Debug, Deserialize)]
+pub struct ArticleDecisions {
+    pub regulation_id: String,
+    pub number: String,
+    /// How many rulings the question matches, of which `decisions` is a page.
+    pub count: u64,
+    pub decisions: Vec<CitingDecision>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CitingDecision {
+    pub ecli: String,
+    /// Absent where LiDO names no court for the ruling.
+    pub court: Option<String>,
+    pub decided_on: Option<NaiveDate>,
+    /// The label of the regulation's rendition in force on `decided_on`, by
+    /// the service's arithmetic. Absent where the ruling states no day or no
+    /// rendition was in force on it.
+    pub rendition: Option<String>,
+}
+
 impl Service {
+    pub fn article_decisions(
+        &self,
+        client: &Client,
+        law: &str,
+        number: &str,
+        ask: &Citing<'_>,
+    ) -> Outcome<Answered<ArticleDecisions>> {
+        let url = self.route(&["regulations", law, "articles", number, "decisions"])?;
+
+        let mut query = Vec::new();
+        window(&mut query, ask.limit, ask.offset);
+
+        if let Some(court) = ask.court {
+            query.push(("court", court));
+        }
+        if let Some(day) = ask.from {
+            query.push(("from", day));
+        }
+        if let Some(day) = ask.to {
+            query.push(("to", day));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
     /// The rulings the service holds, ranked against a question.
     pub fn decision_search(
         &self,

@@ -336,6 +336,46 @@ pub enum Law {
         moment: Moment,
     },
 
+    /// The rulings LiDO found that cite one article, newest decided first.
+    ///
+    /// Each ruling names the rendition of the law in force on the day it was
+    /// decided. That is not necessarily the text the court applied, which
+    /// turns on the day of the facts and transitional law. How many rulings
+    /// LiDO misses is not measured, so an answer says how many were found and
+    /// never that no ruling cites the article.
+    Decisions {
+        /// BWB identifier, e.g. BWBR0005289.
+        id: String,
+
+        /// The number as printed, e.g. 162 or 162a.
+        #[arg(long)]
+        article: String,
+
+        /// One court, as the answer's `courts` names it, e.g. "Hoge Raad der
+        /// Nederlanden". Sent exactly as typed.
+        #[arg(long)]
+        court: Option<String>,
+
+        /// Only rulings decided on this day or later, YYYY-MM-DD. Sent
+        /// exactly as typed.
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Only rulings decided on this day or earlier, YYYY-MM-DD. Sent
+        /// exactly as typed.
+        #[arg(long)]
+        to: Option<String>,
+
+        /// How many rulings to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
+
+        /// How many rulings to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
+    },
+
     /// What the index knows about one regulation.
     ///
     /// How much of it the corpus means to hold and how much it does, which is
