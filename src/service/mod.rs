@@ -37,10 +37,11 @@ pub use decisions::{
 };
 pub use dossiers::{DossierAct, DossierPaper, DossierPapers, DossierRegulation, Fate};
 pub use model::{
-    Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Consolidated, Dossier,
-    Expression, Feed, Had, History, Image, Lineage, LinkedDecree, Named, Paragraph, Parts,
-    Produced, Published, PublishedAct, RegisterEvent, Regulation, Related, Relating, Relation,
-    Relations, Remark, Span, Summary, Units, Upcoming, Waiting, Window, Withdrawn, name,
+    Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Consolidated, Contents,
+    ContentsPart, Dossier, Expression, Feed, Had, History, Image, Lineage, LinkedDecree, Named,
+    Paragraph, Parts, Produced, Published, PublishedAct, RegisterEvent, Regulation, Related,
+    Relating, Relation, Relations, Remark, Span, Summary, Units, Upcoming, Waiting, Window,
+    Withdrawn, name,
 };
 pub use publications::{
     Manifestation, Publication, PublicationDossier, PublicationHit, PublicationQuery,
@@ -330,6 +331,28 @@ impl Service {
         }
         if ask.not_commenced {
             query.push(("not_commenced", "1"));
+        }
+
+        self.read(client, client.get(&url).query(&query))
+    }
+
+    /// The table of contents of the rendition a point in both windows
+    /// resolves to.
+    pub fn contents(
+        &self,
+        client: &Client,
+        law: &str,
+        as_of: Option<&str>,
+        as_known_on: Option<&str>,
+    ) -> Outcome<Answered<Contents>> {
+        let url = self.route(&["regulations", law, "contents"])?;
+
+        let mut query = Vec::new();
+        if let Some(date) = as_of {
+            query.push(("as_of", date));
+        }
+        if let Some(date) = as_known_on {
+            query.push(("as_known_on", date));
         }
 
         self.read(client, client.get(&url).query(&query))

@@ -286,6 +286,19 @@ pub enum Law {
         moment: Moment,
     },
 
+    /// The table of contents of a rendition: the parts the register heads,
+    /// with their headings, and the articles and bijlagen under them.
+    ///
+    /// Read from the rendition's own bytes, of the rendition the moment
+    /// resolves to.
+    Contents {
+        /// BWB identifier, e.g. BWBR0005289.
+        id: String,
+
+        #[command(flatten)]
+        moment: Moment,
+    },
+
     /// The texts the act that established this regulation produced elsewhere.
     ///
     /// An amending act is published as a regulation of its own, and what it

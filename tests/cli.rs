@@ -783,6 +783,74 @@ async fn law_decisions_leaves_out_what_was_not_typed_and_passes_on_a_fault() {
     assert_eq!(envelope["error"]["code"], "article_not_found");
 }
 
+/// `law contents` sends both days as typed, prints the service's envelope as
+/// sent, and to a person the outline alone on stdout.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_contents_sends_the_moment_as_typed_and_prints_what_came_back() {
+    const CONTENTS: &str = r#"{"bron":1,"grade":"authority","as_of":"2023-06-01","as_known_on":"2023-07-01","data":{"regulation_id":"BWBR0005289","register":"bwb","jurisdiction":"nl","expression":{"regulation_id":"BWBR0005289","label":"2023-01-01_0","in_force":{"from":"2023-01-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches","blob":"35e29887c98339a23c835cd45fa22c0569f2db6e7d05fbca6c8de0d4fb15a0fb"},"contents":[{"kind":"boek","label":"Boek 6","title":"Algemeen gedeelte van het verbintenissenrecht","path":"/Boek6","later_field":1,"children":[{"kind":"titeldeel","label":"Titel 3","title":"Onrechtmatige daad","path":"/Boek6/Titeldeel3","children":[{"kind":"artikel","label":"Artikel 162","path":"/Boek6/Titeldeel3/Artikel162","number":"162"},{"kind":"artikel","label":"Artikel 163","path":"/Boek6/Titeldeel3/Artikel163","number":"163","repealed":true}]}]}]}}"#;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0005289/contents"))
+        .and(query_param("as_of", "2023-06-01"))
+        .and(query_param("as_known_on", "not-a-day"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(CONTENTS, "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "law",
+        "contents",
+        "BWBR0005289",
+        "--as-of",
+        "2023-06-01",
+        "--as-known-on",
+        "not-a-day",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{CONTENTS}\n"));
+    assert!(human.status.success(), "{human:?}");
+    assert_eq!(
+        stdout(&human),
+        "Boek 6. Algemeen gedeelte van het verbintenissenrecht\n\
+         \x20 Titel 3. Onrechtmatige daad\n\
+         \x20   art. 162 163*\n",
+        "{human:?}"
+    );
+    let err = String::from_utf8_lossy(&human.stderr);
+    assert!(
+        err.contains("from rendition 2023-01-01_0, in force 2023-01-01 onwards"),
+        "{err}"
+    );
+    assert!(err.contains("* = repealed (vervallen)"), "{err}");
+}
+
+/// A day left untyped is left out, so the service's today answers, and a
+/// regulation the service does not know is not found as it said.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_contents_leaves_out_what_was_not_typed_and_passes_on_a_fault() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/BWBR0000000/contents"))
+        .and(query_param_is_missing("as_of"))
+        .and(query_param_is_missing("as_known_on"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"not_found","code":"regulation_not_found","message":"no regulation BWBR0000000","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "law", "contents", "BWBR0000000"]).await;
+    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(envelope["error"]["code"], "regulation_not_found");
+}
+
 /// One rendition's articles, shaped as the service shapes them. A label opens
 /// with the day its rendition commenced.
 fn articles_of(as_of: &str, label: &str, blob: &str, text: &str) -> String {

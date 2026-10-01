@@ -39,6 +39,7 @@ pub enum Answer {
         /// See `Articles::blob_url`.
         blob_url: Option<String>,
     },
+    Contents(Box<Answered<service::Contents>>),
     Published(Answered<Vec<service::Expression>>),
     Feed(Answered<service::Feed>),
     Upcoming(Answered<Vec<service::Upcoming>>),
@@ -116,6 +117,7 @@ impl Answer {
             Self::Amendments(a) => sent(out, &a.envelope),
             Self::Relations { answered, .. } => sent(out, &answered.envelope),
             Self::Parts { answered, .. } => sent(out, &answered.envelope),
+            Self::Contents(a) => sent(out, &a.envelope),
             Self::Published(a) => sent(out, &a.envelope),
             Self::Feed(a) => sent(out, &a.envelope),
             Self::Upcoming(a) => sent(out, &a.envelope),
@@ -390,6 +392,14 @@ fn run_law(law_cmd: &Law, service: &Service) -> Outcome<Answer> {
                     blob_url: served(service, &answered.data.expression),
                     answered: Box::new(answered),
                 })
+        }
+
+        Law::Contents { id, moment } => {
+            let (as_of, as_known_on) = moment.coordinates();
+
+            service
+                .contents(&client, id, as_of, as_known_on)
+                .map(|answered| Answer::Contents(Box::new(answered)))
         }
 
         Law::Published {

@@ -253,6 +253,34 @@ pub struct Parts {
     pub parts: Vec<Article>,
 }
 
+/// A rendition's table of contents, read from its bytes.
+#[derive(Debug, Deserialize)]
+pub struct Contents {
+    pub regulation_id: String,
+    pub expression: Expression,
+    pub contents: Vec<ContentsPart>,
+}
+
+/// One part of a table of contents: a part the register heads, an article or
+/// a bijlage.
+#[derive(Debug, Deserialize)]
+pub struct ContentsPart {
+    /// The element the register prints it as: `boek`, `titeldeel`, `artikel`,
+    /// `bijlage` and whatever else it heads.
+    pub kind: String,
+    /// As the register prints it, `Titel 3` or `Artikel 162`.
+    pub label: Option<String>,
+    /// The heading's words, `Onrechtmatige daad`.
+    pub title: Option<String>,
+    /// On an article or a bijlage, as `law show` reads it.
+    pub number: Option<String>,
+    #[serde(default)]
+    pub repealed: bool,
+    /// Absent on an article and a bijlage.
+    #[serde(default)]
+    pub children: Vec<ContentsPart>,
+}
+
 /// The texts the act that established a regulation produced elsewhere.
 #[derive(Debug, Deserialize)]
 pub struct Amendments {

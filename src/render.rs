@@ -12,8 +12,9 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::{
-    Article, CitingDecision, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Place,
-    Produced, Regulation, Relation, Remark, SearchData, SearchLid, Upcoming, name,
+    Article, CitingDecision, Consolidated, ContentsPart, Dossier, Expression, Had, Lineage,
+    LinkedDecree, Place, Produced, Regulation, Relation, Remark, SearchData, SearchLid, Upcoming,
+    name,
 };
 use bron::wire::Caveat;
 
@@ -693,6 +694,28 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             }
 
             caveats(&a.caveats, out)
+        }
+
+        // The outline alone on stdout, so it pipes; which rendition answered
+        // and every note on stderr.
+        Answer::Contents(a) => {
+            let rendition = &a.data.expression;
+            answered_by(bound(a.as_of, a.as_known_on).as_deref(), rendition, err)?;
+
+            if a.data.contents.is_empty() {
+                writeln!(
+                    err,
+                    "The service read no contents from {} rendition {}.",
+                    a.data.regulation_id, rendition.label
+                )?;
+            }
+
+            let mut starred = false;
+            outline(&a.data.contents, 0, out, &mut starred)?;
+            if starred {
+                writeln!(err, "* = repealed (vervallen)")?;
+            }
+            caveats(&a.caveats, err)
         }
 
         Answer::Articles {
@@ -1527,6 +1550,84 @@ fn answered_by(
         rendition.label,
         window(rendition.in_force.from, rendition.in_force.until)
     )
+}
+
+/// Writes parts as an outline, two spaces a level. A run of articles is one
+/// `art.` line of their numbers, because a code of 1000 articles on a line
+/// each buries its structure; a part between two articles ends the run, so
+/// document order holds. Sets `starred` where a repealed article was marked.
+fn outline(
+    parts: &[ContentsPart],
+    depth: usize,
+    out: &mut impl Write,
+    starred: &mut bool,
+) -> io::Result<()> {
+    let indent = "  ".repeat(depth);
+    let mut run = Vec::new();
+
+    for part in parts {
+        if let ("artikel" | "enig-artikel", Some(number)) = (part.kind.as_str(), &part.number) {
+            *starred |= part.repealed;
+            run.push(if part.repealed {
+                format!("{number}*")
+            } else {
+                number.clone()
+            });
+            continue;
+        }
+
+        article_run(&std::mem::take(&mut run), &indent, out)?;
+
+        let mut line = part_heading(part);
+        if part.repealed {
+            line.push_str(" (repealed)");
+        }
+        writeln!(out, "{indent}{line}")?;
+        outline(&part.children, depth + 1, out, starred)?;
+    }
+
+    article_run(&run, &indent, out)
+}
+
+/// `label. title`, or what of it the register prints.
+fn part_heading(part: &ContentsPart) -> String {
+    let name = match (&part.label, &part.number) {
+        (Some(label), _) => Some(label.clone()),
+        (None, Some(number)) => Some(format!("{} {number}", part.kind)),
+        (None, None) => None,
+    };
+
+    match (name, &part.title) {
+        (Some(name), Some(title)) => format!("{name}. {title}"),
+        (Some(name), None) => name,
+        (None, Some(title)) => title.clone(),
+        (None, None) => part.kind.clone(),
+    }
+}
+
+/// The width an `art.` line wraps at. Fixed rather than read off the terminal,
+/// so the same answer prints the same lines wherever it is piped.
+const OUTLINE_WIDTH: usize = 80;
+
+/// One `art.` line, wrapped at [`OUTLINE_WIDTH`] with every continuation
+/// starting under the first number.
+fn article_run(numbers: &[String], indent: &str, out: &mut impl Write) -> io::Result<()> {
+    if numbers.is_empty() {
+        return Ok(());
+    }
+
+    let hang = indent.len() + "art.".len();
+    let mut line = format!("{indent}art.");
+    for number in numbers {
+        let width = line.chars().count();
+        if width > hang && width + 1 + number.chars().count() > OUTLINE_WIDTH {
+            writeln!(out, "{line}")?;
+            line = " ".repeat(hang);
+        }
+        line.push(' ');
+        line.push_str(number);
+    }
+    writeln!(out, "{line}")
 }
 
 /// One rendition as a row, the same whichever command lists it. `law published`
@@ -2948,6 +3049,125 @@ mod tests {
         assert!(!err.contains("this ruling"), "{err}");
         assert!(
             err.contains("rulings 41 to 42 of 12274 shown; read on with --offset 42"),
+            "{err}"
+        );
+    }
+
+    /// A rendition's contents rendered for a person: stdout and stderr apart.
+    fn contents_rendered(
+        data: serde_json::Value,
+        caveats: &[serde_json::Value],
+    ) -> (String, String) {
+        let mut answered = answered(
+            serde_json::from_value::<bron::service::Contents>(serde_json::json!({
+                "regulation_id": "BWBR0005289",
+                "register": "bwb",
+                "jurisdiction": "nl",
+                "expression": {
+                    "regulation_id": "BWBR0005289", "label": "2026-01-01_0",
+                    "in_force": {"from": "2026-01-01"}, "withdrawn": false, "held": true,
+                    "upstream_hash_check": "matches", "blob": "a".repeat(64),
+                },
+                "contents": data,
+            }))
+            .unwrap(),
+        );
+        answered.as_of = NaiveDate::from_ymd_opt(2026, 3, 1);
+        answered.as_known_on = NaiveDate::from_ymd_opt(2026, 3, 2);
+        answered.caveats = caveats.iter().map(Caveat::stated).collect();
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(&Answer::Contents(Box::new(answered)), &mut out, &mut err).unwrap();
+        (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
+    }
+
+    /// Parts nest two spaces a level, the articles of a part are one `art.`
+    /// line in document order, a part between them ends the run, and a
+    /// repealed article is starred with the legend on stderr.
+    #[test]
+    fn law_contents_prints_an_outline_with_the_articles_of_a_part_on_one_line() {
+        let (out, err) = contents_rendered(
+            serde_json::json!([
+                {"kind": "boek", "label": "Boek 6", "title": "Algemeen gedeelte van het verbintenissenrecht", "path": "/Boek6", "children": [
+                    {"kind": "titeldeel", "label": "Titel 3", "title": "Onrechtmatige daad", "children": [
+                        {"kind": "artikel", "label": "Artikel 161", "number": "161"},
+                        {"kind": "afdeling", "label": "Afdeling 1", "title": "Algemene bepalingen", "later_field": 1, "children": [
+                            {"kind": "artikel", "label": "Artikel 162", "number": "162"},
+                            {"kind": "artikel", "label": "Artikel 163", "number": "163", "repealed": true},
+                            {"kind": "artikel", "label": "Artikel 164", "number": "164"},
+                        ]},
+                        {"kind": "afdeling", "label": "Afdeling 2", "repealed": true, "children": []},
+                    ]},
+                ]},
+                {"kind": "enig-artikel", "label": "Enig artikel"},
+                {"kind": "bijlage", "label": "Bijlage 1", "number": "1"},
+            ]),
+            &[serde_json::json!({"kind": "no_zicht_window"})],
+        );
+
+        assert_eq!(
+            out,
+            "Boek 6. Algemeen gedeelte van het verbintenissenrecht\n\
+             \x20 Titel 3. Onrechtmatige daad\n\
+             \x20   art. 161\n\
+             \x20   Afdeling 1. Algemene bepalingen\n\
+             \x20     art. 162 163* 164\n\
+             \x20   Afdeling 2 (repealed)\n\
+             Enig artikel\n\
+             Bijlage 1\n"
+        );
+        assert!(
+            err.starts_with(
+                "as in force on 2026-03-01, as the register showed on 2026-03-02\n\
+                 from rendition 2026-01-01_0, in force 2026-01-01 onwards\n"
+            ),
+            "{err}"
+        );
+        assert!(err.contains("* = repealed (vervallen)"), "{err}");
+        assert!(!err.contains("no sentence for"), "{err}");
+        assert!(err.contains("carries no zicht dates"), "{err}");
+    }
+
+    /// No article marked, no legend; and a run too long for one line wraps
+    /// with every continuation under the first number.
+    #[test]
+    fn law_contents_wraps_a_long_run_and_states_no_legend_it_does_not_need() {
+        let articles: Vec<serde_json::Value> = (1..=30)
+            .map(|n| serde_json::json!({"kind": "artikel", "number": format!("{n}")}))
+            .collect();
+        let (out, err) = contents_rendered(
+            serde_json::json!([{"kind": "hoofdstuk", "label": "Hoofdstuk 1", "children": articles}]),
+            &[],
+        );
+
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "Hoofdstuk 1");
+        assert!(lines[1].starts_with("  art. 1 2 3 "), "{out}");
+        assert!(lines[2].starts_with("       "), "{out}");
+        assert!(lines.iter().all(|line| line.chars().count() <= 80), "{out}");
+        assert_eq!(
+            lines[1..]
+                .iter()
+                .flat_map(|line| line.split_whitespace())
+                .filter(|word| *word != "art.")
+                .count(),
+            30
+        );
+        assert!(!err.contains("repealed"), "{err}");
+    }
+
+    /// A rendition the service read no contents from says so, rather than
+    /// printing nothing on either stream.
+    #[test]
+    fn law_contents_says_so_where_the_service_read_none() {
+        let (out, err) = contents_rendered(serde_json::json!([]), &[]);
+
+        assert_eq!(out, "");
+        assert!(
+            err.contains("The service read no contents from BWBR0005289 rendition 2026-01-01_0."),
             "{err}"
         );
     }
