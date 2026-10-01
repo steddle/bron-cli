@@ -4,10 +4,9 @@
 //! service prints the envelope it was sent. What is defined here is the rest:
 //! the answers bron assembles, and the failure envelope.
 //!
-//! Domain types in [`crate::model`] deliberately do not implement `Serialize`.
-//! Everything bron serialises is defined here, so renaming a field in the
-//! domain cannot silently break a parser on the other side of a pipe: it breaks
-//! the build instead.
+//! Everything bron serialises is defined here, so renaming a field elsewhere
+//! cannot silently break a parser on the other side of a pipe: it breaks the
+//! build instead.
 //!
 //! Two properties every answer carries, because a caller cannot infer either:
 //!
@@ -25,8 +24,6 @@ use serde::Serialize;
 
 use crate::blob::BlobId;
 use crate::error::Fault;
-use crate::model;
-use crate::sources;
 
 /// Bumped when a consumer would have to change to keep reading this.
 pub const CONTRACT: u32 = 1;
@@ -149,8 +146,6 @@ pub enum ErrorBody {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Caveat {
-    /// Ordering came from a relevance score that is not reproducible over time.
-    UnstableOrdering,
     /// Filters ran over a capped window; matches may remain unseen.
     Truncated { window: u32 },
     /// Articles in the source yielded no text and were not stored.
@@ -888,13 +883,13 @@ pub struct Provenance {
 }
 
 impl Provenance {
-    /// Provenance for a document bron fetched and froze itself, stamped with
+    /// Provenance for a document bron fetched and hashed itself, stamped with
     /// the moment it did.
-    pub fn frozen(source: &sources::Provenance, fetched_at: DateTime<Utc>) -> Self {
+    pub fn frozen(blob: BlobId, url: String, byte_len: usize, fetched_at: DateTime<Utc>) -> Self {
         Self {
-            blob: source.blob,
-            url: source.url.clone(),
-            byte_len: source.byte_len,
+            blob,
+            url,
+            byte_len,
             frozen: Frozen::Bron { fetched_at },
         }
     }
@@ -922,99 +917,6 @@ pub struct Blob {
 pub struct ByteRange {
     pub start: usize,
     pub end: usize,
-}
-
-// -- decisions -----------------------------------------------------------
-
-#[derive(Debug, Serialize)]
-pub struct Case {
-    pub ecli: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub court: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub decided_on: Option<NaiveDate>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub published_on: Option<NaiveDate>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub procedure_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub full_text: Option<String>,
-    pub relations: Vec<Relation>,
-    pub appeal: AppealStatus,
-    pub provenance: Provenance,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Relation {
-    pub target: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    pub direction: &'static str,
-}
-
-impl From<model::Relation> for Relation {
-    fn from(relation: model::Relation) -> Self {
-        Self {
-            target: relation.target.into_string(),
-            kind: relation.kind,
-            direction: relation.direction.as_str(),
-        }
-    }
-}
-
-/// What the decision's own relations say, and never a boolean.
-///
-/// `no_published_successor` is a claim about what the register held at the
-/// moment bron read it, dated to that moment, and not a claim that no appeal
-/// was brought. An appeal that settled, was withdrawn, or ended in an
-/// unpublished decision leaves no trace.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case", tag = "status")]
-pub enum AppealStatus {
-    Appealed { successors: Vec<String> },
-    NoPublishedSuccessor { as_of: DateTime<Utc> },
-}
-
-impl From<model::AppealStatus> for AppealStatus {
-    fn from(status: model::AppealStatus) -> Self {
-        match status {
-            model::AppealStatus::Appealed { successors } => Self::Appealed {
-                successors: successors.into_iter().map(|e| e.into_string()).collect(),
-            },
-            model::AppealStatus::NoPublishedSuccessor { as_of } => {
-                Self::NoPublishedSuccessor { as_of }
-            }
-        }
-    }
-}
-
-// -- search hits ---------------------------------------------------------
-
-#[derive(Debug, Serialize)]
-pub struct CaseHit {
-    pub ecli: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub court: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub decided_on: Option<NaiveDate>,
-}
-
-impl From<model::CaseHit> for CaseHit {
-    fn from(hit: model::CaseHit) -> Self {
-        Self {
-            ecli: hit.id.into_string(),
-            court: hit.court,
-            title: hit.title,
-            summary: hit.summary,
-            decided_on: hit.decided_on,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1083,7 +985,7 @@ mod tests {
                 service: "bron",
                 source: anyhow::anyhow!("not the bron envelope"),
             },
-            Fault::Local(anyhow::anyhow!("no bucket directory")),
+            Fault::Local(anyhow::anyhow!("cannot build HTTP client")),
         ] {
             let json = serde_json::to_value(Envelope::failed(&ours)).unwrap();
             assert!(json["error"].get("code").is_none(), "{json}");
@@ -1410,11 +1312,9 @@ mod tests {
     #[test]
     fn provenance_says_who_froze_the_bytes() {
         let ours = Provenance::frozen(
-            &sources::Provenance {
-                blob: BlobId::of(b"<toestand/>"),
-                url: "https://data.rechtspraak.nl/x".into(),
-                byte_len: 11,
-            },
+            BlobId::of(b"<toestand/>"),
+            "https://bron.steddle.com/api/v1/blobs/x".into(),
+            11,
             "2026-08-20T09:00:00Z".parse().unwrap(),
         );
         let json = serde_json::to_string(&ours).unwrap();

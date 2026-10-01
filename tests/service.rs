@@ -8,40 +8,22 @@
 //! the caller's own question and the one whose answer must never be mistaken
 //! for an absence.
 //!
-//! [`bron::sources::Client`] is blocking, so every call goes through
+//! [`bron::transport::Client`] is blocking, so every call goes through
 //! [`off_thread`]: driving it from inside the runtime serving the mock would
 //! park the server answering it.
 
-use std::path::PathBuf;
-
 use bron::service::{Ask, PublicationQuery, SearchData, SearchRequest, Service, Upcoming, Waiting};
-use bron::sources::Client;
+use bron::transport::Client;
 use bron::wire::Caveat;
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Somewhere for one test's rate-limit buckets to live.
-struct Home {
-    _dir: tempfile::TempDir,
-    buckets: PathBuf,
-}
-
-impl Home {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let buckets = dir.path().join("buckets");
-        Self { _dir: dir, buckets }
-    }
-}
-
-async fn off_thread<T, F>(home: &Home, f: F) -> T
+async fn off_thread<T, F>(f: F) -> T
 where
     T: Send + 'static,
     F: FnOnce(Client) -> T + Send + 'static,
 {
-    let buckets = home.buckets.clone();
-
-    tokio::task::spawn_blocking(move || f(Client::with_buckets(buckets).unwrap()))
+    tokio::task::spawn_blocking(move || f(Client::new().unwrap()))
         .await
         .unwrap()
 }
@@ -122,10 +104,9 @@ async fn answering(body: &str, status: u16) -> MockServer {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_withdrawn_rendition_is_named_all_the_way_to_the_caller() {
     let server = answering(ANSWER, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .articles(&client, law(), &asking())
             .map_err(|e| e.to_string())
@@ -173,10 +154,9 @@ async fn a_failure_keeps_the_kind_and_the_detail_the_service_gave_it() {
         "message":"no published rendition of BWBR0008691 in force on [2016-01-01]",
         "detail":["2016-01-01_0","2016-06-16_0"]}}"#;
     let server = answering(body, 404).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let fault = off_thread(&home, move |client| {
+    let fault = off_thread(move |client| {
         Service::at(&base)
             .articles(&client, law(), &asking())
             .err()
@@ -212,6 +192,7 @@ fn asking_for(term: &str) -> SearchRequest<'_> {
     SearchRequest {
         q: term,
         regulation: None,
+        jurisdiction: None,
         limit: Some("20"),
         as_of: Some("2026-08-24"),
         as_known_on: None,
@@ -233,10 +214,9 @@ async fn a_search_failure_keeps_the_kind_the_service_gave_it() {
     let body = r#"{"bron":1,"grade":"authority","error":{
         "kind":"usage","message":"limit must be between 1 and 100","detail":[]}}"#;
     let server = searching(body, 400).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let kind = off_thread(&home, move |client| {
+    let kind = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("onrechtmatige daad"))
             .err()
@@ -253,10 +233,9 @@ async fn a_search_failure_keeps_the_kind_the_service_gave_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_ranking_carries_the_limits_the_service_stated() {
     let server = searching(RANKING, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let caveats = off_thread(&home, move |client| {
+    let caveats = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("onrechtmatige daad"))
             .map(|answered| answered.caveats)
@@ -268,9 +247,8 @@ async fn a_ranking_carries_the_limits_the_service_stated() {
     assert_eq!(caveats, vec![Caveat::Truncated { window: 20 }]);
 }
 
-/// The service shares no rate-limit budget, so nothing writes a deadline for
-/// it. That leaves the delay it named as the only thing a caller can be told,
-/// and the service is the only route this lane has while it waits.
+/// A refusal names the delay the service asked for, the one thing a caller
+/// can be told while the only route it has waits.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refusal_from_the_service_says_how_long_it_asked_for() {
     let server = MockServer::start().await;
@@ -280,10 +258,9 @@ async fn a_refusal_from_the_service_says_how_long_it_asked_for() {
         .mount(&server)
         .await;
 
-    let home = Home::new();
     let base = server.uri();
 
-    let message = off_thread(&home, move |client| {
+    let message = off_thread(move |client| {
         Service::at(&base)
             .articles(&client, law(), &asking())
             .err()
@@ -324,10 +301,9 @@ const LOOKUP_UNHELD: &str = r#"{"bron":1,"grade":"authority",
 #[tokio::test(flavor = "multi_thread")]
 async fn a_citation_is_looked_up_rather_than_ranked() {
     let server = searching(LOOKUP, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("8:4"))
             .map_err(|e| e.to_string())
@@ -375,10 +351,9 @@ async fn a_citation_is_looked_up_rather_than_ranked() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reading_that_found_a_rendition_without_text_says_so() {
     let server = searching(LOOKUP_UNHELD, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("3:305a"))
             .map_err(|e| e.to_string())
@@ -414,10 +389,9 @@ async fn a_reading_that_found_a_rendition_without_text_says_so() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_question_is_still_ranked() {
     let server = searching(RANKING, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("onrechtmatige daad"))
             .map_err(|e| e.to_string())
@@ -444,10 +418,9 @@ async fn a_hit_only_the_words_found_may_carry_no_distance() {
         "label":"Artikel 18","content_hash":"b7c2","places":1,"found_by":["text"]}]}}"#;
 
     let server = searching(WORDS_ONLY, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("updates"))
             .map_err(|e| e.to_string())
@@ -472,10 +445,9 @@ async fn a_citation_that_resolves_to_nothing_is_not_found() {
         "detail":["book: BWBR0005291 rendition 2025-07-01_0 does not carry artikel 99999",
                   "literal: no regulation prints artikel 3:99999"]}}"#;
     let server = searching(body, 404).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let fault = off_thread(&home, move |client| {
+    let fault = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("3:99999"))
             .err()
@@ -506,10 +478,9 @@ async fn a_citation_that_resolves_to_nothing_is_not_found() {
 async fn a_broken_ranking_is_reported_against_the_ranking() {
     async fn refused(body: &str) -> String {
         let server = searching(body, 200).await;
-        let home = Home::new();
         let base = server.uri();
 
-        off_thread(&home, move |client| {
+        off_thread(move |client| {
             Service::at(&base)
                 .search(&client, &asking_for("onrechtmatige daad"))
                 .err()
@@ -568,10 +539,9 @@ async fn a_broken_ranking_is_reported_against_the_ranking() {
 async fn a_shape_this_bron_does_not_know_is_refused() {
     let body = r#"{"bron":1,"grade":"authority","data":{"kind":"something_later","x":1}}"#;
     let server = searching(body, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let fault = off_thread(&home, move |client| {
+    let fault = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("onrechtmatige daad"))
             .err()
@@ -609,10 +579,9 @@ async fn a_reading_the_service_contradicts_itself_about_still_arrives() {
         {"reading":"literal","source":"wetgeving","regulation_id":"BWBR0005537",
          "expression":"2026-08-15_0","held":true,"number":"8:4","caveats":[]}]}}"#;
     let server = searching(body, 200).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .search(&client, &asking_for("8:4"))
             .map_err(|e| e.to_string())
@@ -677,10 +646,9 @@ async fn what_waits_to_apply_is_read_as_the_service_sent_it() {
         ))
         .mount(&server)
         .await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .upcoming(&client, &waiting())
             .map_err(|e| e.to_string())
@@ -739,10 +707,9 @@ async fn a_known_stage_that_does_not_match_its_own_shape_is_upstream() {
         .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
         .mount(&server)
         .await;
-    let home = Home::new();
     let base = server.uri();
 
-    let fault = off_thread(&home, move |client| {
+    let fault = off_thread(move |client| {
         Service::at(&base)
             .upcoming(&client, &waiting())
             .err()
@@ -782,10 +749,9 @@ async fn answering_publication(id: &str, body: &str) -> MockServer {
 async fn a_held_publication_is_read_as_the_service_sent_it() {
     let body = fixture("bron-publication-stb-2026-56.json");
     let server = answering_publication("stb-2026-56", &body).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .publication(&client, "stb-2026-56", Some("2"), Some("0"), true, true)
             .map_err(|e| e.to_string())
@@ -834,10 +800,9 @@ async fn a_held_publication_is_read_as_the_service_sent_it() {
 async fn a_publication_passed_through_is_not_held() {
     let body = fixture("bron-publication-trb-2020-1.json");
     let server = answering_publication("trb-2020-1", &body).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .publication(&client, "trb-2020-1", Some("2"), Some("0"), false, false)
             .map_err(|e| e.to_string())
@@ -878,10 +843,9 @@ async fn a_publication_id_the_service_refuses_carries_its_code() {
         "message":"[xyz-2020-1] is no identifier of the officiële publicaties, which read as stb-2026-56 or kst-36327-3",
         "detail":[]}}"#;
     let server = answering_publication("xyz-2020-1", body).await;
-    let home = Home::new();
     let base = server.uri();
 
-    let fault = off_thread(&home, move |client| {
+    let fault = off_thread(move |client| {
         Service::at(&base)
             .publication(&client, "xyz-2020-1", Some("50"), Some("0"), false, false)
             .err()
@@ -909,10 +873,9 @@ async fn publication_search_answers_next_to_walk_on() {
         .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
         .mount(&server)
         .await;
-    let home = Home::new();
     let base = server.uri();
 
-    let answered = off_thread(&home, move |client| {
+    let answered = off_thread(move |client| {
         Service::at(&base)
             .publication_search(
                 &client,

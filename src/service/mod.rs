@@ -1,4 +1,4 @@
-//! Reading the wetgeving lane through the bron service.
+//! Reading through the bron service.
 //!
 //! One address, and what travels over it is the whole design.
 //!
@@ -20,15 +20,20 @@
 //! what the service is for.
 
 pub mod client;
+pub mod decisions;
 pub mod dossiers;
 pub mod model;
 pub mod publications;
 pub mod search;
 
 use crate::error::{Fault, Outcome};
-use crate::sources::Client;
+use crate::transport::Client;
 
 pub use client::Answered;
+pub use decisions::{
+    Decision, DecisionParagraph, DecisionParagraphs, DecisionRelation, DecisionRelations,
+    DecisionRendition, Target,
+};
 pub use dossiers::{DossierAct, DossierPaper, DossierPapers, DossierRegulation, Fate};
 pub use model::{
     Amendments, Article, Articles, Ask, Carried, Change, Changes, Compare, Consolidated, Dossier,
@@ -67,9 +72,8 @@ pub struct Service {
 impl Service {
     /// The service this invocation reads through.
     ///
-    /// Always one. Every lane either reads the service or reads a publisher
-    /// directly, and no lane does both, so there is nothing an empty setting
-    /// could turn the service off in favour of. A setting that names no service
+    /// Always one. Every lane reads the service, so there is nothing an empty
+    /// setting could turn the service off in favour of. A setting that names no service
     /// is refused rather than silently ignored, because whoever wrote it meant
     /// something by it and is owed the news that it cannot be done.
     ///
@@ -92,7 +96,7 @@ impl Service {
 
         if !names_a_service {
             return Err(Fault::usage(format!(
-                "{ENV} is set to [{configured}], which names no service. The legislation lane \
+                "{ENV} is set to [{configured}], which names no service. bron \
                  reads the bron service and nothing else; unset it to use {DEFAULT}, or point \
                  it at another deployment."
             )));
@@ -448,7 +452,7 @@ impl Service {
     ///
     /// Whether the text is a digest at all is the service's to say, as it
     /// says for every route.
-    pub fn blob(&self, client: &Client, digest: &str) -> Outcome<crate::sources::FetchedBytes> {
+    pub fn blob(&self, client: &Client, digest: &str) -> Outcome<crate::transport::FetchedBytes> {
         let url = self.route(&["blobs", digest])?;
         let fetched = self.read_raw(client, client.get(&url))?;
 

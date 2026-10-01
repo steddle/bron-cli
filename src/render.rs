@@ -15,7 +15,7 @@ use bron::service::{
     Article, Consolidated, Dossier, Expression, Had, Lineage, LinkedDecree, Place, Produced,
     Regulation, Relation, Remark, SearchData, SearchLid, Upcoming, name,
 };
-use bron::wire::{AppealStatus, Caveat, Envelope};
+use bron::wire::Caveat;
 
 use crate::run::Answer;
 
@@ -882,35 +882,24 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&a.caveats, out)
         }
 
-        Answer::CaseHits(e) => {
-            for hit in data(e) {
-                let mut row = hit.ecli.clone();
-                if let Some(court) = &hit.court {
-                    let _ = write!(row, "  {court}");
-                }
-                if let Some(day) = hit.decided_on {
-                    let _ = write!(row, "  {day}");
-                }
-                writeln!(out, "{row}")?;
-                if let Some(title) = &hit.title {
-                    writeln!(out, "  {title}")?;
-                }
-                if let Some(summary) = &hit.summary {
-                    writeln!(out, "  {summary}")?;
-                }
-            }
-            caveats(&e.caveats, err)
-        }
+        Answer::Decision {
+            answered: a,
+            blob_url,
+            offset,
+        } => {
+            let decision = &a.data.decision;
 
-        Answer::Case(e) => {
-            let Some(case) = &e.data else { return Ok(()) };
-            writeln!(out, "{}", case.ecli)?;
-            if let Some(court) = &case.court {
+            let mut head = decision.id.clone();
+            if decision.form == "opinion" {
+                head.push_str("  conclusie");
+            }
+            writeln!(out, "{head}")?;
+            if let Some(court) = &decision.court {
                 writeln!(out, "{court}")?;
             }
             let dates: Vec<String> = [
-                case.decided_on.map(|day| format!("decided {day}")),
-                case.published_on.map(|day| format!("published {day}")),
+                decision.decided_on.map(|day| format!("decided {day}")),
+                decision.published_on.map(|day| format!("published {day}")),
             ]
             .into_iter()
             .flatten()
@@ -918,33 +907,118 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             if !dates.is_empty() {
                 writeln!(out, "{}", dates.join(", "))?;
             }
-            if let Some(procedure) = &case.procedure_type {
+            if let Some(procedure) = decision.native("procedure") {
                 writeln!(out, "{procedure}")?;
             }
-            if let Some(summary) = &case.summary {
-                writeln!(out, "\n{summary}")?;
+            if let Some(numbers) = decision.native("zaaknummer") {
+                writeln!(out, "zaaknummer {numbers}")?;
             }
-            // The decision itself, after the register's gloss on it.
-            if let Some(text) = &case.full_text {
-                writeln!(out, "\n{text}")?;
+            if let Some(rendition) = &decision.rendition {
+                writeln!(out, "source: {}", rendition.blob)?;
             }
-            if !case.relations.is_empty() {
-                writeln!(out, "\nrelations")?;
-                for relation in &case.relations {
-                    let kind = relation.kind.as_deref().unwrap_or("relation");
-                    writeln!(out, "  {} {kind} {}", relation.direction, relation.target)?;
+            if let Some(url) = blob_url {
+                writeln!(out, "{url}")?;
+            }
+            if let Some(stamp) = &decision.known_since {
+                writeln!(out, "as the publisher served it since {stamp}")?;
+            }
+            // Never served, so named and nothing more: a text the court took
+            // back stays out of what a reader is handed.
+            if !decision.superseded.is_empty() {
+                writeln!(
+                    out,
+                    "replaces {} earlier text(s) the publisher withdrew, which bron does not serve",
+                    decision.superseded.len()
+                )?;
+            }
+
+            if !decision.has_body {
+                writeln!(
+                    out,
+                    "\nrechtspraak publishes {} as metadata alone, so it has no text.",
+                    decision.id
+                )?;
+            }
+
+            for paragraph in &a.data.paragraphs {
+                let name = match (paragraph.kind.as_str(), &paragraph.section_path) {
+                    ("inhoudsindicatie", _) => "inhoudsindicatie".to_string(),
+                    ("title", Some(path)) => format!("section {path}"),
+                    ("title", None) => "section".to_string(),
+                    ("footnote", Some(path)) => path.clone(),
+                    (_, Some(path)) => format!("{path}, paragraph {}", paragraph.ordinal),
+                    _ => format!("paragraph {}", paragraph.ordinal),
+                };
+                writeln!(
+                    out,
+                    "\n{name}  ({}..{})",
+                    paragraph.span.start, paragraph.span.end
+                )?;
+                if let Some(text) = paragraph.rendered.as_deref().or(paragraph.raw.as_deref()) {
+                    writeln!(out, "{text}")?;
                 }
             }
-            writeln!(out, "\nappeal: {}", appeal(&case.appeal))?;
-            writeln!(out, "source: {}", case.provenance.blob)?;
-            writeln!(out, "{}", case.provenance.url)?;
-            caveats(&e.caveats, out)
+
+            // A cut ruling is a page of one document and not a filtered list,
+            // so `truncated` says where the next page starts.
+            let (cut, rest): (Vec<Caveat>, Vec<Caveat>) = a
+                .caveats
+                .iter()
+                .cloned()
+                .partition(|caveat| matches!(caveat, Caveat::Truncated { .. }));
+            if let Some(Caveat::Truncated { window }) = cut.first() {
+                // The service accepted the offset, so it is a whole number.
+                let from = offset
+                    .as_deref()
+                    .and_then(|typed| typed.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let shown = a.data.paragraphs.len() as u64;
+                writeln!(
+                    out,
+                    "\nnote: units {} to {} shown; read on with --offset {}, or the whole ruling with --limit none",
+                    from + 1,
+                    from + shown,
+                    from + u64::from(*window)
+                )?;
+            }
+            caveats(&rest, out)
         }
 
-        Answer::Appeal(e) => {
-            let Some(status) = &e.data else { return Ok(()) };
-            writeln!(out, "{}", appeal(status))?;
-            caveats(&e.caveats, out)
+        Answer::DecisionRelations(a) => {
+            let ruling = &a.data;
+
+            if ruling.relations.is_empty() {
+                writeln!(
+                    out,
+                    "No document bron holds states a relation for {}.",
+                    ruling.id
+                )?;
+            }
+            for relation in &ruling.relations {
+                let mut row = match &relation.aanleg {
+                    Some(aanleg) => format!("{aanleg}  {}", relation.kind),
+                    None => relation.kind.clone(),
+                };
+                let _ = write!(row, "  {}", relation.to.id);
+                if let Some(part) = &relation.to.part {
+                    let _ = write!(row, " {part}");
+                }
+                if relation.asserted == "machine" {
+                    row.push_str("  (bron's reading)");
+                }
+                if let Some(digest) = &relation.stated_in {
+                    let _ = write!(row, "  stated in {digest}");
+                }
+                writeln!(out, "{row}")?;
+            }
+            // The one conclusion a reader is tempted to draw, and the one these
+            // rows cannot support.
+            writeln!(
+                err,
+                "A relation is the publisher's statement. None says whether an appeal was lodged."
+            )?;
+
+            caveats(&a.caveats, err)
         }
 
         Answer::Publication(a) => {
@@ -1605,10 +1679,6 @@ fn write_remarks(remarks: &[Remark], indent: &str, out: &mut impl Write) -> io::
     Ok(())
 }
 
-fn data<T>(envelope: &Envelope<Vec<T>>) -> &[T] {
-    envelope.data.as_deref().unwrap_or_default()
-}
-
 /// The moment an answer is bound to, where it is bound to one.
 fn bound(as_of: Option<NaiveDate>, as_known_on: Option<NaiveDate>) -> Option<String> {
     match (as_of, as_known_on) {
@@ -1633,19 +1703,6 @@ fn window(from: NaiveDate, until: Option<NaiveDate>) -> String {
     }
 }
 
-fn appeal(status: &AppealStatus) -> String {
-    match status {
-        AppealStatus::Appealed { successors } => {
-            format!("a later decision exists: {}", successors.join(", "))
-        }
-        // Deliberately not 'not appealed'. This says what the register held on
-        // the day it was read, and nothing about whether an appeal was brought.
-        AppealStatus::NoPublishedSuccessor { as_of } => {
-            format!("no published successor known, as of {}", as_of.date_naive())
-        }
-    }
-}
-
 fn caveats(caveats: &[Caveat], out: &mut impl Write) -> io::Result<()> {
     if caveats.is_empty() {
         return Ok(());
@@ -1665,9 +1722,6 @@ fn caveats(caveats: &[Caveat], out: &mut impl Write) -> io::Result<()> {
 /// the line they qualify rather than in a block at the end.
 fn caveat_line(caveat: &Caveat) -> String {
     match caveat {
-        Caveat::UnstableOrdering => {
-            "note: ordering comes from a relevance score and is not reproducible".to_string()
-        }
         Caveat::Truncated { window } => {
             format!("note: filtered over a window of {window}, matches may be missing")
         }
@@ -2490,72 +2544,121 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
-    /// The decision itself is what `case show` is asked for; the summary is
-    /// the register's gloss on it. Printed after the summary, whole.
+    fn answered<T>(data: T) -> bron::service::Answered<T> {
+        bron::service::Answered {
+            data,
+            caveats: Vec::new(),
+            as_of: None,
+            as_known_on: None,
+            envelope: String::new(),
+        }
+    }
+
+    /// A ruling as the service answers it: the court and the days, the
+    /// publisher's procedure and case numbers, the digest every span points
+    /// into, then each unit under the section the court numbered it in.
     #[test]
-    fn case_show_prints_the_decision_and_when_it_was_published() {
-        use bron::wire::{AppealStatus, Case, Provenance};
+    fn case_show_prints_the_ruling_and_where_each_unit_stands() {
+        let ruling: bron::service::DecisionParagraphs = serde_json::from_str(
+            r#"{"decision":{"id":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl",
+                "form":"ruling","court":"Hoge Raad","decided_on":"2024-11-29","published_on":"2024-11-29",
+                "known_since":"2026-01-16T10:06:33","has_body":true,
+                "rendition":{"language":"nl","blob":"de3e3678909a1d2e51c4afc4ffe19139f514ca4d357083576e49fbb3eadbe1ff","blob_size":63030},
+                "superseded":[],
+                "native":{"type":"Uitspraak","procedure":["Prejudiciële beslissing"],"zaaknummer":["24/00169","24/00170"],"subject":[],"vindplaatsen":[]}},
+              "paragraphs":[
+                {"ordinal":1,"kind":"inhoudsindicatie","span":{"start":10,"end":20},"content_hash":"a","rendered":"Huurrecht."},
+                {"ordinal":2,"kind":"title","section_path":"2","span":{"start":30,"end":40},"content_hash":"b","rendered":"2 Uitgangspunten"},
+                {"ordinal":3,"kind":"para","section_path":"2/2.1","span":{"start":50,"end":60},"content_hash":"c","rendered":"2.1 De huurder."}]}"#,
+        )
+        .unwrap();
 
-        let case = Answer::Case(Envelope::ok(Box::new(Case {
-            ecli: "ECLI:NL:HR:2019:1278".into(),
-            court: Some("Hoge Raad".into()),
-            decided_on: Some("2019-07-19".parse().unwrap()),
-            published_on: Some("2019-07-18".parse().unwrap()),
-            procedure_type: Some("Uitspraak".into()),
-            summary: Some("Prejudiciële beslissing.".into()),
-            full_text: Some("HOGE RAAD DER NEDERLANDEN\nCIVIELE KAMER".into()),
-            relations: Vec::new(),
-            appeal: AppealStatus::NoPublishedSuccessor {
-                as_of: "2026-09-19T20:05:34Z".parse().unwrap(),
-            },
-            provenance: Provenance::frozen(
-                &bron::sources::Provenance {
-                    blob: bron::blob::BlobId::of(b"<open-rechtspraak/>"),
-                    url: "https://data.rechtspraak.nl/uitspraken/content?id=ECLI%3ANL%3AHR%3A2019%3A1278".into(),
-                    byte_len: 19,
-                },
-                "2026-09-19T20:05:34Z".parse().unwrap(),
-            ),
-        })));
+        let text = printed(&Answer::Decision {
+            answered: Box::new(answered(ruling)),
+            blob_url: Some("https://bron.steddle.com/api/v1/blobs/de3e".into()),
+            offset: None,
+        });
 
-        let text = printed(&case);
-
-        assert!(text.contains("published 2019-07-18"), "{text}");
-        assert!(text.contains("Uitspraak"), "{text}");
         assert!(
-            text.contains("HOGE RAAD DER NEDERLANDEN\nCIVIELE KAMER"),
+            text.starts_with("ECLI:NL:HR:2024:1780\nHoge Raad\n"),
             "{text}"
         );
         assert!(
-            text.find("Prejudiciële beslissing.") < text.find("HOGE RAAD DER NEDERLANDEN"),
+            text.contains("decided 2024-11-29, published 2024-11-29"),
+            "{text}"
+        );
+        assert!(text.contains("Prejudiciële beslissing"), "{text}");
+        assert!(text.contains("zaaknummer 24/00169, 24/00170"), "{text}");
+        assert!(text.contains("source: de3e3678"), "{text}");
+        assert!(
+            text.contains("inhoudsindicatie  (10..20)\nHuurrecht."),
             "{text}"
         );
         assert!(
-            text.contains("https://data.rechtspraak.nl/uitspraken/content?id="),
+            text.contains("2/2.1, paragraph 3  (50..60)\n2.1 De huurder."),
             "{text}"
         );
     }
 
-    /// A hit names its court and the day it was decided on its own row, where
-    /// rechtspraak's title may or may not carry them.
+    /// A ruling cut at its window is a page of one document, not a filtered
+    /// list: the note says which units were shown and how to read on.
     #[test]
-    fn a_case_hit_names_its_court_and_its_day() {
-        use bron::wire::CaseHit;
+    fn a_cut_ruling_says_where_to_read_on() {
+        let ruling: bron::service::DecisionParagraphs = serde_json::from_str(
+            r#"{"decision":{"id":"ECLI:NL:HR:2024:1780","form":"ruling","has_body":true,"superseded":[],"native":{}},
+              "paragraphs":[
+                {"ordinal":11,"kind":"para","span":{"start":1,"end":2},"content_hash":"a","rendered":"Een."},
+                {"ordinal":12,"kind":"para","span":{"start":3,"end":4},"content_hash":"b","rendered":"Twee."}]}"#,
+        )
+        .unwrap();
+        let mut answered = answered(ruling);
+        answered.caveats = vec![Caveat::Truncated { window: 2 }];
 
-        let hits = Answer::CaseHits(Envelope::ok(vec![CaseHit {
-            ecli: "ECLI:NL:RBLIM:2025:9073".into(),
-            court: Some("Rechtbank Limburg".into()),
-            title: None,
-            summary: None,
-            decided_on: Some("2025-09-17".parse().unwrap()),
-        }]));
+        let text = printed(&Answer::Decision {
+            answered: Box::new(answered),
+            blob_url: None,
+            offset: Some("10".into()),
+        });
 
         assert!(
-            printed(&hits)
-                .lines()
-                .any(|l| l == "ECLI:NL:RBLIM:2025:9073  Rechtbank Limburg  2025-09-17"),
-            "{}",
-            printed(&hits)
+            text.contains(
+                "note: units 11 to 12 shown; read on with --offset 12, or the whole ruling with --limit none"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("filtered over a window"), "{text}");
+    }
+
+    /// The publisher's relations on stdout, one a row, and on stderr the one
+    /// conclusion they cannot carry.
+    #[test]
+    fn case_relations_says_no_relation_settles_an_appeal() {
+        let relations: bron::service::DecisionRelations = serde_json::from_str(
+            r#"{"id":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","relations":[
+                {"kind":"conclusie","aanleg":"eerdereAanleg","to":{"scheme":"ecli","id":"ECLI:NL:PHR:2024:771"},
+                 "asserted":"publisher","stated_by":"rechtspraak","stated_in":"de3e"}]}"#,
+        )
+        .unwrap();
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(
+            &Answer::DecisionRelations(Box::new(answered(relations))),
+            &mut out,
+            &mut err,
+        )
+        .unwrap();
+        let (out, err) = (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        );
+
+        assert_eq!(
+            out,
+            "eerdereAanleg  conclusie  ECLI:NL:PHR:2024:771  stated in de3e\n"
+        );
+        assert!(
+            err.contains("None says whether an appeal was lodged"),
+            "{err}"
         );
     }
 
@@ -2640,25 +2743,10 @@ mod tests {
         );
     }
 
-    /// Rows on stdout and every note on stderr, for the two lists read from a
-    /// publisher, whose endpoints no test can stand in for.
+    /// Rows on stdout and every note on stderr, so a shell script reading
+    /// line by line never reads a sentence as a row.
     #[test]
-    fn a_list_read_from_a_publisher_keeps_its_notes_off_stdout() {
-        use bron::wire::CaseHit;
-
-        let cases = Answer::CaseHits(
-            Envelope::ok(vec![CaseHit {
-                ecli: "ECLI:NL:HR:2025:1888".into(),
-                court: Some("Hoge Raad".into()),
-                title: Some("Hoge Raad, 12-12-2025, 25/01812".into()),
-                summary: None,
-                decided_on: None,
-            }])
-            .with_caveats(vec![
-                Caveat::UnstableOrdering,
-                Caveat::Truncated { window: 20 },
-            ]),
-        );
+    fn a_list_of_publications_keeps_its_notes_off_stdout() {
         let publications = publication_search(
             vec![publication_hit(
                 "kst-33669-6",
@@ -2669,21 +2757,16 @@ mod tests {
             vec![Caveat::Truncated { window: 20 }],
         );
 
-        for (answer, row) in [
-            (cases, "ECLI:NL:HR:2025:1888"),
-            (publications, "kst-33669-6"),
-        ] {
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            super::answer(&answer, &mut out, &mut err).unwrap();
-            let (out, err) = (
-                String::from_utf8(out).unwrap(),
-                String::from_utf8(err).unwrap(),
-            );
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(&publications, &mut out, &mut err).unwrap();
+        let (out, err) = (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        );
 
-            assert!(out.contains(row), "{out}");
-            assert!(!out.contains("note:"), "{out}");
-            assert!(err.contains("note: filtered over a window of 20"), "{err}");
-        }
+        assert!(out.contains("kst-33669-6"), "{out}");
+        assert!(!out.contains("note:"), "{out}");
+        assert!(err.contains("note: filtered over a window of 20"), "{err}");
     }
 
     /// Three facts about the publisher's hash, and a reader told one must not

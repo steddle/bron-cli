@@ -21,7 +21,6 @@ cargo install --path .
 - Rust 1.85 or newer, for edition 2024.
 - No system libraries. TLS goes through rustls, so there's no OpenSSL header to find on Linux.
 - A network. bron holds nothing between runs, so every answer is fetched.
-- `BRON_HOME` to put the rate-limit buckets somewhere other than `~/.bron/buckets`, which is what a CI run that should pace itself alone wants.
 
 ## Quick start
 
@@ -80,27 +79,32 @@ AMENDED    Artikel 119a
   [...] uiterste dag van betaling overeenkomen van meer dan [-zestig-] {+30+} dagen indien de schuldenaar een rechtspersoon is die [...]
 ```
 
-Case law works the same way. Fetch a decision once, and the appeal question is answered from what the register holds:
+Case law works the same way. A ruling arrives with its court, its days and its case numbers, then the inhoudsindicatie and every paragraph with its byte range in the document the service froze:
 
 ```
-$ bron case show ECLI:NL:HR:2019:1278
-ECLI:NL:HR:2019:1278
+$ bron case show ECLI:NL:HR:2024:1780 --limit 4
+ECLI:NL:HR:2024:1780
 Hoge Raad
-decided 2019-07-19
+decided 2024-11-29, published 2024-11-29
+Prejudiciële beslissing
+zaaknummer 24/00169, 24/00170
+source: de3e3678909a1d2e51c4afc4ffe19139f514ca4d357083576e49fbb3eadbe1ff
+https://bron.steddle.com/api/v1/blobs/de3e3678909a1d2e51c4afc4ffe19139f514ca4d357083576e49fbb3eadbe1ff
+as the publisher served it since 2026-01-16T10:06:33
 
-Prejudiciële vraag (art. 392 Rv). Aardbevingsschade in Groningen. [...]
+inhoudsindicatie  (4104..4575)
+Prejudiciële beslissing (art. 392 Rv). Huurrecht; Europees consumentenrecht. Richtlijn oneerlijke bedingen (Richtlijn 93/13/EEG). Huurprijswijzigingsbeding; indexatiebeding en opslagbeding.
 
-relations
-  earlier conclusie ECLI:NL:PHR:2019:496
+paragraph 2  (4876..4947)
+HOGE RAAD DER NEDERLANDEN
+[...]
 
-appeal: no published successor known, as of 2026-08-20
-source: 0dba13d017e9cb0a4dc7c77a5af767559ef454c5ab9425e5185a4418a01647cf
-
-$ bron case appeal ECLI:NL:HR:2019:1278
-no published successor known, as of 2026-08-20
+$ bron case relations ECLI:NL:HR:2024:1780
+eerdereAanleg  conclusie  ECLI:NL:PHR:2024:771  stated in de3e3678909a1d2e51c4afc4ffe19139f514ca4d357083576e49fbb3eadbe1ff
+A relation is the publisher's statement. None says whether an appeal was lodged.
 ```
 
-Those two read one law. Two more read the register as a whole, and the
+`law show` and `law changes` read one law. Two more read the register as a whole, and the
 difference between them is why there are two:
 
 ```
@@ -170,7 +174,7 @@ kst-34608-13  2018-12-21  amendement  Stemmen - aangenomen
 
 ## Machine use
 
-Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law parts`, `law changes`, `law published`, `law feed` and `law upcoming` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code, and the whole `error` object is the service's as it arrived, its kind included: `throttled`, `corpus` and `source` read as the API and the MCP give them, and exit 4. A failure bron states itself carries no code, so presence says who stated it. A question goes to the service as asked, so a window that runs backwards, a `--limit` of 0, a date that names no day or an identifier that is none is refused by the service, with its code, exactly as the API and the MCP refuse it; bron refuses only what it alone can judge, such as `case search`'s own `--limit` and `--from`, which rechtspraak.nl reads directly, or a `--span` outside the bytes it hashed.
+Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as `find`, `law search`, `law versions`, `law parts`, `law changes`, `law published`, `law feed` and `law upcoming` are, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code, and the whole `error` object is the service's as it arrived, its kind included: `throttled`, `corpus` and `source` read as the API and the MCP give them, and exit 4. A failure bron states itself carries no code, so presence says who stated it. A question goes to the service as asked, so a window that runs backwards, a `--limit` of 0, a date that names no day or an identifier that is none is refused by the service, with its code, exactly as the API and the MCP refuse it; bron refuses only what it alone can judge, such as a `--span` outside the bytes it hashed.
 
 ```
 $ bron --json find 6:162 BW
@@ -196,9 +200,9 @@ Exit 4 covers two things, and what is printed tells them apart. **The service st
 
 ## Reading through the service
 
-`bron law`, `bron publication` and `bron dossier` read through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
+Every command reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not. For legislation and publications the service froze them and names the digest; a decision is one bron fetched and hashed itself, and `provenance.frozen_by` on that answer says so and states when.
+Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article or paragraph inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not.
 
 ```
 bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
@@ -206,9 +210,9 @@ bron blob <digest> --span 349072..361267        # fetch it, hash it, cut it your
 BRON_MIRROR=https://bron.example.org/api/v1     # another deployment
 ```
 
-Case law is read straight from rechtspraak.nl, because the service holds no case law that would add anything: the register already answers by identifier, and the digest travels with the answer either way.
+The service fetches a ruling from rechtspraak on the first read that asks for it and answers every later read from the bytes it froze. A text the publisher replaced is never served again: its digest answers 410, and the ruling names the digests it replaced.
 
-Nothing is kept. bron writes one thing between runs, its share of the per-host rate-limit budget, so every answer is fetched and without a network there is no answer. A question put to `bron find` travels in a POST body for the same reason nothing is written down: the material is public, the interest in it is not.
+Nothing is kept. bron writes nothing between runs, so every answer is fetched and without a network there is no answer. A question put to `bron find` travels in a POST body for the same reason nothing is written down: the material is public, the interest in it is not.
 
 ## Features
 
@@ -218,13 +222,8 @@ Nothing is kept. bron writes one thing between runs, its share of the per-host r
 - The life of one article. `bron law history` answers every text it has had, each with the window it applied in and the act that produced it, from the renditions the corpus holds.
 - What the register states around a law. `bron law about` says how much of it is held, `bron law relations` what rests on it and what cites it, and `bron law amendments` what the act that established it did elsewhere.
 - Amendment diffs. `bron law changes` compares a law between two dates unit by unit, its bijlagen and aanhef beside its articles, and matches them on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
-- An appeal answer that is never a boolean. `no_published_successor` is dated to the moment bron read the decision, because 'nothing published' is a claim about what the register held then and not about whether an appeal was brought.
-- Per-host pacing through a file lock, so several processes on one machine share one budget against the publishers rather than each pacing itself perfectly and together going three times too fast.
-- Nothing kept between runs. bron writes its share of the rate-limit budget and nothing else, so there is no store to migrate, verify or grow stale.
-
-## Documentation
-
-- [docs/buckets.md](docs/buckets.md): how the shared rate-limit budget works, and how a non-Rust process joins it.
+- Rulings by ECLI. `bron case show` answers a ruling or a conclusie paragraph by paragraph, each at its byte range, and `bron case relations` the conclusie and the instances before and after it, in the publisher's words and never as a finding that an appeal was or was not lodged.
+- Nothing kept between runs. bron writes nothing, so there is no store to migrate, verify or grow stale.
 
 ## Changelog
 
@@ -233,7 +232,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## Credits
 
 - [Mischa Sigtermans](https://github.com/mischasigtermans)
-- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen) and [de Rechtspraak](https://www.rechtspraak.nl). bron fetches on your behalf and keeps none of it. The only material shipped here is the frozen responses under `tests/fixtures/` that the test suite parses; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
+- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen) and [de Rechtspraak](https://www.rechtspraak.nl). bron reads them through the bron service and keeps none of it. The only material shipped here is the frozen answers under `tests/fixtures/` that the test suite reads; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
 
 ## License
 

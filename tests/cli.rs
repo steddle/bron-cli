@@ -16,7 +16,6 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Runs `bron` against a mock service, off the runtime serving that mock.
 async fn bron(server: &MockServer, args: &[&str]) -> Output {
-    let home = tempfile::tempdir().unwrap();
     let mirror = server.uri();
     let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
 
@@ -24,7 +23,6 @@ async fn bron(server: &MockServer, args: &[&str]) -> Output {
         std::process::Command::new(env!("CARGO_BIN_EXE_bron"))
             .args(&args)
             .env("BRON_MIRROR", mirror)
-            .env("BRON_HOME", home.path())
             // A proxy in the developer's environment must not get between the
             // binary and the mock on loopback.
             .env("NO_PROXY", "127.0.0.1,localhost")
@@ -525,20 +523,126 @@ async fn a_failure_bron_states_itself_carries_no_code() {
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
-/// `case search` reads rechtspraak.nl directly rather than the bron service,
-/// so bron is the only judge there is for `--limit`: it stays a `u32` and a
-/// bad one never leaves this process, exactly as a malformed date does not.
+/// A ruling as the service answers it, with a field this build has no name
+/// for, so a re-serialisation would show.
+const DECISION: &str = r#"{"bron":1,"grade":"authority","data":{"decision":{"id":"ECLI:NL:HR:2024:1780",
+ "register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Hoge Raad","decided_on":"2024-11-29",
+ "has_body":true,"rendition":{"language":"nl","blob":"de3e3678909a1d2e51c4afc4ffe19139f514ca4d357083576e49fbb3eadbe1ff","blob_size":63030},
+ "superseded":[],"native":{"procedure":[],"zaaknummer":["24/00169"],"subject":[],"vindplaatsen":[]},"later_field":1},
+ "paragraphs":[{"ordinal":1,"kind":"para","span":{"start":5,"end":9},"content_hash":"c","rendered":"De Hoge Raad."}]}}"#;
+
+/// `case show` is one call to the service: the ruling's units, rendered, and
+/// the page and the publisher's bytes only where typed.
 #[tokio::test(flavor = "multi_thread")]
-async fn case_search_still_judges_its_own_limit_locally() {
+async fn case_show_prints_the_envelope_the_service_sent() {
     let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions/ECLI:NL:HR:2024:1780/paragraphs"))
+        .and(query_param("rendered", "1"))
+        .and(query_param("raw", "1"))
+        .and(query_param("limit", "abc"))
+        .and(query_param_is_missing("offset"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(DECISION, "application/json"))
+        .mount(&server)
+        .await;
 
-    let output = bron(&server, &["--json", "case", "search", "--limit", "abc"]).await;
-    let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let output = bron(
+        &server,
+        &[
+            "--json",
+            "case",
+            "show",
+            "ECLI:NL:HR:2024:1780",
+            "--raw",
+            "--limit",
+            "abc",
+        ],
+    )
+    .await;
 
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert_eq!(envelope["error"]["kind"], "usage");
-    assert!(envelope["error"].get("code").is_none(), "{envelope}");
-    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{DECISION}\n"));
+}
+
+/// What is or is not an ECLI is the service's to say, and so is a ruling it
+/// cannot find or no longer serves: each reaches the caller as stated, exit 2.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ruling_the_service_does_not_answer_is_not_found_as_it_said() {
+    for (status, code) in [(404, "decision_not_found"), (410, "decision_withdrawn")] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/decisions/ECLI:NL:HR:2099:1/paragraphs"))
+            .respond_with(ResponseTemplate::new(status).set_body_raw(
+                format!(
+                    r#"{{"bron":1,"grade":"authority","error":{{"kind":"not_found","code":"{code}","message":"no ruling","detail":[]}}}}"#
+                ),
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+
+        let output = bron(&server, &["--json", "case", "show", "ECLI:NL:HR:2099:1"]).await;
+        let envelope: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert_eq!(envelope["error"]["code"], code, "{envelope}");
+    }
+}
+
+/// `case relations` prints the publisher's relations as the service sent
+/// them, and for a person says what none of them settles.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_relations_reads_the_service_and_says_what_a_relation_cannot() {
+    let relations = r#"{"bron":1,"grade":"authority","data":{"id":"ECLI:NL:HR:2024:1780","register":"rechtspraak",
+ "jurisdiction":"nl","relations":[{"kind":"conclusie","aanleg":"eerdereAanleg","to":{"scheme":"ecli","id":"ECLI:NL:PHR:2024:771"},
+ "asserted":"publisher","stated_by":"rechtspraak","stated_in":"de3e"}]}}"#;
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:NL:HR:2024:1780/relations",
+        relations,
+    )
+    .await;
+
+    let json = bron(
+        &server,
+        &["--json", "case", "relations", "ECLI:NL:HR:2024:1780"],
+    )
+    .await;
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{relations}\n"));
+
+    let human = bron(&server, &["case", "relations", "ECLI:NL:HR:2024:1780"]).await;
+    assert!(
+        stdout(&human).contains("eerdereAanleg  conclusie  ECLI:NL:PHR:2024:771"),
+        "{human:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&human.stderr).contains("None says whether an appeal was lodged"),
+        "{human:?}"
+    );
+}
+
+/// `find --jurisdiction` goes in the body as typed, and is the service's to
+/// judge.
+#[tokio::test(flavor = "multi_thread")]
+async fn find_sends_a_jurisdiction_as_typed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/search"))
+        .and(body_partial_json(
+            serde_json::json!({"q": "6:162", "jurisdiction": "nl"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(LOOKUP, "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["--json", "find", "6:162", "--jurisdiction", "nl"],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
 }
 
 /// One rendition's articles, shaped as the service shapes them. A label opens

@@ -5,15 +5,13 @@
 
 use std::io::{self, Write};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::Serialize;
 
-use bron::error::{Fault, Outcome, from_source};
-use bron::ids::Ecli;
-use bron::model::{AppealStatus, Direction, Relation};
+use bron::error::{Fault, Outcome};
 use bron::service::{self, Answered, Service};
-use bron::sources::{Client, FetchedCase, rechtspraak};
-use bron::wire::{self, Caveat, Envelope};
+use bron::transport::Client;
+use bron::wire::{self, Envelope};
 
 use crate::cli::{Case, Cli, Command, DossierCmd, Law, Moment, Publication};
 use crate::render;
@@ -70,9 +68,15 @@ pub enum Answer {
         /// Whether the question asked only for what is not yet applied.
         not_commenced: bool,
     },
-    CaseHits(Envelope<Vec<wire::CaseHit>>),
-    Case(Envelope<Box<wire::Case>>),
-    Appeal(Envelope<wire::AppealStatus>),
+    Decision {
+        answered: Box<Answered<service::DecisionParagraphs>>,
+        /// Where the ruling's document is served. See `Articles::blob_url`.
+        blob_url: Option<String>,
+        /// The offset the question named, so a cut page can say where the next
+        /// one starts.
+        offset: Option<String>,
+    },
+    DecisionRelations(Box<Answered<service::DecisionRelations>>),
     PublicationHits(Answered<service::PublicationSearch>),
     Publication(Box<Answered<service::Publication>>),
     Dossier(Box<Answered<service::DossierPapers>>),
@@ -110,9 +114,8 @@ impl Answer {
             Self::Upcoming(a) => sent(out, &a.envelope),
             Self::Changes { answered, .. } => sent(out, &answered.envelope),
             Self::Articles { answered, .. } => sent(out, &answered.envelope),
-            Self::CaseHits(e) => write(out, e),
-            Self::Case(e) => write(out, e),
-            Self::Appeal(e) => write(out, e),
+            Self::Decision { answered, .. } => sent(out, &answered.envelope),
+            Self::DecisionRelations(a) => sent(out, &a.envelope),
             Self::PublicationHits(a) => sent(out, &a.envelope),
             Self::Publication(a) => sent(out, &a.envelope),
             Self::Dossier(a) => sent(out, &a.envelope),
@@ -125,40 +128,36 @@ impl Answer {
     }
 }
 
-pub fn execute(cli: &Cli, quiet: bool) -> Outcome<Answer> {
+pub fn execute(cli: &Cli) -> Outcome<Answer> {
     // Resolved once, so every fetch in a run takes the same route.
     let service = Service::resolve()?;
 
     match &cli.command {
-        Command::Law(law) => run_law(law, quiet, &service),
-        Command::Case(case) => run_case(case, quiet),
-        Command::Publication(pub_) => run_publication(pub_, quiet, &service),
-        Command::Dossier(dossier) => run_dossier(dossier, quiet, &service),
+        Command::Law(law) => run_law(law, &service),
+        Command::Case(case) => run_case(case, &service),
+        Command::Publication(pub_) => run_publication(pub_, &service),
+        Command::Dossier(dossier) => run_dossier(dossier, &service),
         Command::Find {
             query,
             regulation,
+            jurisdiction,
             limit,
             moment,
         } => run_find(
             &query.join(" "),
             regulation,
+            jurisdiction.as_deref(),
             limit.as_deref(),
             moment,
-            quiet,
             &service,
         ),
-        Command::Blob { digest, span } => run_blob(digest, *span, quiet, &service),
+        Command::Blob { digest, span } => run_blob(digest, *span, &service),
     }
 }
 
 /// The bytes a digest names, checked against it, and the span asked for.
-fn run_blob(
-    digest: &str,
-    span: Option<(usize, usize)>,
-    quiet: bool,
-    service: &Service,
-) -> Outcome<Answer> {
-    let fetched = service.blob(&client(quiet)?, digest)?;
+fn run_blob(digest: &str, span: Option<(usize, usize)>, service: &Service) -> Outcome<Answer> {
+    let fetched = service.blob(&client()?, digest)?;
     let read_at = Utc::now();
     let length = fetched.bytes.len();
 
@@ -172,15 +171,14 @@ fn run_blob(
         None => fetched.bytes.clone(),
     };
 
-    let provenance = bron::sources::Provenance {
-        blob: fetched.blob,
-        url: fetched.url.clone(),
-        byte_len: length,
-    };
-
     Ok(Answer::Blob {
         envelope: Envelope::ok(Box::new(wire::Blob {
-            provenance: wire::Provenance::frozen(&provenance, read_at),
+            provenance: wire::Provenance::frozen(
+                fetched.blob,
+                fetched.url.clone(),
+                length,
+                read_at,
+            ),
             span: span.map(|(start, end)| wire::ByteRange { start, end }),
             text: String::from_utf8(bytes.clone()).ok(),
         })),
@@ -209,30 +207,29 @@ pub fn item<'a>(text: &'a str, letter: &str) -> Option<&'a str> {
 
 /// Answers which article, from a question or from a citation, by identifier.
 ///
-/// The one command with no publisher behind it. Every other route through the
-/// service is an accelerant in front of a source of last resort; the shared
-/// corpus has none, because it is the source. So no service is a refusal rather
-/// than an empty answer: reporting nothing found would record an absence bron
-/// never established, which is the distinction the whole contract rests on. A
-/// 404 read as 'nothing matched' would record that same absence, and a citation
-/// that resolves to nothing is exactly such a 404, which is why this reads the
-/// service's own envelope like every other call here.
+/// No service is a refusal rather than an empty answer: reporting nothing
+/// found would record an absence bron never established, which is the
+/// distinction the whole contract rests on. A 404 read as 'nothing matched'
+/// would record that same absence, and a citation that resolves to nothing is
+/// exactly such a 404, which is why this reads the service's own envelope like
+/// every other call here.
 fn run_find(
     query: &str,
     regulation: &[String],
+    jurisdiction: Option<&str>,
     limit: Option<&str>,
     moment: &Moment,
-    quiet: bool,
     service: &Service,
 ) -> Outcome<Answer> {
     let (as_of, as_known_on) = moment.coordinates();
 
     service
         .search(
-            &client(quiet)?,
+            &client()?,
             &service::SearchRequest {
                 q: query,
                 regulation: (!regulation.is_empty()).then(|| regulation.join(",")),
+                jurisdiction,
                 limit,
                 as_of,
                 as_known_on,
@@ -243,8 +240,8 @@ fn run_find(
 
 // -- wetgeving -----------------------------------------------------------
 
-fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
-    let client = client(quiet)?;
+fn run_law(law_cmd: &Law, service: &Service) -> Outcome<Answer> {
+    let client = client()?;
 
     match law_cmd {
         Law::Search {
@@ -496,106 +493,41 @@ fn run_law(law_cmd: &Law, quiet: bool, service: &Service) -> Outcome<Answer> {
 
 // -- rechtspraak ---------------------------------------------------------
 
-/// One decision, and the moment bron read it.
-///
-/// Fetched every time. A decision is immutable once published, so the only
-/// thing a stored copy would save is a request, and what it would cost is a
-/// store that has to be kept, verified and migrated.
-///
-/// The moment is bron's own and is stamped once, because it is what an answer
-/// about the absence of a successor is dated to and two reads of the clock
-/// would date two halves of one answer differently.
-fn decision(ecli: &Ecli, quiet: bool) -> Outcome<(FetchedCase, DateTime<Utc>)> {
-    let client = client(quiet)?;
-    let fetched = rechtspraak::fetch(&client, ecli).map_err(|e| from_source("rechtspraak", e))?;
+fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
+    let client = client()?;
 
-    Ok((fetched, Utc::now()))
-}
-
-/// What the decision's own relations can say about appeal or cassation.
-///
-/// Read off the document rather than out of a corpus, because that is where
-/// upstream states them. Dated to when bron looked, because
-/// `no_published_successor` is a claim about what the register held at that
-/// moment and it began going stale as it was made.
-fn appeal(relations: &[Relation], read_at: DateTime<Utc>) -> AppealStatus {
-    let successors: Vec<Ecli> = relations
-        .iter()
-        .filter(|relation| relation.direction == Direction::Later)
-        .map(|relation| relation.target.clone())
-        .collect();
-
-    if successors.is_empty() {
-        AppealStatus::NoPublishedSuccessor { as_of: read_at }
-    } else {
-        AppealStatus::Appealed { successors }
-    }
-}
-
-fn run_case(case_cmd: &Case, quiet: bool) -> Outcome<Answer> {
     match case_cmd {
-        Case::Search {
-            query,
-            court,
-            from,
+        Case::Show {
+            ecli,
+            raw,
             limit,
+            offset,
         } => {
-            let client = client(quiet)?;
-            let results = rechtspraak::search(
-                &client,
-                &rechtspraak::Query {
-                    terms: &query.join(" "),
-                    court: court.as_deref(),
-                    from: *from,
-                    limit: *limit,
-                },
-            )
-            .map_err(|e| from_source("rechtspraak", e))?;
+            let answered =
+                service.decision(&client, ecli, *raw, limit.as_deref(), offset.as_deref())?;
 
-            let mut caveats = vec![Caveat::UnstableOrdering];
-            if results.truncated {
-                caveats.push(Caveat::Truncated { window: *limit });
-            }
-
-            Ok(Answer::CaseHits(
-                Envelope::ok(results.hits.into_iter().map(Into::into).collect())
-                    .with_caveats(caveats),
-            ))
+            Ok(Answer::Decision {
+                blob_url: answered
+                    .data
+                    .decision
+                    .rendition
+                    .as_ref()
+                    .and_then(|rendition| service.blob_url(&rendition.blob)),
+                answered: Box::new(answered),
+                offset: offset.clone(),
+            })
         }
 
-        Case::Show { ecli } => {
-            let ecli: Ecli = parse_id(ecli)?;
-            let (decision, read_at) = decision(&ecli, quiet)?;
-
-            Ok(Answer::Case(Envelope::ok(Box::new(wire::Case {
-                ecli: decision.id.into_string(),
-                court: decision.court,
-                decided_on: decision.decided_on,
-                published_on: decision.published_on,
-                procedure_type: decision.procedure_type,
-                summary: decision.summary,
-                full_text: decision.full_text,
-                appeal: appeal(&decision.relations, read_at).into(),
-                relations: decision.relations.into_iter().map(Into::into).collect(),
-                provenance: wire::Provenance::frozen(&decision.provenance, read_at),
-            }))))
-        }
-
-        Case::Appeal { ecli } => {
-            let ecli: Ecli = parse_id(ecli)?;
-            let (decision, read_at) = decision(&ecli, quiet)?;
-
-            Ok(Answer::Appeal(Envelope::ok(
-                appeal(&decision.relations, read_at).into(),
-            )))
-        }
+        Case::Relations { ecli } => service
+            .decision_relations(&client, ecli)
+            .map(|answered| Answer::DecisionRelations(Box::new(answered))),
     }
 }
 
 // -- officiële publicaties -----------------------------------------------
 
-fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome<Answer> {
-    let client = client(quiet)?;
+fn run_publication(cmd: &Publication, service: &Service) -> Outcome<Answer> {
+    let client = client()?;
 
     match cmd {
         Publication::Search {
@@ -642,8 +574,8 @@ fn run_publication(cmd: &Publication, quiet: bool, service: &Service) -> Outcome
 
 // -- kamerstukdossiers ---------------------------------------------------
 
-fn run_dossier(cmd: &DossierCmd, quiet: bool, service: &Service) -> Outcome<Answer> {
-    let client = client(quiet)?;
+fn run_dossier(cmd: &DossierCmd, service: &Service) -> Outcome<Answer> {
+    let client = client()?;
 
     match cmd {
         DossierCmd::Show {
@@ -675,23 +607,8 @@ fn served(service: &Service, expression: &service::Expression) -> Option<String>
         .and_then(|digest| service.blob_url(digest))
 }
 
-fn parse_id<T: std::str::FromStr>(text: &str) -> Outcome<T>
-where
-    T::Err: std::fmt::Display,
-{
-    text.parse().map_err(|e| Fault::usage(format!("{e}")))
-}
-
-fn client(quiet: bool) -> Outcome<Client> {
-    let client = Client::new().map_err(Fault::Local)?;
-    if quiet {
-        return Ok(client);
-    }
-
-    Ok(client.on_wait(|host, waited| {
-        // A sweep that pauses must say so rather than look hung.
-        eprintln!("bron: waiting {:.1}s for {host}", waited.as_secs_f32());
-    }))
+fn client() -> Outcome<Client> {
+    Client::new().map_err(Fault::Local)
 }
 
 #[cfg(test)]
@@ -722,64 +639,5 @@ mod item_tests {
     #[test]
     fn an_item_nothing_opens_is_not_there() {
         assert_eq!(item(LID, "z"), None);
-    }
-}
-
-#[cfg(test)]
-mod appeal_tests {
-    use super::appeal;
-    use bron::model::{AppealStatus, Direction, Relation};
-    use chrono::{DateTime, Utc};
-
-    fn read_at() -> DateTime<Utc> {
-        "2026-08-24T09:00:00Z".parse().unwrap()
-    }
-
-    fn relation(target: &str, direction: Direction) -> Relation {
-        Relation {
-            target: target.parse().unwrap(),
-            kind: Some("cassatie".into()),
-            direction,
-        }
-    }
-
-    /// A forward link is the appeal. Read off the decision's own relations,
-    /// which is where upstream states them.
-    #[test]
-    fn a_forward_relation_is_an_appeal() {
-        let status = appeal(
-            &[relation("ECLI:NL:HR:2016:2326", Direction::Later)],
-            read_at(),
-        );
-
-        assert_eq!(
-            status,
-            AppealStatus::Appealed {
-                successors: vec!["ECLI:NL:HR:2016:2326".parse().unwrap()],
-            }
-        );
-    }
-
-    /// A cassation decision points back at the hof. That says something was
-    /// appealed *to* it, not that it was itself appealed.
-    #[test]
-    fn a_backward_relation_alone_is_not_an_appeal() {
-        let status = appeal(
-            &[relation("ECLI:NL:GHARL:2015:10068", Direction::Earlier)],
-            read_at(),
-        );
-
-        assert!(matches!(status, AppealStatus::NoPublishedSuccessor { .. }));
-    }
-
-    /// The strongest true claim available, and deliberately not "was not
-    /// appealed". It is dated to when bron looked, because it began going stale
-    /// as it was made.
-    #[test]
-    fn no_forward_relation_is_dated_to_the_moment_bron_looked() {
-        assert_eq!(
-            appeal(&[], read_at()),
-            AppealStatus::NoPublishedSuccessor { as_of: read_at() }
-        );
     }
 }

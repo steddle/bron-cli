@@ -12,17 +12,13 @@ description = "Dutch primary legal sources, quotable to the byte: wetgeving, rec
 repository = "https://github.com/steddle/bron-cli"
 readme = "README.md"
 keywords = ["law", "netherlands", "legal", "citation", "rechtspraak"]
-categories = ["command-line-utilities", "parser-implementations"]
+categories = ["command-line-utilities"]
 license = "MIT"
 
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-dirs = "5"
-# flock(2) for the cross-process rate-limit bucket, which other languages
-# reach through the same call.
-libc = "0.2"
 # rustls rather than the house default of native-tls: bron is installed on
 # developer machines and CI images, and native-tls needs OpenSSL headers present
 # at build time on Linux. rustls has no system dependency on either platform.
@@ -38,10 +34,6 @@ reqwest = { version = "0.12", default-features = false, features = [
     # native-tls still holds.
     "rustls-tls-native-roots",
 ] }
-# roxmltree over the house quick-xml: it is the only one of the two that gives a
-# byte range per node, which is what lets every stored field point back at the
-# characters in the frozen document that state it.
-roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
 # raw_value keeps a failure the service states as it arrived, so `--json`
 # prints its error object byte for byte and a field added later still crosses.
@@ -53,7 +45,6 @@ similar = "3.1"
 thiserror = "2"
 
 [dev-dependencies]
-tempfile = "3"
 # The transport's refusal, retry-after and freeze-before-decode paths cannot be
 # proved against a fixture file: they need a server that misbehaves on cue.
 wiremock = "0.6"

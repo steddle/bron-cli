@@ -8,7 +8,6 @@
 //! Dutch survives only where a term has no English equivalent and translating
 //! it would lose precision: `citeertitel`, `geldigheid`, `zicht`, `lid`.
 
-use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -22,13 +21,9 @@ use clap::{Args, Parser, Subcommand};
                   Exit codes: 0 ok, 1 usage, 2 not found, 3 network, 4 upstream, 5 local."
 )]
 pub struct Cli {
-    /// Machine-readable output. Implies --quiet.
+    /// Machine-readable output.
     #[arg(long, global = true)]
     pub json: bool,
-
-    /// No progress reporting on stderr.
-    #[arg(long, global = true)]
-    pub quiet: bool,
 
     #[command(subcommand)]
     pub command: Command,
@@ -40,7 +35,7 @@ pub enum Command {
     #[command(subcommand)]
     Law(Law),
 
-    /// Published decisions of the Dutch courts (Rechtspraak).
+    /// Rulings and conclusies of the Dutch courts, from rechtspraak.
     #[command(subcommand)]
     Case(Case),
 
@@ -80,6 +75,11 @@ pub enum Command {
         /// search inside several.
         #[arg(long, value_name = "BWB")]
         regulation: Vec<String>,
+
+        /// The jurisdiction to search, e.g. nl; untyped, the service's. Sent
+        /// exactly as typed, and the service says whether it reads one.
+        #[arg(long)]
+        jurisdiction: Option<String>,
 
         /// How many hits to answer; untyped, the service's window. Sent
         /// exactly as typed; the service pages this route and refuses what it
@@ -544,34 +544,35 @@ pub enum Law {
 
 #[derive(Debug, Subcommand)]
 pub enum Case {
-    /// Searches decisions by text.
+    /// One ruling or conclusie by its ECLI, with its text.
     ///
-    /// Ordering comes from rechtspraak.nl's relevance score and is not
-    /// reproducible over time. The answer says so itself.
-    Search {
-        query: Vec<String>,
-        /// Only decisions of this court, by its whole name, e.g. 'Hoge Raad'.
+    /// The service fetches a ruling from rechtspraak on the first read that
+    /// asks for it and answers every later read from the bytes it froze. A
+    /// ruling rechtspraak publishes as metadata alone answers with no text.
+    Show {
+        ecli: String,
+
+        /// Also carry the publisher's own bytes at every span. See `law show`.
         #[arg(long)]
-        court: Option<String>,
-        /// Only decisions from this date onwards.
-        #[arg(long, value_name = "YYYY-MM-DD")]
-        from: Option<NaiveDate>,
-        /// This lane reads rechtspraak.nl directly rather than the bron
-        /// service, so bron is the only judge there is: a whole number, and
-        /// nothing else.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
+        raw: bool,
+
+        /// How many units of its text to answer; untyped, the service's
+        /// window. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
+
+        /// How many units to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
     },
 
-    /// Fetches one decision by ECLI.
-    Show { ecli: String },
-
-    /// What the decision's own relations say about appeal or cassation.
+    /// What the publisher states connects a ruling to others: its conclusie,
+    /// and the instances before and after it.
     ///
-    /// Two answers and never a boolean: appealed, or no_published_successor
-    /// dated to the moment bron read the decision. The second is a claim about
-    /// what the register held then, not about whether an appeal was brought.
-    Appeal { ecli: String },
+    /// A relation is the publisher's statement and never a finding that an
+    /// appeal was or was not lodged: one that settled, was withdrawn or ended
+    /// in an unpublished ruling leaves no relation behind.
+    Relations { ecli: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -772,20 +773,16 @@ mod tests {
         assert!(result.is_ok(), "a moment is a point in both windows");
     }
 
-    /// A date the service reads is the service's to judge. `case search
-    /// --from` is read by rechtspraak.nl directly, so bron is its only judge.
+    /// A date the service reads is the service's to judge.
     #[test]
-    fn a_malformed_date_is_refused_only_where_bron_is_the_judge() {
+    fn a_malformed_date_goes_to_the_service_as_typed() {
         let service =
             Cli::try_parse_from(["bron", "law", "show", "BWBR0005289", "--as-of", "gisteren"]);
         assert!(service.is_ok(), "{service:?}");
-
-        let rechtspraak = Cli::try_parse_from(["bron", "case", "search", "--from", "gisteren"]);
-        assert!(rechtspraak.is_err());
     }
 
     #[test]
-    fn json_and_quiet_are_available_on_every_subcommand() {
+    fn json_is_available_on_every_subcommand() {
         let cli =
             Cli::try_parse_from(["bron", "--json", "law", "versions", "BWBR0005289"]).unwrap();
         assert!(cli.json);

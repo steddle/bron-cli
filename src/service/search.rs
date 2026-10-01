@@ -7,18 +7,14 @@
 //! because a resolved citation carries no distance, and inventing one would
 //! say the answer came about a way it did not.
 //!
-//! The one call with no publisher behind it. Bytes and manifests both have a
-//! source of last resort; the shared corpus does not, because it is the source.
-//!
 //! A POST, alone among these, because the term is the caller's own question
 //! rather than an identifier. A question in a URL is a question in every access
-//! log the request passes, which is also why the answer to one is never written
-//! to disk here; see [`crate::sources`] and `Reading::Envelope`.
+//! log the request passes, and bron writes nothing to disk.
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::Outcome;
-use crate::sources::Client;
+use crate::transport::Client;
 
 use super::Service;
 use super::client::Answered;
@@ -30,6 +26,10 @@ pub struct SearchRequest<'a> {
     /// One or more BWB identifiers to search inside, separated by commas.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regulation: Option<String>,
+    /// The jurisdiction to search, as typed. Left out where untyped, and the
+    /// service reads its absence as `nl`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jurisdiction: Option<&'a str>,
     /// As the service reads it: digits, exactly as typed. A numeric string
     /// crosses the same request body a bare number would: the service reads
     /// either. Left out where untyped, so the service's window is the

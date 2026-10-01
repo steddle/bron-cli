@@ -15,7 +15,7 @@ mod cli;
 mod render;
 mod run;
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -68,11 +68,7 @@ fn main() -> ExitCode {
         }
     };
 
-    // Progress is never written when it could be mistaken for output, and never
-    // when nobody is watching.
-    let quiet = cli.quiet || cli.json || !io::stderr().is_terminal();
-
-    match run::execute(&cli, quiet) {
+    match run::execute(&cli) {
         Ok(answer) => {
             if let Err(e) = emit(&answer, cli.json) {
                 eprintln!("bron: cannot write output: {e}");

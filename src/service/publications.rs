@@ -10,7 +10,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Outcome;
-use crate::sources::Client;
+use crate::transport::Client;
 
 use super::client::Answered;
 use super::model::Span;

@@ -81,8 +81,7 @@ pub enum Fault {
     /// bron could not do its own part on this machine.
     ///
     /// Not the network and not what came back over it: an HTTP client that
-    /// would not build, a rate-limit directory that cannot be created, a stdout
-    /// that will not take the answer. Nothing here is worth retrying against
+    /// would not build, a stdout that will not take the answer. Nothing here is worth retrying against
     /// the same machine, which is what tells it apart from the two above.
     #[error("{0}")]
     Local(#[source] anyhow::Error),
@@ -216,65 +215,18 @@ impl Fault {
 
 pub type Outcome<T> = std::result::Result<T, Fault>;
 
-/// Marks a failure as this machine's rather than a service's, and says what
-/// bron was trying to do at the time.
-///
-/// A lane wraps everything it does in [`from_source`], which knows how to tell
-/// a 404 from a dead network and reads anything else as the service answering
-/// badly. That is right for a malformed body and wrong for a rate-limit
-/// directory bron cannot create: reported as the publisher misbehaving, it is
-/// a failure a pipeline would retry against a host that was never at fault.
-///
-/// It carries the sentence rather than being a bare tag, because it ends up
-/// outermost and is therefore what a reader sees first; what actually went
-/// wrong follows it in the cause chain.
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct OwnDoing(pub &'static str);
-
-/// The register answered and holds no record under the identifier asked for.
-///
-/// Not-found, and marked so by the lane that asked: a register that answers an
-/// empty result set does so with a 200, so no status in the chain says it.
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct NoRecord(pub String);
-
-/// Classifies a failure from a source module.
+/// Classifies a failure of the transport.
 ///
 /// Reqwest is the only thing that can tell reachability from unreadability, and
 /// by the time an error reaches the command layer it is an opaque chain, so the
 /// split is made by looking for a transport error anywhere in that chain.
 pub fn from_source(service: &'static str, error: anyhow::Error) -> Fault {
-    // bron's own end, wherever in the chain it was marked. Checked first: a
-    // failure this machine caused is not the service's to answer for, whatever
-    // else the chain says about it.
-    if error.downcast_ref::<OwnDoing>().is_some() {
-        return Fault::Local(error);
-    }
+    let unreachable = error
+        .chain()
+        .filter_map(|e| e.downcast_ref::<reqwest::Error>())
+        .any(|e| e.is_timeout() || e.is_connect() || e.is_request());
 
-    if let Some(absent) = error.chain().find_map(|e| e.downcast_ref::<NoRecord>()) {
-        return Fault::NotFound(absent.to_string());
-    }
-
-    let transport_errors = || {
-        error
-            .chain()
-            .filter_map(|e| e.downcast_ref::<reqwest::Error>())
-    };
-
-    // A 404 is upstream answering the question, not upstream failing. Reporting
-    // it as a transport problem would have a pipeline retry something that will
-    // never exist.
-    if transport_errors()
-        .filter_map(reqwest::Error::status)
-        .any(|status| matches!(status.as_u16(), 404 | 410))
-    {
-        // The outermost context line is where the caller named the thing.
-        return Fault::NotFound(format!("{service} has nothing here: {error}"));
-    }
-
-    if transport_errors().any(|e| e.is_timeout() || e.is_connect() || e.is_request()) {
+    if unreachable {
         Fault::Network {
             service,
             source: error,
@@ -297,7 +249,7 @@ mod tests {
         assert_eq!(Fault::not_found("law", "BWBR0000001").exit_byte(), 2);
         assert_eq!(
             Fault::Network {
-                service: "rechtspraak",
+                service: "bron",
                 source: anyhow::anyhow!("x")
             }
             .exit_byte(),
@@ -305,7 +257,7 @@ mod tests {
         );
         assert_eq!(
             Fault::Upstream {
-                service: "rechtspraak",
+                service: "bron",
                 source: anyhow::anyhow!("x")
             }
             .exit_byte(),
@@ -328,7 +280,7 @@ mod tests {
             .context("cannot read the manifest for BWBR0005289");
 
         let chain = Fault::Network {
-            service: "rechtspraak",
+            service: "bron",
             source: inner,
         }
         .chain();
@@ -342,22 +294,9 @@ mod tests {
         );
     }
 
-    /// A directory bron cannot create is not the publisher answering badly,
-    /// and a pipeline told otherwise retries a host that was never at fault.
-    #[test]
-    fn a_failure_of_our_own_is_not_charged_to_the_service() {
-        let ours = anyhow::Error::new(std::io::Error::other("Not a directory"))
-            .context("cannot create /etc/hosts/buckets")
-            .context(OwnDoing(
-                "bron cannot use the rate-limit budget on this machine",
-            ));
-
-        assert_eq!(from_source("data.rechtspraak.nl", ours).kind(), "local");
-    }
-
     #[test]
     fn a_non_transport_failure_is_upstream_rather_than_network() {
-        let fault = from_source("rechtspraak", anyhow::anyhow!("malformed XML"));
+        let fault = from_source("bron", anyhow::anyhow!("malformed JSON"));
         assert_eq!(fault.exit_byte(), exit::UPSTREAM);
     }
 

@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
 use crate::error::{Fault, Outcome, Statement, from_source};
-use crate::sources::{Client, Refused};
+use crate::transport::{Client, Refused};
 use crate::wire;
 
 use super::Service;
@@ -257,7 +257,7 @@ impl Service {
         &self,
         client: &Client,
         request: reqwest::blocking::RequestBuilder,
-    ) -> Outcome<crate::sources::FetchedBytes> {
+    ) -> Outcome<crate::transport::FetchedBytes> {
         let fetched = client
             .fetch_raw(request)
             .map_err(|e| refused(e).unwrap_or_else(|e| from_source(SERVICE, e)))?;
