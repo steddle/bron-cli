@@ -578,7 +578,7 @@ pub enum Case {
     ///
     /// The service ranks the rulings it has read, the ones someone asked for
     /// by their ECLI, and not the case law rechtspraak publishes: search over
-    /// case law is still to come, and every answer says how many it ranked.
+    /// case law is still to come, and every answer says how many rulings the search covers.
     Search {
         query: Vec<String>,
 
