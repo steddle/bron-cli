@@ -85,6 +85,11 @@ pub enum Answer {
         /// one starts.
         offset: Option<String>,
     },
+    RecentDecisions {
+        answered: Box<Answered<service::RecentDecisions>>,
+        /// See `ArticleDecisions::offset`.
+        offset: Option<String>,
+    },
     PublicationHits(Answered<service::PublicationSearch>),
     Publication(Box<Answered<service::Publication>>),
     Dossier(Box<Answered<service::DossierPapers>>),
@@ -127,6 +132,7 @@ impl Answer {
             Self::DecisionRelations(a) => sent(out, &a.envelope),
             Self::DecisionHits(a) => sent(out, &a.envelope),
             Self::ArticleDecisions { answered, .. } => sent(out, &answered.envelope),
+            Self::RecentDecisions { answered, .. } => sent(out, &answered.envelope),
             Self::PublicationHits(a) => sent(out, &a.envelope),
             Self::Publication(a) => sent(out, &a.envelope),
             Self::Dossier(a) => sent(out, &a.envelope),
@@ -566,6 +572,28 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
         Case::Relations { ecli } => service
             .decision_relations(&client, ecli)
             .map(|answered| Answer::DecisionRelations(Box::new(answered))),
+
+        Case::Recent {
+            court,
+            from,
+            to,
+            limit,
+            offset,
+        } => service
+            .recent_decisions(
+                &client,
+                &service::Citing {
+                    court: court.as_deref(),
+                    from: from.as_deref(),
+                    to: to.as_deref(),
+                    limit: limit.as_deref(),
+                    offset: offset.as_deref(),
+                },
+            )
+            .map(|answered| Answer::RecentDecisions {
+                answered: Box::new(answered),
+                offset: offset.clone(),
+            }),
 
         Case::Search {
             query,

@@ -660,6 +660,40 @@ pub enum Case {
         #[arg(long, allow_negative_numbers = true)]
         limit: Option<String>,
     },
+
+    /// The newest rulings with a text, as rechtspraak's feed listed them,
+    /// newest decided first.
+    ///
+    /// Not every ruling decided. The list holds the rulings with a text whose
+    /// record rechtspraak's feed listed or changed from 30 days before bron
+    /// first read it, so an older ruling can stand among them by its own day
+    /// decided; it lists no conclusie and no ruling published as metadata
+    /// alone, so a ruling missing here may still have been decided.
+    Recent {
+        /// One court, as the answer's `courts` names it, e.g. "Hoge Raad".
+        /// Sent exactly as typed.
+        #[arg(long)]
+        court: Option<String>,
+
+        /// Only rulings decided on this day or later, YYYY-MM-DD. Sent
+        /// exactly as typed.
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Only rulings decided on this day or earlier, YYYY-MM-DD. Sent
+        /// exactly as typed.
+        #[arg(long)]
+        to: Option<String>,
+
+        /// How many rulings to answer; untyped, the service's window. Sent
+        /// exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        limit: Option<String>,
+
+        /// How many rulings to skip; untyped, none. Sent exactly as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        offset: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

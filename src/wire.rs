@@ -541,6 +541,12 @@ pub enum Caveat {
     /// wrongly is not measured.
     RulingsFound,
 
+    /// The rulings answered are the ones with a text whose record
+    /// rechtspraak's feed listed or changed from 30 days before bron first read
+    /// it. A conclusie, a ruling published as metadata alone and one the feed
+    /// last listed before then are not listed.
+    RulingsListed,
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -751,6 +757,7 @@ impl Caveat {
                 count: u32,
             },
             RulingsFound,
+            RulingsListed,
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -886,6 +893,7 @@ impl Caveat {
             Ok(Stated::LinksNotRead) => Self::LinksNotRead,
             Ok(Stated::LinksUnresolved { count }) => Self::LinksUnresolved { count },
             Ok(Stated::RulingsFound) => Self::RulingsFound,
+            Ok(Stated::RulingsListed) => Self::RulingsListed,
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
@@ -1062,6 +1070,14 @@ mod tests {
                 stated
             );
         }
+    }
+
+    #[test]
+    fn the_limit_on_rulings_the_feed_listed_keeps_its_name() {
+        let stated = serde_json::json!({"kind": "rulings_listed"});
+
+        assert_eq!(Caveat::stated(&stated), Caveat::RulingsListed);
+        assert_eq!(serde_json::to_value(Caveat::RulingsListed).unwrap(), stated);
     }
 
     #[test]

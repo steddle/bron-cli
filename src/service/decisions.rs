@@ -166,9 +166,9 @@ pub struct OrdinalRange {
     pub to: u32,
 }
 
-/// Which of the rulings that cite an article to answer. Every field the
-/// caller typed is sent as typed and judged by the service; an untyped one is
-/// left out.
+/// Which of the rulings that cite an article, or that rechtspraak's feed
+/// listed, to answer. Every field the caller typed is sent as typed and judged
+/// by the service; an untyped one is left out.
 #[derive(Debug)]
 pub struct Citing<'a> {
     pub court: Option<&'a str>,
@@ -176,6 +176,25 @@ pub struct Citing<'a> {
     pub to: Option<&'a str>,
     pub limit: Option<&'a str>,
     pub offset: Option<&'a str>,
+}
+
+impl Citing<'_> {
+    fn query(&self) -> Vec<(&'static str, &str)> {
+        let mut query = Vec::new();
+        window(&mut query, self.limit, self.offset);
+
+        if let Some(court) = self.court {
+            query.push(("court", court));
+        }
+        if let Some(day) = self.from {
+            query.push(("from", day));
+        }
+        if let Some(day) = self.to {
+            query.push(("to", day));
+        }
+
+        query
+    }
 }
 
 /// The rulings LiDO found that cite one article, newest decided first.
@@ -200,6 +219,35 @@ pub struct CitingDecision {
     pub rendition: Option<String>,
 }
 
+/// The rulings with a text rechtspraak's feed listed, newest decided first.
+#[derive(Debug, Deserialize)]
+pub struct RecentDecisions {
+    /// How many rulings the question matches, of which `decisions` is a page.
+    pub count: u64,
+    /// Every court with a ruling listed under the dates asked, most first,
+    /// whatever `court` asked.
+    pub courts: Vec<CourtCount>,
+    pub decisions: Vec<ListedDecision>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CourtCount {
+    pub court: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListedDecision {
+    pub ecli: String,
+    /// Absent where the feed's title does not name one.
+    pub court: Option<String>,
+    /// Absent where the feed's title does not state one.
+    pub decided_on: Option<NaiveDate>,
+    /// Whether the service holds the ruling. One it does not is fetched on the
+    /// first read that asks for it.
+    pub held: bool,
+}
+
 impl Service {
     pub fn article_decisions(
         &self,
@@ -210,20 +258,18 @@ impl Service {
     ) -> Outcome<Answered<ArticleDecisions>> {
         let url = self.route(&["regulations", law, "articles", number, "decisions"])?;
 
-        let mut query = Vec::new();
-        window(&mut query, ask.limit, ask.offset);
+        self.read(client, client.get(&url).query(&ask.query()))
+    }
 
-        if let Some(court) = ask.court {
-            query.push(("court", court));
-        }
-        if let Some(day) = ask.from {
-            query.push(("from", day));
-        }
-        if let Some(day) = ask.to {
-            query.push(("to", day));
-        }
+    /// The rulings with a text rechtspraak's feed listed, newest decided first.
+    pub fn recent_decisions(
+        &self,
+        client: &Client,
+        ask: &Citing<'_>,
+    ) -> Outcome<Answered<RecentDecisions>> {
+        let url = self.route(&["decisions"])?;
 
-        self.read(client, client.get(&url).query(&query))
+        self.read(client, client.get(&url).query(&ask.query()))
     }
 
     /// The rulings the service holds, ranked against a question.

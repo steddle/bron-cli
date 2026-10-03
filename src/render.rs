@@ -13,8 +13,8 @@ use chrono::NaiveDate;
 
 use bron::service::{
     Article, CitingDecision, Consolidated, ContentsPart, Dossier, Expression, Had, Lineage,
-    LinkedDecree, Place, Produced, Regulation, Relation, Remark, SearchData, SearchLid, Upcoming,
-    name,
+    LinkedDecree, ListedDecision, Place, Produced, Regulation, Relation, Remark, SearchData,
+    SearchLid, Upcoming, name,
 };
 use bron::wire::Caveat;
 
@@ -1219,24 +1219,80 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 .caveats
                 .iter()
                 .map(|caveat| match caveat {
-                    Caveat::Truncated { window } => {
-                        // The service accepted the offset, so it is a whole number.
-                        let from = offset
-                            .as_deref()
-                            .and_then(|typed| typed.parse::<u64>().ok())
-                            .unwrap_or(0);
-                        format!(
-                            "note: rulings {} to {} of {} shown; read on with --offset {}",
-                            from + 1,
-                            from + found.decisions.len() as u64,
-                            found.count,
-                            from + u64::from(*window)
-                        )
-                    }
+                    Caveat::Truncated { window } => read_on(
+                        offset.as_deref(),
+                        found.decisions.len(),
+                        found.count,
+                        *window,
+                    ),
                     Caveat::LinksNotShown => "note: the citations LiDO's computer recognised are \
                          held and not shown until their accuracy is measured, so these are the \
                          rulings whose own Wetsverwijzing names the article"
                         .to_string(),
+                    other => caveat_line(other),
+                })
+                .collect();
+            if !notes.is_empty() {
+                writeln!(err, "\n{}", notes.join("\n"))?;
+            }
+            Ok(())
+        }
+
+        Answer::RecentDecisions {
+            answered: a,
+            offset,
+        } => {
+            let listed = &a.data;
+
+            writeln!(
+                err,
+                "{} ruling(s) listed by rechtspraak's feed",
+                listed.count
+            )?;
+            let count_width = listed
+                .courts
+                .iter()
+                .map(|court| court.count.to_string().len())
+                .max()
+                .unwrap_or(0);
+            for court in &listed.courts {
+                writeln!(err, "  {:>count_width$}  {}", court.count, court.court)?;
+            }
+
+            let court = |ruling: &ListedDecision| ruling.court.clone().unwrap_or_default();
+            let court_width = listed
+                .decisions
+                .iter()
+                .map(|ruling| court(ruling).chars().count())
+                .max()
+                .unwrap_or(0);
+
+            for ruling in &listed.decisions {
+                let day = ruling
+                    .decided_on
+                    .map(|day| day.to_string())
+                    .unwrap_or_default();
+                let mut row = format!(
+                    "{day:<10}  {:<court_width$}  {}",
+                    court(ruling),
+                    ruling.ecli
+                );
+                if !ruling.held {
+                    let _ = write!(row, "  {NOT_HELD}");
+                }
+                writeln!(out, "{row}")?;
+            }
+
+            let notes: Vec<String> = a
+                .caveats
+                .iter()
+                .map(|caveat| match caveat {
+                    Caveat::Truncated { window } => read_on(
+                        offset.as_deref(),
+                        listed.decisions.len(),
+                        listed.count,
+                        *window,
+                    ),
                     other => caveat_line(other),
                 })
                 .collect();
@@ -1930,6 +1986,21 @@ fn caveats(caveats: &[Caveat], out: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
+/// Where the next page of a list of rulings starts, from the `truncated`
+/// caveat's window.
+fn read_on(offset: Option<&str>, shown: usize, count: u64, window: u32) -> String {
+    // The service accepted the offset, so it is a whole number.
+    let from = offset
+        .and_then(|typed| typed.parse::<u64>().ok())
+        .unwrap_or(0);
+    format!(
+        "note: rulings {} to {} of {count} shown; read on with --offset {}",
+        from + 1,
+        from + shown as u64,
+        from + u64::from(window)
+    )
+}
+
 /// One limit, in words.
 ///
 /// Separate from the loop above because a limit is not always the answer's:
@@ -2335,6 +2406,11 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::RulingsFound => "note: these are the rulings LiDO found, by its computer's \
              reading and the publisher's own Wetsverwijzingen. How many it misses or names \
              wrongly is not measured, so a ruling missing here may still cite the article."
+            .to_string(),
+        Caveat::RulingsListed => "note: these are the rulings with a text whose record \
+             rechtspraak's feed listed or changed from 30 days before bron first read it. A \
+             conclusie, a ruling published as metadata alone and one the feed last listed before \
+             then are not listed, so a ruling missing here may still have been decided."
             .to_string(),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
@@ -3049,6 +3125,68 @@ mod tests {
         assert!(!err.contains("this ruling"), "{err}");
         assert!(
             err.contains("rulings 41 to 42 of 12274 shown; read on with --offset 42"),
+            "{err}"
+        );
+    }
+
+    /// The rulings rechtspraak's feed listed, in the shape the service's
+    /// DecisionController answers: a ruling whose title names no court or day
+    /// carries neither key.
+    #[test]
+    fn case_recent_counts_the_rulings_listed_per_court_and_marks_what_is_not_held() {
+        let envelope: serde_json::Value = serde_json::from_str(
+            r#"{"bron":1,"grade":"authority","data":{"count":4,
+              "courts":[{"court":"Rechtbank Amsterdam","count":2},{"court":"Hoge Raad","count":1}],
+              "decisions":[
+               {"ecli":"ECLI:NL:HR:2026:1552","register":"rechtspraak","jurisdiction":"nl","court":"Hoge Raad",
+                "decided_on":"2026-09-25","form":"ruling","held":true,"stated_by":"rechtspraak","stated_in":"ab"},
+               {"ecli":"ECLI:NL:XX:2026:1","register":"rechtspraak","jurisdiction":"nl","form":"ruling",
+                "held":false,"stated_by":"rechtspraak","stated_in":"ab"}]},
+              "caveats":[{"kind":"rulings_listed"},{"kind":"truncated","window":2}]}"#,
+        )
+        .unwrap();
+        let listed: bron::service::RecentDecisions =
+            serde_json::from_value(envelope["data"].clone()).unwrap();
+        let mut answered = answered(listed);
+        answered.caveats = envelope["caveats"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(Caveat::stated)
+            .collect();
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(
+            &Answer::RecentDecisions {
+                answered: Box::new(answered),
+                offset: None,
+            },
+            &mut out,
+            &mut err,
+        )
+        .unwrap();
+        let (out, err) = (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        );
+
+        assert_eq!(
+            out,
+            "2026-09-25  Hoge Raad  ECLI:NL:HR:2026:1552\n\
+             \x20                      ECLI:NL:XX:2026:1  not held\n"
+        );
+        assert!(!err.contains("no sentence for"), "{err}");
+        assert!(
+            err.starts_with(
+                "4 ruling(s) listed by rechtspraak's feed\n  \
+                 2  Rechtbank Amsterdam\n  \
+                 1  Hoge Raad\n"
+            ),
+            "{err}"
+        );
+        assert!(err.contains("may still have been decided"), "{err}");
+        assert!(
+            err.contains("rulings 1 to 2 of 4 shown; read on with --offset 2"),
             "{err}"
         );
     }

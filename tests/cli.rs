@@ -783,6 +783,80 @@ async fn law_decisions_leaves_out_what_was_not_typed_and_passes_on_a_fault() {
     assert_eq!(envelope["error"]["code"], "article_not_found");
 }
 
+/// `case recent` sends every narrowing in the query as typed, and prints the
+/// service's envelope as sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_recent_sends_every_narrowing_as_typed_and_prints_what_came_back() {
+    const LISTED: &str = r#"{"bron":1,"grade":"authority","data":{"count":2,"courts":[{"court":"Hoge Raad","count":2}],"decisions":[{"ecli":"ECLI:NL:HR:2026:1552","register":"rechtspraak","jurisdiction":"nl","court":"Hoge Raad","decided_on":"2026-09-25","form":"ruling","held":false,"stated_by":"rechtspraak","stated_in":"ab","later_field":1}]},"caveats":[{"kind":"rulings_listed"},{"kind":"truncated","window":1}]}"#;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions"))
+        .and(query_param("court", "Hoge Raad"))
+        .and(query_param("from", "2026-09-01"))
+        .and(query_param("to", "abc"))
+        .and(query_param("limit", "1"))
+        .and(query_param("offset", "-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(LISTED, "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "case",
+        "recent",
+        "--court",
+        "Hoge Raad",
+        "--from",
+        "2026-09-01",
+        "--to",
+        "abc",
+        "--limit",
+        "1",
+        "--offset",
+        "-1",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{LISTED}\n"));
+    assert!(human.status.success(), "{human:?}");
+    assert_eq!(
+        stdout(&human),
+        "2026-09-25  Hoge Raad  ECLI:NL:HR:2026:1552  not held\n",
+        "{human:?}"
+    );
+    let said = String::from_utf8_lossy(&human.stderr);
+    assert!(
+        said.starts_with("2 ruling(s) listed by rechtspraak's feed\n  2  Hoge Raad\n"),
+        "{said}"
+    );
+    assert!(said.contains("may still have been decided"), "{said}");
+}
+
+/// An untyped narrowing is left out, so the service's own window answers.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_recent_leaves_out_what_was_not_typed() {
+    const LISTED: &str = r#"{"bron":1,"grade":"authority","data":{"count":0,"courts":[],"decisions":[]},"caveats":[{"kind":"rulings_listed"}]}"#;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions"))
+        .and(query_param_is_missing("court"))
+        .and(query_param_is_missing("from"))
+        .and(query_param_is_missing("to"))
+        .and(query_param_is_missing("limit"))
+        .and(query_param_is_missing("offset"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(LISTED, "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["--json", "case", "recent"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), format!("{LISTED}\n"));
+}
+
 /// `law contents` sends both days as typed, prints the service's envelope as
 /// sent, and to a person the outline alone on stdout.
 #[tokio::test(flavor = "multi_thread")]
@@ -4690,6 +4764,42 @@ async fn law_upcoming_with_a_limit_of_zero_is_the_services_refusal() {
         vec![Carries::Param("limit", "0")],
         "invalid_parameter",
         "limit must be between 1 and 500",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn case_recent_with_a_window_that_runs_backwards_is_the_services_refusal() {
+    refused_by_the_service(
+        &[
+            "case",
+            "recent",
+            "--from",
+            "2026-09-01",
+            "--to",
+            "2026-01-01",
+        ],
+        "GET",
+        "/api/v1/decisions",
+        vec![
+            Carries::Param("from", "2026-09-01"),
+            Carries::Param("to", "2026-01-01"),
+        ],
+        "reversed_window",
+        "from 2026-09-01 is after to 2026-01-01",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn case_recent_with_a_limit_of_zero_is_the_services_refusal() {
+    refused_by_the_service(
+        &["case", "recent", "--limit", "0"],
+        "GET",
+        "/api/v1/decisions",
+        vec![Carries::Param("limit", "0")],
+        "invalid_parameter",
+        "limit must be between 1 and 100",
     )
     .await;
 }
