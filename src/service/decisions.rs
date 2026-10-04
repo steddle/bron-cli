@@ -251,6 +251,12 @@ pub struct ListedDecision {
     /// The zaaknummer or zaaknummers as the feed's title prints them. Absent
     /// where it prints none.
     pub case_numbers: Option<String>,
+    /// The inhoudsindicatie as the feed prints it, cut short by the publisher.
+    /// Absent where it prints none, for a criminal case, and while the service
+    /// has not read whether the ruling is criminal law.
+    pub summary: Option<String>,
+    /// `criminal_law` where the service leaves a criminal case's summary out.
+    pub summary_left_out: Option<String>,
     /// Whether the service holds the ruling. One it does not is fetched on the
     /// first read that asks for it.
     pub held: bool,

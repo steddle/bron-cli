@@ -1276,10 +1276,16 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 if let Some(numbers) = &ruling.case_numbers {
                     let _ = write!(row, "  {numbers}");
                 }
+                if ruling.summary_left_out.as_deref() == Some("criminal_law") {
+                    let _ = write!(row, "  criminal law");
+                }
                 if !ruling.held {
                     let _ = write!(row, "  {NOT_HELD}");
                 }
                 writeln!(out, "{row}")?;
+                if let Some(summary) = &ruling.summary {
+                    writeln!(out, "    {summary}")?;
+                }
             }
 
             let notes: Vec<String> = a
@@ -3153,8 +3159,8 @@ mod tests {
               "courts":[{"court":"Rechtbank Amsterdam","count":2},{"court":"Hoge Raad","count":1}],
               "decisions":[
                {"ecli":"ECLI:NL:HR:2026:1552","register":"rechtspraak","jurisdiction":"nl","court":"Hoge Raad",
-                "decided_on":"2026-09-25","case_numbers":"24/04589","form":"ruling","held":true,"stated_by":"rechtspraak","stated_in":"ab"},
-               {"ecli":"ECLI:NL:XX:2026:1","register":"rechtspraak","jurisdiction":"nl","form":"ruling",
+                "decided_on":"2026-09-25","case_numbers":"24/04589","summary":"Huurrecht. Opzegging wegens dringend eigen gebruik.","form":"ruling","held":true,"stated_by":"rechtspraak","stated_in":"ab"},
+               {"ecli":"ECLI:NL:XX:2026:1","register":"rechtspraak","jurisdiction":"nl","form":"ruling","summary_left_out":"criminal_law",
                 "held":false,"stated_by":"rechtspraak","stated_in":"ab"}]},
               "caveats":[{"kind":"rulings_listed"},{"kind":"truncated","window":2}]}"#,
         )
@@ -3187,7 +3193,8 @@ mod tests {
         assert_eq!(
             out,
             "2026-09-25  Hoge Raad  ECLI:NL:HR:2026:1552  24/04589\n\
-             \x20                      ECLI:NL:XX:2026:1  not held\n"
+             \x20   Huurrecht. Opzegging wegens dringend eigen gebruik.\n\
+             \x20                      ECLI:NL:XX:2026:1  criminal law  not held\n"
         );
         assert!(!err.contains("no sentence for"), "{err}");
         assert!(
