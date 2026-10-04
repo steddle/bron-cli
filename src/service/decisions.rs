@@ -204,6 +204,9 @@ pub struct ArticleDecisions {
     pub number: String,
     /// How many rulings the question matches, of which `decisions` is a page.
     pub count: u64,
+    /// Every court with a ruling found under the dates asked, most first,
+    /// whatever `court` asked.
+    pub courts: Vec<CourtCount>,
     pub decisions: Vec<CitingDecision>,
 }
 
@@ -213,6 +216,8 @@ pub struct CitingDecision {
     /// Absent where LiDO names no court for the ruling.
     pub court: Option<String>,
     pub decided_on: Option<NaiveDate>,
+    /// Whether the service holds the ruling.
+    pub held: bool,
     /// The label of the regulation's rendition in force on `decided_on`, by
     /// the service's arithmetic. Absent where the ruling states no day or no
     /// rendition was in force on it.
@@ -243,6 +248,9 @@ pub struct ListedDecision {
     pub court: Option<String>,
     /// Absent where the feed's title does not state one.
     pub decided_on: Option<NaiveDate>,
+    /// The zaaknummer or zaaknummers as the feed's title prints them. Absent
+    /// where it prints none.
+    pub case_numbers: Option<String>,
     /// Whether the service holds the ruling. One it does not is fetched on the
     /// first read that asks for it.
     pub held: bool,

@@ -12,9 +12,9 @@ use std::io::{self, Write};
 use chrono::NaiveDate;
 
 use bron::service::{
-    Article, CitingDecision, Consolidated, ContentsPart, Dossier, Expression, Had, Lineage,
-    LinkedDecree, ListedDecision, Place, Produced, Regulation, Relation, Remark, SearchData,
-    SearchLid, Upcoming, name,
+    Article, CitingDecision, Consolidated, ContentsPart, CourtCount, Dossier, Expression, Had,
+    Lineage, LinkedDecree, ListedDecision, Place, Produced, Regulation, Relation, Remark,
+    SearchData, SearchLid, Upcoming, name,
 };
 use bron::wire::Caveat;
 
@@ -1188,6 +1188,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 "{} ruling(s) found for article {} of {}",
                 found.count, found.number, found.regulation_id
             )?;
+            court_counts(err, &found.courts)?;
 
             let court = |ruling: &CitingDecision| ruling.court.clone().unwrap_or_default();
             let court_width = found
@@ -1207,6 +1208,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     court(ruling),
                     ruling.ecli
                 );
+                if !ruling.held {
+                    let _ = write!(row, "  {NOT_HELD}");
+                }
                 if let Some(rendition) = &ruling.rendition {
                     let _ = write!(row, "  version {rendition}");
                 }
@@ -1249,15 +1253,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 "{} ruling(s) listed by rechtspraak's feed",
                 listed.count
             )?;
-            let count_width = listed
-                .courts
-                .iter()
-                .map(|court| court.count.to_string().len())
-                .max()
-                .unwrap_or(0);
-            for court in &listed.courts {
-                writeln!(err, "  {:>count_width$}  {}", court.count, court.court)?;
-            }
+            court_counts(err, &listed.courts)?;
 
             let court = |ruling: &ListedDecision| ruling.court.clone().unwrap_or_default();
             let court_width = listed
@@ -1277,6 +1273,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     court(ruling),
                     ruling.ecli
                 );
+                if let Some(numbers) = &ruling.case_numbers {
+                    let _ = write!(row, "  {numbers}");
+                }
                 if !ruling.held {
                     let _ = write!(row, "  {NOT_HELD}");
                 }
@@ -1982,6 +1981,18 @@ fn caveats(caveats: &[Caveat], out: &mut impl Write) -> io::Result<()> {
     writeln!(out)?;
     for caveat in caveats {
         writeln!(out, "{}", caveat_line(caveat))?;
+    }
+    Ok(())
+}
+
+fn court_counts(err: &mut impl Write, courts: &[CourtCount]) -> io::Result<()> {
+    let width = courts
+        .iter()
+        .map(|court| court.count.to_string().len())
+        .max()
+        .unwrap_or(0);
+    for court in courts {
+        writeln!(err, "  {:>width$}  {}", court.count, court.court)?;
     }
     Ok(())
 }
@@ -3076,7 +3087,7 @@ mod tests {
                {"ecli":"ECLI:NL:GHAMS:2026:2678","register":"rechtspraak","jurisdiction":"nl","court":"Gerechtshof Amsterdam",
                 "decided_on":"2026-09-22","held":false,"rendition":"2026-07-16_0",
                 "links":[{"kind":"rvr-referentie","asserted":"publisher","stated_by":"lido","stated_in":"ab"}]},
-               {"ecli":"ECLI:NL:XX:2015:1","register":"rechtspraak","jurisdiction":"nl","held":false,
+               {"ecli":"ECLI:NL:XX:2015:1","register":"rechtspraak","jurisdiction":"nl","held":true,
                 "links":[{"kind":"rvr-referentie","asserted":"publisher","stated_by":"lido"}]}]},
               "caveats":[{"kind":"rulings_found"},{"kind":"links_not_shown"},{"kind":"truncated","window":2}]}"#,
         )
@@ -3108,12 +3119,15 @@ mod tests {
 
         assert_eq!(
             out,
-            "2026-09-22  Gerechtshof Amsterdam  ECLI:NL:GHAMS:2026:2678  version 2026-07-16_0\n\
+            "2026-09-22  Gerechtshof Amsterdam  ECLI:NL:GHAMS:2026:2678  not held  version 2026-07-16_0\n\
              \x20                                  ECLI:NL:XX:2015:1\n"
         );
         assert!(!err.contains("no sentence for"), "{err}");
         assert!(
-            err.starts_with("12274 ruling(s) found for article 162 of BWBR0005289\n"),
+            err.starts_with(
+                "12274 ruling(s) found for article 162 of BWBR0005289\n  \
+                 1122  Rechtbank Rotterdam\n"
+            ),
             "{err}"
         );
         assert!(err.contains("the rulings LiDO found"), "{err}");
@@ -3139,7 +3153,7 @@ mod tests {
               "courts":[{"court":"Rechtbank Amsterdam","count":2},{"court":"Hoge Raad","count":1}],
               "decisions":[
                {"ecli":"ECLI:NL:HR:2026:1552","register":"rechtspraak","jurisdiction":"nl","court":"Hoge Raad",
-                "decided_on":"2026-09-25","form":"ruling","held":true,"stated_by":"rechtspraak","stated_in":"ab"},
+                "decided_on":"2026-09-25","case_numbers":"24/04589","form":"ruling","held":true,"stated_by":"rechtspraak","stated_in":"ab"},
                {"ecli":"ECLI:NL:XX:2026:1","register":"rechtspraak","jurisdiction":"nl","form":"ruling",
                 "held":false,"stated_by":"rechtspraak","stated_in":"ab"}]},
               "caveats":[{"kind":"rulings_listed"},{"kind":"truncated","window":2}]}"#,
@@ -3172,7 +3186,7 @@ mod tests {
 
         assert_eq!(
             out,
-            "2026-09-25  Hoge Raad  ECLI:NL:HR:2026:1552\n\
+            "2026-09-25  Hoge Raad  ECLI:NL:HR:2026:1552  24/04589\n\
              \x20                      ECLI:NL:XX:2026:1  not held\n"
         );
         assert!(!err.contains("no sentence for"), "{err}");

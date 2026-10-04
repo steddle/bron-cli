@@ -730,12 +730,13 @@ async fn law_decisions_sends_every_narrowing_as_typed_and_prints_what_came_back(
     assert_eq!(stdout(&json), format!("{FOUND}\n"));
     assert_eq!(
         stdout(&human),
-        "2026-05-08  Parket bij de Hoge Raad  ECLI:NL:PHR:2026:506  version 2026-01-01_0\n",
+        "2026-05-08  Parket bij de Hoge Raad  ECLI:NL:PHR:2026:506  not held  version 2026-01-01_0\n",
         "{human:?}"
     );
     assert!(
-        String::from_utf8_lossy(&human.stderr)
-            .starts_with("2 ruling(s) found for article 201 of BWBR0005290\n"),
+        String::from_utf8_lossy(&human.stderr).starts_with(
+            "2 ruling(s) found for article 201 of BWBR0005290\n  2  Parket bij de Hoge Raad\n"
+        ),
         "{human:?}"
     );
     assert!(
@@ -787,7 +788,7 @@ async fn law_decisions_leaves_out_what_was_not_typed_and_passes_on_a_fault() {
 /// service's envelope as sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn case_recent_sends_every_narrowing_as_typed_and_prints_what_came_back() {
-    const LISTED: &str = r#"{"bron":1,"grade":"authority","data":{"count":2,"courts":[{"court":"Hoge Raad","count":2}],"decisions":[{"ecli":"ECLI:NL:HR:2026:1552","register":"rechtspraak","jurisdiction":"nl","court":"Hoge Raad","decided_on":"2026-09-25","form":"ruling","held":false,"stated_by":"rechtspraak","stated_in":"ab","later_field":1}]},"caveats":[{"kind":"rulings_listed"},{"kind":"truncated","window":1}]}"#;
+    const LISTED: &str = r#"{"bron":1,"grade":"authority","data":{"count":2,"courts":[{"court":"Hoge Raad","count":2}],"decisions":[{"ecli":"ECLI:NL:HR:2026:1552","register":"rechtspraak","jurisdiction":"nl","court":"Hoge Raad","decided_on":"2026-09-25","case_numbers":"C/05/455383 / HZ ZA 25-219","form":"ruling","held":false,"stated_by":"rechtspraak","stated_in":"ab","later_field":1}]},"caveats":[{"kind":"rulings_listed"},{"kind":"truncated","window":1}]}"#;
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -823,7 +824,7 @@ async fn case_recent_sends_every_narrowing_as_typed_and_prints_what_came_back() 
     assert!(human.status.success(), "{human:?}");
     assert_eq!(
         stdout(&human),
-        "2026-09-25  Hoge Raad  ECLI:NL:HR:2026:1552  not held\n",
+        "2026-09-25  Hoge Raad  ECLI:NL:HR:2026:1552  C/05/455383 / HZ ZA 25-219  not held\n",
         "{human:?}"
     );
     let said = String::from_utf8_lossy(&human.stderr);
