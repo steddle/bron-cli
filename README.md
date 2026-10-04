@@ -202,7 +202,7 @@ Exit 4 covers two things, and what is printed tells them apart. **The service st
 
 Every command reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Nothing has to be taken on trust. Every answer names the blob it was read from, addressed by the hash of its own content, and the offsets of the article or paragraph inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not.
+Nothing has to be taken on trust. Every answer that quotes a text names the blob it was read from, addressed by the hash of its own content, and the offsets of the article or paragraph inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not. A list of rulings names the frozen feed page or LiDO answer it stands on by digest too; the service holds those and serves none of them, since they go on naming rulings the court has withdrawn.
 
 ```
 bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
