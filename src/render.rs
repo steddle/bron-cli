@@ -907,7 +907,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             let decision = &a.data.decision;
 
             let mut head = decision.id.clone();
-            if decision.form == "opinion" {
+            if decision.form.as_deref() == Some("opinion") {
                 head.push_str("  conclusie");
             }
             writeln!(out, "{head}")?;
@@ -968,12 +968,17 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 )?;
             }
 
-            if !decision.has_body {
-                writeln!(
+            // That bron withholds it and never why, as the site says it.
+            match (&decision.withheld_because, decision.register.as_str()) {
+                (Some(_), "acm") => writeln!(out, "\nbron does not show this besluit.")?,
+                (Some(_), _) => writeln!(out, "\nbron does not show this ruling.")?,
+                (None, _) if decision.has_body => {}
+                (None, "rechtspraak") => writeln!(
                     out,
                     "\nrechtspraak publishes {} as metadata alone, so it has no text.",
                     decision.id
-                )?;
+                )?,
+                (None, _) => writeln!(out, "\nThe service answers no text of {}.", decision.id)?,
             }
 
             // Where the package holds more than one document, a span is a range
@@ -1313,7 +1318,11 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 if ruling.summary_left_out.as_deref() == Some("criminal_law") {
                     let _ = write!(row, "  criminal law");
                 }
-                if !ruling.held {
+                // A withheld ruling is never fetched, and `not held` reads as
+                // not yet.
+                if ruling.summary_left_out.as_deref() == Some("privacy") {
+                    let _ = write!(row, "  withheld");
+                } else if !ruling.held {
                     let _ = write!(row, "  {NOT_HELD}");
                 }
                 writeln!(out, "{row}")?;
@@ -2509,6 +2518,10 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::RelationsNotRead => "note: CELLAR states which provisions a case interprets and \
              which rulings it cites. bron does not read that yet, so an empty list does not mean \
              there are none."
+            .to_string(),
+        // Never `because`, as on the withheld line of `case show`.
+        Caveat::TextWithheld { .. } => "note: bron keeps the digests of what it held of this \
+             text and none of its bytes, and answers none of it."
             .to_string(),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")

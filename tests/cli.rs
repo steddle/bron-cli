@@ -6491,3 +6491,80 @@ async fn case_search_names_a_besluit_of_the_acm_by_its_id() {
         "{text}"
     );
 }
+
+// -- a withheld ruling ---------------------------------------------------
+
+/// A ruling the service withholds answers its court and days and no text, and
+/// a person reads that bron does not show it, never why. Production withholds
+/// none, so both answers are ECLI:NL:HR:2024:1780 as production answered it
+/// on 2026-10-25, edited to what `DecisionController::withheld` answers: held
+/// and then withheld, and withheld before the service held it, which states
+/// no form.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_says_bron_does_not_show_a_withheld_ruling_and_never_why() {
+    for (name, head) in [
+        (
+            "bron-decision-ECLI-NL-HR-2024-1780-edited-withheld.json",
+            "ECLI:NL:HR:2024:1780\nHoge Raad\ndecided 2024-11-29, published 2024-11-29\n\n",
+        ),
+        (
+            "bron-decision-ECLI-NL-HR-2024-1780-edited-withheld-before-held.json",
+            "ECLI:NL:HR:2024:1780\n\n",
+        ),
+    ] {
+        let sent = fixture(name);
+        let server = answering(
+            "GET",
+            "/api/v1/decisions/ECLI:NL:HR:2024:1780/paragraphs",
+            &sent,
+        )
+        .await;
+
+        let json = bron(&server, &["--json", "case", "show", "ECLI:NL:HR:2024:1780"]).await;
+        let human = bron(&server, &["case", "show", "ECLI:NL:HR:2024:1780"]).await;
+        let text = stdout(&human);
+
+        assert!(json.status.success(), "{name}: {json:?}");
+        assert_eq!(stdout(&json), format!("{sent}\n"), "{name}");
+        assert!(human.status.success(), "{name}: {human:?}");
+        assert!(
+            text.starts_with(&format!("{head}bron does not show this ruling.\n")),
+            "{name}: {text}"
+        );
+        assert!(
+            text.contains(
+                "note: bron keeps the digests of what it held of this text and none of its bytes"
+            ),
+            "{name}: {text}"
+        );
+        for never in [
+            "privacy",
+            "objection",
+            "bezwaar",
+            "metadata alone",
+            "source:",
+        ] {
+            assert!(!text.contains(never), "{name}: {never}: {text}");
+        }
+    }
+}
+
+/// A withheld ruling in the feed's list reads `withheld` and nothing more,
+/// and not `not held`, which reads as not yet: it is never fetched.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_recent_marks_a_withheld_ruling_withheld_and_nothing_more() {
+    const LISTED: &str = r#"{"bron":1,"grade":"authority","data":{"count":2,"courts":[{"court":"Rechtbank Rotterdam","count":2}],"decisions":[
+ {"ecli":"ECLI:NL:RBROT:2026:11911","register":"rechtspraak","jurisdiction":"nl","court":"Rechtbank Rotterdam","decided_on":"2026-10-01","summary_left_out":"privacy","form":"ruling","held":false,"stated_by":"rechtspraak","stated_in":"ab"},
+ {"ecli":"ECLI:NL:RBROT:2026:11912","register":"rechtspraak","jurisdiction":"nl","court":"Rechtbank Rotterdam","decided_on":"2026-10-01","form":"ruling","held":false,"stated_by":"rechtspraak","stated_in":"ab"}]},
+ "caveats":[{"kind":"rulings_listed"}]}"#;
+    let server = answering("GET", "/api/v1/decisions", LISTED).await;
+
+    let output = bron(&server, &["case", "recent"]).await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        "2026-10-01  Rechtbank Rotterdam  ECLI:NL:RBROT:2026:11911  withheld\n\
+         2026-10-01  Rechtbank Rotterdam  ECLI:NL:RBROT:2026:11912  not held\n"
+    );
+}

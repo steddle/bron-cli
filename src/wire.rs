@@ -581,6 +581,10 @@ pub enum Caveat {
     /// by, and bron reads none of it yet: no relation answered says nothing.
     RelationsNotRead,
 
+    /// The service holds the digests of the text and none of its bytes, and
+    /// answers none of it, `because` as it states it.
+    TextWithheld { because: String },
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -812,6 +816,9 @@ impl Caveat {
             },
             DirectiveBindsStates,
             RelationsNotRead,
+            TextWithheld {
+                because: String,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -960,6 +967,7 @@ impl Caveat {
             Ok(Stated::NotYetInForce { in_force_from }) => Self::NotYetInForce { in_force_from },
             Ok(Stated::DirectiveBindsStates) => Self::DirectiveBindsStates,
             Ok(Stated::RelationsNotRead) => Self::RelationsNotRead,
+            Ok(Stated::TextWithheld { because }) => Self::TextWithheld { because },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
@@ -1173,6 +1181,20 @@ mod tests {
             serde_json::to_value(Caveat::RelationsNotRead).unwrap(),
             stated
         );
+    }
+
+    #[test]
+    fn the_limit_on_a_withheld_text_keeps_its_name_and_why() {
+        let stated = serde_json::json!({"kind": "text_withheld", "because": "privacy"});
+        let read = Caveat::stated(&stated);
+
+        assert_eq!(
+            read,
+            Caveat::TextWithheld {
+                because: "privacy".into()
+            }
+        );
+        assert_eq!(serde_json::to_value(read).unwrap(), stated);
     }
 
     #[test]

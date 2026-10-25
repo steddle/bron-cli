@@ -24,8 +24,9 @@ pub struct Decision {
     pub id: String,
     /// Who published it: `rechtspraak`, `cellar` for the EU's courts, `acm`.
     pub register: String,
-    /// `ruling`, or `opinion` for the conclusie of an advocate-general.
-    pub form: String,
+    /// `ruling`, or `opinion` for the conclusie of an advocate-general. Absent
+    /// where the ruling was withheld before the service held it.
+    pub form: Option<String>,
     pub court: Option<String>,
     pub decided_on: Option<NaiveDate>,
     pub published_on: Option<NaiveDate>,
@@ -33,6 +34,9 @@ pub struct Decision {
     pub known_since: Option<String>,
     /// Whether the publisher serves the text, or the metadata alone.
     pub has_body: bool,
+    /// Why the service answers no text of it, `privacy`, as the service
+    /// states it.
+    pub withheld_because: Option<String>,
     pub rendition: Option<DecisionRendition>,
     /// The digests of the texts the publisher replaced or withdrew before
     /// this one. The service serves none of them.
@@ -280,7 +284,8 @@ pub struct ListedDecision {
     /// Absent where it prints none, for a criminal case, and while the service
     /// has not read whether the ruling is criminal law.
     pub summary: Option<String>,
-    /// `criminal_law` where the service leaves a criminal case's summary out.
+    /// `criminal_law` where the service leaves a criminal case's summary out,
+    /// `privacy` where it withholds the ruling.
     pub summary_left_out: Option<String>,
     /// Whether the service holds the ruling. One it does not is fetched on the
     /// first read that asks for it.
