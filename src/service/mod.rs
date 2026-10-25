@@ -66,7 +66,7 @@ const DEFAULT: &str = "https://bron.steddle.com/api/v1";
 /// the corpus bounds.
 const WHOLE: &str = "none";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Service {
     base: String,
 }

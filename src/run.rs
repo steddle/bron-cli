@@ -36,8 +36,8 @@ pub enum Answer {
     },
     Parts {
         answered: Box<Answered<service::Parts>>,
-        /// See `Articles::blob_url`.
-        blob_url: Option<String>,
+        /// See `Articles::service`.
+        service: Service,
     },
     Contents(Box<Answered<service::Contents>>),
     Published(Answered<Vec<service::Expression>>),
@@ -48,15 +48,17 @@ pub enum Answer {
         /// Whether --kind or --article narrowed the list, which the service's
         /// summary does not follow.
         narrowed: bool,
-        /// Where each side's document is served. See `Articles::blob_url`.
+        /// Where each side's document is served, for the source line a reader
+        /// fetches. Absent where the service holds no text for it.
         from_url: Option<String>,
         to_url: Option<String>,
     },
     Articles {
         answered: Box<Answered<service::Articles>>,
-        /// Where the rendition's document is served, for the source line a
-        /// reader fetches. Absent where the service holds no text for it.
-        blob_url: Option<String>,
+        /// The service this run read, which serves the document behind each
+        /// source line for a reader to fetch: the rendition's, or an annex an
+        /// act of the EU publishes apart.
+        service: Service,
         /// The article the question named, so an answer with none can say
         /// what was asked.
         number: Option<String>,
@@ -71,7 +73,8 @@ pub enum Answer {
     },
     Decision {
         answered: Box<Answered<service::DecisionParagraphs>>,
-        /// Where the ruling's document is served. See `Articles::blob_url`.
+        /// Where the ruling's document is served, for the source line a reader
+        /// fetches.
         blob_url: Option<String>,
         /// The offset the question named, so a cut page can say where the next
         /// one starts.
@@ -213,12 +216,17 @@ fn run_blob(digest: &str, span: Option<(usize, usize)>, service: &Service) -> Ou
 /// The letter opens the line because the parser puts it there, so asking for
 /// `sub b` costs no schema and no second address space.
 pub fn item<'a>(text: &'a str, letter: &str) -> Option<&'a str> {
-    let wanted = letter.trim_end_matches('.');
+    // The BWB letters an item `a.`, an act of the EU `a)` in Dutch and `(a)`
+    // in English, and a point inserted later in two words, `e bis)`.
+    fn bare(label: &str) -> &str {
+        label.trim_start_matches('(').trim_end_matches(['.', ')'])
+    }
+    let words: Vec<&str> = bare(letter.trim()).split_whitespace().collect();
+    let wanted = words.join(" ");
 
     text.lines().find(|line| {
-        line.split_whitespace()
-            .next()
-            .is_some_and(|first| first.trim_end_matches('.') == wanted)
+        let label: Vec<&str> = line.split_whitespace().take(words.len()).collect();
+        !words.is_empty() && bare(&label.join(" ")) == wanted
     })
 }
 
@@ -395,8 +403,8 @@ fn run_law(law_cmd: &Law, service: &Service) -> Outcome<Answer> {
                     },
                 )
                 .map(|answered| Answer::Parts {
-                    blob_url: served(service, &answered.data.expression),
                     answered: Box::new(answered),
+                    service: service.clone(),
                 })
         }
 
@@ -531,8 +539,8 @@ fn run_law(law_cmd: &Law, service: &Service) -> Outcome<Answer> {
             )?;
 
             Ok(Answer::Articles {
-                blob_url: served(service, &answered.data.expression),
                 answered: Box::new(answered),
+                service: service.clone(),
                 number: wanted.clone(),
                 paragraph: paragraph.clone(),
                 item: letter.clone(),
@@ -733,5 +741,45 @@ mod item_tests {
     #[test]
     fn an_item_nothing_opens_is_not_there() {
         assert_eq!(item(LID, "z"), None);
+    }
+
+    #[test]
+    fn an_item_of_an_act_of_the_eu_is_the_line_its_letter_opens() {
+        let lid = "In het geval van een uitnodiging tot aankoop:\n\
+                   a) de voornaamste kenmerken van het product;\n\
+                   b) het geografische adres van de handelaar;";
+
+        for spelling in ["b", "b)"] {
+            assert_eq!(
+                item(lid, spelling),
+                Some("b) het geografische adres van de handelaar;")
+            );
+        }
+
+        let english = "Processing shall be lawful only if:\n\
+                       (a) the data subject has given consent;\n\
+                       (b) processing is necessary for a contract;";
+        for spelling in ["b", "(b)"] {
+            assert_eq!(
+                item(english, spelling),
+                Some("(b) processing is necessary for a contract;")
+            );
+        }
+    }
+
+    #[test]
+    fn a_point_inserted_later_is_the_line_its_two_words_open() {
+        let lid = "e) de totale prijs;\n\
+                   e bis) indien van toepassing, dat de prijs is gepersonaliseerd;\n\
+                   f) de kosten voor communicatie op afstand;";
+
+        for spelling in ["e bis", "e bis)", " e  bis "] {
+            assert_eq!(
+                item(lid, spelling),
+                Some("e bis) indien van toepassing, dat de prijs is gepersonaliseerd;")
+            );
+        }
+        assert_eq!(item(lid, "e"), Some("e) de totale prijs;"));
+        assert_eq!(item(lid, ""), None);
     }
 }

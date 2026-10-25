@@ -5835,3 +5835,398 @@ async fn publication_search_in_a_collection_the_service_does_not_read_is_its_ref
     )
     .await;
 }
+
+// -- acts of the EU ------------------------------------------------------
+
+/// An article of an act of the EU, as production answered it on 2026-10-25:
+/// the consolidation in force on the day, in the language read, and every
+/// limit the service stated on it, each in words.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_reads_an_article_of_an_act_of_the_eu() {
+    let sent = fixture("bron-articles-celex-32005L0029-7-2024-01-01.json");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/celex:32005L0029/articles"))
+        .and(query_param("number", "7"))
+        .and(query_param("as_of", "2024-01-01"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sent.as_str(), "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "law",
+        "show",
+        "celex:32005L0029",
+        "--article",
+        "7",
+        "--as-of",
+        "2024-01-01",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    assert!(human.status.success(), "{human:?}");
+    assert!(
+        text.contains(
+            "from rendition 02005L0029-20220528 (nl), in force 2022-05-28 to 2026-09-26\n\n\
+             article 7  Misleidende omissies\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n4. In het geval van een uitnodiging tot aankoop"),
+        "{text}"
+    );
+    assert!(text.contains("\n4 bis. Wanneer consumenten"), "{text}");
+    assert!(
+        text.contains(
+            "source: 22fbf84bc4cd2f0d4e3b9a53eb79cc07e909ef8537de25a183a843cc3adcfd29 (21069..27667)"
+        ),
+        "{text}"
+    );
+    for said in [
+        "the register states no zicht dates for this text",
+        "for information only and not legally binding. The authentic text is that of 32005L0029",
+        "bron runs it to the day before 02005L0029-20260927 takes effect",
+        "a directive binds the Member States",
+    ] {
+        assert!(text.contains(said), "{said}: {text}");
+    }
+    assert!(!text.contains("has no sentence for"), "{text}");
+}
+
+/// The EU letters an item `b)`, and `--item` cuts the lid down to it as it
+/// does an item the BWB letters `b.`.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_cuts_a_paragraph_of_an_act_of_the_eu_to_one_item() {
+    let sent = fixture("bron-articles-celex-32005L0029-7-lid-4-2024-01-01.json");
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/celex:32005L0029/articles",
+        &sent,
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "celex:32005L0029",
+            "--article",
+            "7",
+            "--paragraph",
+            "4",
+            "--item",
+            "b",
+            "--as-of",
+            "2024-01-01",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "article 7 lid 4  Misleidende omissies\n\nb) het geografische adres en de identiteit van de handelaar"
+        ),
+        "{text}"
+    );
+}
+
+/// The English text letters an item `(b)`, and `--item b` cuts the lid down
+/// to it all the same.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_cuts_a_paragraph_of_an_english_text_of_the_eu_to_one_item() {
+    let sent = fixture("bron-articles-celex-32016R0679-6-lid-1-en-2016-05-01.json");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/regulations/celex:32016R0679/articles"))
+        .and(query_param("lang", "en"))
+        .and(query_param("paragraph", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sent.as_str(), "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "celex:32016R0679",
+            "--article",
+            "6",
+            "--paragraph",
+            "1",
+            "--item",
+            "b",
+            "--lang",
+            "en",
+            "--as-of",
+            "2016-05-01",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("from rendition 02016R0679-20160504 (en), in force 2016-05-24 onwards"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "article 6 lid 1  Lawfulness of processing\n\n(b) processing is necessary for the performance of a contract"
+        ),
+        "{text}"
+    );
+}
+
+/// A point a later act inserted is lettered in two words, `e bis)`, and
+/// `--item "e bis"` cuts the lid down to it.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_cuts_a_paragraph_of_an_act_of_the_eu_to_a_point_inserted_later() {
+    let sent = fixture("bron-articles-celex-32011L0083-6-lid-1-2024-01-01.json");
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/celex:32011L0083/articles",
+        &sent,
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "celex:32011L0083",
+            "--article",
+            "6",
+            "--paragraph",
+            "1",
+            "--item",
+            "e bis",
+            "--as-of",
+            "2024-01-01",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("\n\ne bis) indien van toepassing, dat de prijs is gepersonaliseerd"),
+        "{text}"
+    );
+}
+
+/// A day after the act was adopted and before it entered into force answers
+/// the text it entered into force as, and says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_show_says_an_act_of_the_eu_was_not_yet_in_force_on_the_day() {
+    let sent = fixture("bron-articles-celex-32016R0679-6-2016-05-01.json");
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/celex:32016R0679/articles",
+        &sent,
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "law",
+            "show",
+            "celex:32016R0679",
+            "--article",
+            "6",
+            "--as-of",
+            "2016-05-01",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("article 6  Rechtmatigheid van de verwerking"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "note: on the day asked this text was adopted and not yet in force: it entered into force on 2016-05-24."
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("that this text entered into force on 2016-05-24 is stated as a date in the EU's metadata"),
+        "{text}"
+    );
+}
+
+/// An annex an act of the EU publishes as a document apart: its span points
+/// into that document, so its source line and address name it, and never
+/// the act's own.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_parts_names_the_document_an_annex_of_an_act_of_the_eu_stands_in() {
+    let sent = fixture("bron-parts-celex-32005L0029-annex-2010-01-01.json");
+    let server = answering("GET", "/api/v1/regulations/celex:32005L0029/parts", &sent).await;
+
+    let args = [
+        "law",
+        "parts",
+        "celex:32005L0029",
+        "--kind",
+        "annex",
+        "--as-of",
+        "2010-01-01",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    for (heading, annex, span) in [
+        (
+            "annex I  HANDELSPRAKTIJKEN DIE ONDER ALLE OMSTANDIGHEDEN ALS ONEERLIJK WORDEN BESCHOUWD",
+            "7d06b1f9df244b9d92aa2bf24fb7ac781227483d3ac74f3c65247d15f3189f4e",
+            "38..11620",
+        ),
+        (
+            "annex II  COMMUNAUTAIRE WETSBEPALINGEN BETREFFENDE RECLAME EN COMMERCIËLE COMMUNICATIE",
+            "760ad800ddeaeeb957536d58fa9808d32ad5b9b783c1016bd41d4610af2df88e",
+            "38..6736",
+        ),
+    ] {
+        assert!(text.contains(heading), "{heading}: {text}");
+        assert!(
+            text.contains(&format!(
+                "source: {annex} ({span})\n{}/api/v1/blobs/{annex}\n",
+                server.uri()
+            )),
+            "{annex}: {text}"
+        );
+    }
+    assert!(
+        !text.contains("76e42ad8918b4887b1c1c1e456cd515208cbcdfe16ef5ab7b3424fde3979a1ca"),
+        "{text}"
+    );
+}
+
+/// The act and each consolidation of it, newest first as the service sends
+/// them, each under the title it prints.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_versions_lists_an_act_of_the_eu_and_its_consolidations() {
+    let sent = fixture("bron-expressions-celex-32016R0679.json");
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/celex:32016R0679/expressions",
+        &sent,
+    )
+    .await;
+
+    let json = bron(&server, &["--json", "law", "versions", "celex:32016R0679"]).await;
+    let human = bron(&server, &["law", "versions", "celex:32016R0679"]).await;
+    let rows: Vec<String> = stdout(&human).lines().map(str::to_string).collect();
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(
+        rows[0].starts_with("* 32016R0679  2016-05-24 onwards"),
+        "{rows:?}"
+    );
+    assert!(
+        rows[1].starts_with("* 02016R0679-20160504  2016-05-24 onwards"),
+        "{rows:?}"
+    );
+    for row in &rows {
+        assert!(row.contains("  absent  "), "{row}");
+        assert!(
+            row.contains("  Verordening (EU) 2016/679 van het Europees Parlement"),
+            "{row}"
+        );
+    }
+    assert!(
+        String::from_utf8_lossy(&human.stderr).contains("- = the register states none"),
+        "{human:?}"
+    );
+}
+
+/// A route that reads no act of the EU says so, as production refused
+/// `law contents celex:32016R0679` on 2026-10-25.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_route_that_reads_no_act_of_the_eu_is_the_service_s_refusal() {
+    refused_by_the_service(
+        &["law", "contents", "celex:32016R0679"],
+        "GET",
+        "/api/v1/regulations/celex:32016R0679/contents",
+        Vec::new(),
+        "route_not_for_register",
+        "[celex:32016R0679] is an act of the EU, which this route does not read: /regulations/{id}, /expressions, /articles and /parts read it",
+    )
+    .await;
+}
+
+/// A text of the EU owed in a language and not read yet is the service's
+/// `corpus` failure, exit 4, and one CELLAR serves in no form bron reads its
+/// not-found, exit 2. Both cross under the service's code. The bodies are
+/// written as `CellarActs` states them; production held every text asked.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_text_of_the_eu_bron_does_not_hold_crosses_under_its_code() {
+    for (status, kind, message, detail, exit) in [
+        (
+            503,
+            "corpus",
+            "Bron holds no text of 02005L0029-20260927 in this language yet: it reads every act of the EU from CELLAR, a part each night",
+            serde_json::json!([]),
+            4,
+        ),
+        (
+            404,
+            "not_found",
+            "no text of 32005L0029 in this language that CELLAR serves",
+            serde_json::json!(["lang=nl reads the text CELLAR serves"]),
+            2,
+        ),
+    ] {
+        let body = serde_json::json!({
+            "bron": 1,
+            "grade": "authority",
+            "error": {"kind": kind, "code": "rendition_not_held", "message": message, "detail": detail},
+        });
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/regulations/celex:32005L0029/articles"))
+            .and(query_param("lang", "en"))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .insert_header("Retry-After", "300")
+                    .set_body_raw(body.to_string(), "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let args = ["law", "show", "celex:32005L0029", "--lang", "en"];
+        let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+        let human = bron(&server, &args).await;
+        let envelope: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+
+        assert_eq!(json.status.code(), Some(exit), "{json:?}");
+        assert_eq!(envelope["error"]["kind"], kind, "{envelope}");
+        assert_eq!(
+            envelope["error"]["code"], "rendition_not_held",
+            "{envelope}"
+        );
+        assert_eq!(human.status.code(), Some(exit), "{human:?}");
+        assert!(
+            String::from_utf8_lossy(&human.stderr).contains(message),
+            "{human:?}"
+        );
+    }
+}

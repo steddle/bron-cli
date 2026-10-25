@@ -31,7 +31,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Legislation from the Basis Wetten Bestand (BWB).
+    /// Legislation from the Basis Wetten Bestand (BWB), and the acts of the EU
+    /// from CELLAR.
     #[command(subcommand)]
     Law(Law),
 
@@ -159,10 +160,12 @@ pub enum Law {
     /// Shows a law's articles, or one of them.
     ///
     /// Articles only: `artikel`, or `enig-artikel` for a regulation's one
-    /// article. A bijlage, the aanhef, the closing formula and every other unit
-    /// a rendition prints beside its articles is `law parts`.
+    /// article, and `article` in an act of the EU. A bijlage, the aanhef, the
+    /// closing formula, a recital, an annex and every other unit a rendition
+    /// prints beside its articles is `law parts`.
     Show {
-        /// BWB identifier, e.g. BWBR0005289.
+        /// BWB identifier, e.g. BWBR0005289, or an act of the EU as celex: and
+        /// its CELEX, e.g. celex:32016R0679.
         id: String,
 
         /// Article number as printed, e.g. 162 or 162a.
@@ -198,9 +201,10 @@ pub enum Law {
         #[arg(long, requires = "paragraph")]
         item: Option<String>,
 
-        /// A treaty's text in this language, as the register writes it, e.g.
-        /// en or nl. A number named without it answers the authentic text,
-        /// and the service says whether the language is one it prints.
+        /// The text in this language: of a treaty as the register writes it,
+        /// e.g. en or nl, where a number named without it answers the
+        /// authentic text; of an act of the EU nl or en, nl where left out.
+        /// The service says whether the language is one it prints.
         #[arg(long)]
         lang: Option<String>,
 
@@ -229,11 +233,13 @@ pub enum Law {
     /// digest that place it. Every kind unless --kind names one, so the whole
     /// of what a rendition prints is one question.
     Parts {
-        /// BWB identifier, e.g. BWBR0001941.
+        /// BWB identifier, e.g. BWBR0001941, or an act of the EU as celex: and
+        /// its CELEX, e.g. celex:32005L0029.
         id: String,
 
         /// One kind of unit, as the register names the element: bijlage,
-        /// aanhef, tekst, wetsluiting, artikel.
+        /// aanhef, tekst, wetsluiting, artikel; of an act of the EU recital,
+        /// article, annex.
         #[arg(long)]
         kind: Option<String>,
 
@@ -252,8 +258,7 @@ pub enum Law {
         #[arg(long)]
         paragraph: Option<String>,
 
-        /// A treaty's text in this language, as the register writes it. See
-        /// `law show --lang`.
+        /// The text in this language. See `law show --lang`.
         #[arg(long)]
         lang: Option<String>,
 
@@ -425,7 +430,11 @@ pub enum Law {
     },
 
     /// Every published version of a law, with its validity windows.
-    Versions { id: String },
+    Versions {
+        /// BWB identifier, e.g. BWBR0005289, or an act of the EU as celex: and
+        /// its CELEX, e.g. celex:32016R0679.
+        id: String,
+    },
 
     /// Which renditions the register published in a window, across every law.
     ///

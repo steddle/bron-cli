@@ -113,7 +113,7 @@ $ bron law published --from 2026-09-01 --type wet
 * BWBR0052931  2026-09-11_0  2026-09-11 onwards        2026-09-11 onwards        matches    1 images    Wet herindeling gemeenten Hilversum en Wijdemeren
 * BWBR0052755  2026-09-01_0  2026-09-01 onwards        2026-09-01 onwards        matches    0 images    Verzamelwet gegevensbescherming
 * = the service holds this text
-first window = in force (geldigheid), second = shown by the register (zicht), - = the manifest states none
+first window = in force (geldigheid), second = shown by the register (zicht), - = the register states none
 matches, differs, rewritten, absent, unchecked = what the publisher's hash says of the held bytes
 
 $ bron law feed --since 10
@@ -217,6 +217,7 @@ Nothing is kept. bron writes nothing between runs, so every answer is fetched an
 ## Features
 
 - Every published version of a law, with geldigheid and zicht kept as separate windows rather than collapsed into one date, and renditions the publisher has withdrawn named rather than quietly served.
+- Acts of the EU. `bron law show celex:32005L0029 --article 7 --as-of 2024-01-01` reads the directive's article as the consolidation in force that day prints it, and `law parts` and `law versions` read the act the same way. Each answer says what the text can be cited as: a consolidation is for information only, and the authentic text is the act in the Official Journal.
 - Content-addressed provenance. Each document is named by the SHA-256 of its own bytes, and every article and lid carries a byte range into it, so a reader can fetch those bytes and cut the quotation again, with `bron blob` or with any tool that hashes.
 - What is coming. `bron law upcoming` lists the regulations that already print provisions they do not yet apply, with the first day to come where the register states one and the acts and besluiten behind them.
 - The life of one article. `bron law history` answers every text it has had, each with the window it applied in and the act that produced it, from the renditions the corpus holds.
@@ -234,7 +235,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## Credits
 
 - [Mischa Sigtermans](https://github.com/mischasigtermans)
-- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen) and [de Rechtspraak](https://www.rechtspraak.nl). bron reads them through the bron service and keeps none of it. The only material shipped here is the frozen answers under `tests/fixtures/` that the test suite reads; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
+- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen), [de Rechtspraak](https://www.rechtspraak.nl) and the Publications Office of the European Union ([CELLAR](https://op.europa.eu/en/web/cellar)). bron reads them through the bron service and keeps none of it. The only material shipped here is the frozen answers under `tests/fixtures/` that the test suite reads; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
 
 ## License
 

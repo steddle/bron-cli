@@ -50,10 +50,16 @@ pub struct Expression {
     /// keeps saying which regulation it belongs to.
     pub regulation_id: String,
     pub label: String,
+    /// What the rendition itself prints, which an act of the EU states where
+    /// it states no `regulation_title`.
+    pub title: Option<String>,
     /// What the register calls the regulation, stated on a list of renditions.
     pub regulation_title: Option<String>,
+    /// On an act of the EU, the language of the text: `nl`, or `en` where
+    /// `lang` asked for it.
+    pub language: Option<String>,
     pub in_force: Window,
-    /// Absent where the manifest carried no zicht dates, and never filled in
+    /// Absent where the register states no zicht dates, and never filled in
     /// from `in_force`.
     pub as_known: Option<Window>,
     pub upstream_hash: Option<String>,
@@ -447,7 +453,8 @@ pub struct Article {
     pub path: Option<String>,
     /// The publisher's stable identity for this article across renditions,
     /// which is what makes a comparison an identity match rather than a guess.
-    pub stam_id: String,
+    /// CELLAR states none for an act of the EU.
+    pub stam_id: Option<String>,
     pub amended_by: Option<String>,
     /// The kamerstukdossiers the BWB states for the act named in
     /// `amended_by`. Absent where the rendition has not been read for them,
@@ -465,6 +472,9 @@ pub struct Article {
     pub in_force_from: Option<NaiveDate>,
     pub jci: Option<String>,
     pub span: Span,
+    /// The document `span` points into where it is not the rendition's own
+    /// `blob`: an annex an act of the EU publishes as a document apart.
+    pub blob: Option<String>,
     /// The service's reading of the whole unit, present only where
     /// `rendered=1` asked for it. See [`Article::text`].
     pub rendered: Option<String>,
@@ -530,7 +540,10 @@ impl Article {
     /// BW`. Any other unit reads as the service's rendering of it, because a
     /// bijlage prints words beside its leden that no lid holds, and its leden
     /// are pieces the parser cut rather than units anyone cites. Either falls
-    /// back to the other where the service sent nothing to read.
+    /// back to the other where the service sent nothing to read. An article of
+    /// an act of the EU, `article`, reads as its leden too: the service's
+    /// rendering of it prints a number on a line of its own where the lid
+    /// opens with a list.
     pub fn text(&self) -> String {
         let leden = self
             .leden()
@@ -539,7 +552,7 @@ impl Article {
             .join("\n");
         let rendered = self.rendered.clone().unwrap_or_default();
 
-        let is_article = matches!(self.kind.as_str(), "artikel" | "enig-artikel");
+        let is_article = matches!(self.kind.as_str(), "artikel" | "enig-artikel" | "article");
         let (first, second) = if is_article {
             (leden, rendered)
         } else {
@@ -818,7 +831,7 @@ mod tests {
             label: None,
             title: None,
             path: None,
-            stam_id: "1".into(),
+            stam_id: Some("1".into()),
             amended_by: None,
             dossiers: None,
             commenced_by: None,
@@ -829,6 +842,7 @@ mod tests {
             in_force_from: None,
             jci: None,
             span: Span { start: 0, end: 1 },
+            blob: None,
             rendered: rendered.map(str::to_string),
             raw: None,
             images: Vec::new(),
@@ -858,6 +872,23 @@ mod tests {
         );
 
         assert_eq!(article.text(), "1. Eerste lid.\n2. Tweede lid.");
+    }
+
+    #[test]
+    fn an_article_of_an_act_of_the_eu_reads_as_its_leden_each_opened_by_its_number() {
+        let article = unit(
+            "article",
+            Some("1. Eerste lid.\n4.\nIn het geval van:\na) een uitnodiging"),
+            vec![
+                paragraph(Some("1"), "Eerste lid."),
+                paragraph(Some("4"), "In het geval van:\na) een uitnodiging"),
+            ],
+        );
+
+        assert_eq!(
+            article.text(),
+            "1. Eerste lid.\n4. In het geval van:\na) een uitnodiging"
+        );
     }
 
     /// An article printed without leden is one unnumbered unit, and opening it

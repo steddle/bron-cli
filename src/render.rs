@@ -14,7 +14,7 @@ use chrono::NaiveDate;
 use bron::service::{
     Article, CitingDecision, Consolidated, ContentsPart, CourtCount, Dossier, Expression, Had,
     Lineage, LinkedDecree, ListedDecision, Place, Produced, Regulation, Relation, Remark,
-    SearchData, SearchLid, Upcoming, name,
+    SearchData, SearchLid, Service, Upcoming, name,
 };
 use bron::wire::Caveat;
 
@@ -675,7 +675,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
         // on the answer beneath it.
         Answer::Parts {
             answered: a,
-            blob_url,
+            service,
         } => {
             answered_by(
                 header(&a.data.parts, a.as_of, a.as_known_on).as_deref(),
@@ -684,13 +684,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             )?;
 
             for part in &a.data.parts {
-                write_unit(
-                    part,
-                    &a.data.expression,
-                    blob_url.as_deref(),
-                    Narrowed::default(),
-                    out,
-                )?;
+                write_unit(part, &a.data.expression, service, Narrowed::default(), out)?;
             }
 
             caveats(&a.caveats, out)
@@ -720,7 +714,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
         Answer::Articles {
             answered: a,
-            blob_url,
+            service,
             number,
             paragraph,
             item,
@@ -774,7 +768,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 write_unit(
                     article,
                     &a.data.expression,
-                    blob_url.as_deref(),
+                    service,
                     Narrowed {
                         lid: paragraph.as_deref(),
                         item: item.as_deref(),
@@ -1418,7 +1412,7 @@ struct Narrowed<'a> {
 fn write_unit(
     unit: &Article,
     rendition: &Expression,
-    blob_url: Option<&str>,
+    service: &Service,
     narrowed: Narrowed<'_>,
     out: &mut impl Write,
 ) -> io::Result<()> {
@@ -1469,15 +1463,15 @@ fn write_unit(
         _ => writeln!(out, "\n{text}\n")?,
     }
 
-    if let Some(blob) = &rendition.blob {
+    if let Some(blob) = unit.blob.as_ref().or(rendition.blob.as_ref()) {
         writeln!(
             out,
             "source: {blob} ({}..{})",
             unit.span.start, unit.span.end
         )?;
-    }
-    if let Some(url) = blob_url {
-        writeln!(out, "{url}")?;
+        if let Some(url) = service.blob_url(blob) {
+            writeln!(out, "{url}")?;
+        }
     }
     // The register's own citation string for exactly what is printed above,
     // carrying this rendition's zicht and geldigheid dates. It is what Dutch
@@ -1605,10 +1599,13 @@ fn answered_by(
     if let Some(header) = header {
         writeln!(out, "{header}")?;
     }
+    let mut named = rendition.label.clone();
+    if let Some(language) = &rendition.language {
+        let _ = write!(named, " ({language})");
+    }
     writeln!(
         out,
-        "from rendition {}, in force {}\n",
-        rendition.label,
+        "from rendition {named}, in force {}\n",
         window(rendition.in_force.from, rendition.in_force.until)
     )
 }
@@ -1696,7 +1693,7 @@ fn article_run(numbers: &[String], indent: &str, out: &mut impl Write) -> io::Re
 /// one regulation's and does not.
 ///
 /// Both windows, because they diverge wherever something was published with
-/// retroactive effect; `-` where the manifest states no zicht dates.
+/// retroactive effect; `-` where the register states no zicht dates.
 fn rendition_row(rendition: &Expression, regulation: Option<&str>) -> String {
     let held = if rendition.held { "*" } else { " " };
     // The service states images for held text only, so of a rendition it does
@@ -1725,7 +1722,11 @@ fn rendition_row(rendition: &Expression, regulation: Option<&str>) -> String {
     if let Some(because) = &rendition.unread_because {
         let _ = write!(row, "  unread: {because}");
     }
-    if let Some(title) = &rendition.regulation_title {
+    if let Some(title) = rendition
+        .regulation_title
+        .as_ref()
+        .or(rendition.title.as_ref())
+    {
         let _ = write!(row, "  {title}");
     }
     row.trim_end().to_string()
@@ -1737,7 +1738,7 @@ fn rendition_legend(renditions: &[Expression], err: &mut impl Write) -> io::Resu
     writeln!(
         err,
         "first window = in force (geldigheid), second = shown by the register (zicht), \
-         - = the manifest states none"
+         - = the register states none"
     )?;
     writeln!(
         err,
@@ -2429,11 +2430,47 @@ fn caveat_line(caveat: &Caveat) -> String {
              conclusie, a ruling published as metadata alone and one the feed last listed before \
              then are not listed, so a ruling missing here may still have been decided."
             .to_string(),
+        // The site's sentences, from the service's lang/en/search.php, whose
+        // wording goes past the lawyer project before it changes.
+        Caveat::ConsolidationNotAuthentic { act } => format!(
+            "note: this is a consolidated text by the Publications Office of the European Union, \
+             for information only and not legally binding. The authentic text is that of {act} in \
+             the Official Journal, with the acts that amended it and the corrigenda."
+        ),
+        Caveat::WindowEndInferred { next } => format!(
+            "note: the EU states no end to this text. bron runs it to the day before {next} takes \
+             effect. An amendment the Publications Office has not yet consolidated, bron does not \
+             see: check that the acts amending the text are in it."
+        ),
+        Caveat::WindowStartFromMetadata { day } => format!(
+            "note: that this text entered into force on {day} is stated as a date in the EU's \
+             metadata; the act itself gives the rule. An act can apply later than it enters into \
+             force: read its final provisions."
+        ),
+        Caveat::StructureReadFromHtml { .. } => "note: CELLAR delivers this old text as a web \
+             page alone; the Official Journal is the authentic text. bron read its articles, \
+             paragraphs and annexes from the headings on that page, so check in the Official \
+             Journal where an article ends."
+            .to_string(),
+        Caveat::ConsolidationsUnread { consolidations } => format!(
+            "note: after this text the Publications Office made a further consolidated version \
+             that already reflects the day asked, which bron cannot read: CELLAR does not deliver \
+             it in Dutch or English as Formex or HTML. {}. The text that day can read otherwise; \
+             read that version in EUR-Lex.",
+            consolidations.join(", "),
+        ),
+        Caveat::NotYetInForce { in_force_from } => format!(
+            "note: on the day asked this text was adopted and not yet in force: it entered into \
+             force on {in_force_from}."
+        ),
+        Caveat::DirectiveBindsStates => "note: a directive binds the Member States: conduct in \
+             the Netherlands is governed by the law that transposes it."
+            .to_string(),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
         Caveat::NoZichtWindow => {
-            "note: the manifest carries no zicht dates, so this question cannot be \
+            "note: the register states no zicht dates for this text, so this question cannot be \
                  answered against that window"
                 .to_string()
         }
@@ -3287,7 +3324,7 @@ mod tests {
         );
         assert!(err.contains("* = repealed (vervallen)"), "{err}");
         assert!(!err.contains("no sentence for"), "{err}");
-        assert!(err.contains("carries no zicht dates"), "{err}");
+        assert!(err.contains("states no zicht dates"), "{err}");
     }
 
     /// No article marked, no legend; and a run too long for one line wraps
@@ -3451,6 +3488,30 @@ mod tests {
         assert!(differs.contains("do not hash to"), "{differs}");
         assert!(rewritten.contains("rewrote this rendition"), "{rewritten}");
         assert!(rewritten.contains("earlier text"), "{rewritten}");
+    }
+
+    #[test]
+    fn a_text_of_the_eu_read_from_html_or_past_an_unread_consolidation_says_so() {
+        let html = caveat_line(&Caveat::StructureReadFromHtml {
+            format: "xhtml".into(),
+        });
+        let unread = caveat_line(&Caveat::ConsolidationsUnread {
+            consolidations: vec!["02005L0029-20050612".into(), "02005L0029-20080101".into()],
+        });
+
+        assert!(
+            html.contains("the Official Journal is the authentic text"),
+            "{html}"
+        );
+        assert!(
+            html.contains("check in the Official Journal where an article ends"),
+            "{html}"
+        );
+        assert!(
+            unread
+                .contains("as Formex or HTML. 02005L0029-20050612, 02005L0029-20080101. The text"),
+            "{unread}"
+        );
     }
 
     /// What a rendition holds is true of the rendition, so it has a column of

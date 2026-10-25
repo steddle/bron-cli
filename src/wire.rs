@@ -325,8 +325,8 @@ pub enum Caveat {
     /// means the caller should throw its cursor away and start again from the
     /// head, which is why `origin` travels beside it.
     CursorAhead { asked: u64, head: u64 },
-    /// The manifest carried no zicht dates, so no as-known-on query can be
-    /// answered for this version.
+    /// The register states no zicht dates for this text, so no as-known-on
+    /// query can be answered for it.
     NoZichtWindow,
     /// This text applied from before the register showed it.
     Retroactive {
@@ -547,6 +547,36 @@ pub enum Caveat {
     /// last listed before then are not listed.
     RulingsListed,
 
+    /// The text is a consolidation the Publications Office made of `act`, the
+    /// act's CELEX: the authentic text is the act in the Official Journal,
+    /// with the acts that amended it and the corrigenda.
+    ConsolidationNotAuthentic { act: String },
+
+    /// CELLAR states no end to the text, so its window closes the day before
+    /// `next`, the consolidation after it, takes effect. An amendment the
+    /// Publications Office has not consolidated yet is in no window.
+    WindowEndInferred { next: String },
+
+    /// The window opens on `day` as CELLAR's metadata states it, and no
+    /// frozen document states that day. An act can apply later than it
+    /// enters into force.
+    WindowStartFromMetadata { day: NaiveDate },
+
+    /// CELLAR serves the text as `format`, `html` or `xhtml` alone, so its
+    /// units were read from the headings it prints.
+    StructureReadFromHtml { format: String },
+
+    /// Consolidations, by CELEX, that started after the text answered and on
+    /// or before the day asked, which CELLAR serves in no form bron reads.
+    ConsolidationsUnread { consolidations: Vec<String> },
+
+    /// The act had not entered into force on the day asked, and the text
+    /// answered is the one it entered into force as, on `in_force_from`.
+    NotYetInForce { in_force_from: NaiveDate },
+
+    /// The act is a directive, which binds the Member States.
+    DirectiveBindsStates,
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -758,6 +788,25 @@ impl Caveat {
             },
             RulingsFound,
             RulingsListed,
+            ConsolidationNotAuthentic {
+                act: String,
+            },
+            WindowEndInferred {
+                next: String,
+            },
+            WindowStartFromMetadata {
+                day: NaiveDate,
+            },
+            StructureReadFromHtml {
+                format: String,
+            },
+            ConsolidationsUnread {
+                consolidations: Vec<String>,
+            },
+            NotYetInForce {
+                in_force_from: NaiveDate,
+            },
+            DirectiveBindsStates,
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -894,6 +943,17 @@ impl Caveat {
             Ok(Stated::LinksUnresolved { count }) => Self::LinksUnresolved { count },
             Ok(Stated::RulingsFound) => Self::RulingsFound,
             Ok(Stated::RulingsListed) => Self::RulingsListed,
+            Ok(Stated::ConsolidationNotAuthentic { act }) => {
+                Self::ConsolidationNotAuthentic { act }
+            }
+            Ok(Stated::WindowEndInferred { next }) => Self::WindowEndInferred { next },
+            Ok(Stated::WindowStartFromMetadata { day }) => Self::WindowStartFromMetadata { day },
+            Ok(Stated::StructureReadFromHtml { format }) => Self::StructureReadFromHtml { format },
+            Ok(Stated::ConsolidationsUnread { consolidations }) => {
+                Self::ConsolidationsUnread { consolidations }
+            }
+            Ok(Stated::NotYetInForce { in_force_from }) => Self::NotYetInForce { in_force_from },
+            Ok(Stated::DirectiveBindsStates) => Self::DirectiveBindsStates,
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
@@ -1078,6 +1138,24 @@ mod tests {
 
         assert_eq!(Caveat::stated(&stated), Caveat::RulingsListed);
         assert_eq!(serde_json::to_value(Caveat::RulingsListed).unwrap(), stated);
+    }
+
+    #[test]
+    fn the_limits_on_an_act_of_the_eu_keep_their_names_and_fields() {
+        for stated in [
+            serde_json::json!({"kind": "consolidation_not_authentic", "act": "32005L0029"}),
+            serde_json::json!({"kind": "window_end_inferred", "next": "02005L0029-20260927"}),
+            serde_json::json!({"kind": "window_start_from_metadata", "day": "2016-05-24"}),
+            serde_json::json!({"kind": "structure_read_from_html", "format": "xhtml"}),
+            serde_json::json!({"kind": "consolidations_unread", "consolidations": ["02005L0029-20050612"]}),
+            serde_json::json!({"kind": "not_yet_in_force", "in_force_from": "2016-05-24"}),
+            serde_json::json!({"kind": "directive_binds_states"}),
+        ] {
+            let read = Caveat::stated(&stated);
+
+            assert!(!matches!(read, Caveat::Unrecognised { .. }), "{stated}");
+            assert_eq!(serde_json::to_value(read).unwrap(), stated);
+        }
     }
 
     #[test]
