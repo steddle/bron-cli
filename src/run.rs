@@ -73,9 +73,9 @@ pub enum Answer {
     },
     Decision {
         answered: Box<Answered<service::DecisionParagraphs>>,
-        /// Where the ruling's document is served, for the source line a reader
-        /// fetches.
-        blob_url: Option<String>,
+        /// See `Articles::service`: of a case of the EU it serves each
+        /// document of the package.
+        service: Service,
         /// The offset the question named, so a cut page can say where the next
         /// one starts.
         offset: Option<String>,
@@ -559,23 +559,23 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
         Case::Show {
             ecli,
             raw,
+            lang,
             limit,
             offset,
-        } => {
-            let answered =
-                service.decision(&client, ecli, *raw, limit.as_deref(), offset.as_deref())?;
-
-            Ok(Answer::Decision {
-                blob_url: answered
-                    .data
-                    .decision
-                    .rendition
-                    .as_ref()
-                    .and_then(|rendition| service.blob_url(&rendition.blob)),
+        } => service
+            .decision(
+                &client,
+                ecli,
+                *raw,
+                lang.as_deref(),
+                limit.as_deref(),
+                offset.as_deref(),
+            )
+            .map(|answered| Answer::Decision {
                 answered: Box::new(answered),
+                service: service.clone(),
                 offset: offset.clone(),
-            })
-        }
+            }),
 
         Case::Relations { ecli } => service
             .decision_relations(&client, ecli)
@@ -609,6 +609,7 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
             from,
             to,
             form,
+            register,
             limit,
         } => service
             .decision_search(
@@ -619,6 +620,7 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
                     from: from.as_deref(),
                     to: to.as_deref(),
                     form: form.as_deref(),
+                    register: register.as_deref(),
                     limit: limit.as_deref(),
                 },
             )

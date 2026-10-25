@@ -36,7 +36,8 @@ pub enum Command {
     #[command(subcommand)]
     Law(Law),
 
-    /// Rulings and conclusies of the Dutch courts, from rechtspraak.
+    /// Rulings and conclusies of the Dutch courts, from rechtspraak, and the
+    /// judgments and opinions of the EU's courts, from CELLAR.
     #[command(subcommand)]
     Case(Case),
 
@@ -610,13 +611,21 @@ pub enum Case {
     ///
     /// The service fetches a ruling from rechtspraak on the first read that
     /// asks for it and answers every later read from the bytes it froze. A
-    /// ruling rechtspraak publishes as metadata alone answers with no text.
+    /// ruling rechtspraak publishes as metadata alone answers with no text. A
+    /// judgment or an opinion of the EU's courts, ECLI:EU:C:2019:773, is read
+    /// from CELLAR, each paragraph under the number the Court prints for it.
     Show {
         ecli: String,
 
         /// Also carry the publisher's own bytes at every span. See `law show`.
         #[arg(long)]
         raw: bool,
+
+        /// The language a case of the EU is read in, nl or en; nl where left
+        /// out. Sent exactly as typed: rechtspraak publishes Dutch alone, and
+        /// the service refuses en for its rulings.
+        #[arg(long)]
+        lang: Option<String>,
 
         /// How many units of its text to answer; untyped, the service's
         /// window. Sent exactly as typed.
@@ -663,6 +672,12 @@ pub enum Case {
         /// exactly as typed.
         #[arg(long)]
         form: Option<String>,
+
+        /// Only the decisions of one register: `rechtspraak`, `acm`, or
+        /// `cellar` for the judgments and opinions of the EU's courts, which
+        /// the service ranks only where asked. Sent exactly as typed.
+        #[arg(long)]
+        register: Option<String>,
 
         /// How many rulings to answer; untyped, the service's window. Sent
         /// exactly as typed.

@@ -901,7 +901,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
         Answer::Decision {
             answered: a,
-            blob_url,
+            service,
             offset,
         } => {
             let decision = &a.data.decision;
@@ -930,11 +930,30 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             if let Some(numbers) = decision.native("zaaknummer") {
                 writeln!(out, "zaaknummer {numbers}")?;
             }
-            if let Some(rendition) = &decision.rendition {
-                writeln!(out, "source: {}", rendition.blob)?;
+            if let Some(celex) = decision.native("celex") {
+                writeln!(out, "celex {celex}")?;
             }
-            if let Some(url) = blob_url {
-                writeln!(out, "{url}")?;
+            let documents = decision
+                .rendition
+                .as_ref()
+                .map_or(&[][..], |rendition| &rendition.documents);
+            if let Some(rendition) = &decision.rendition {
+                if let Some(blob) = &rendition.blob {
+                    writeln!(out, "source: {blob}")?;
+                    if let Some(url) = service.blob_url(blob) {
+                        writeln!(out, "{url}")?;
+                    }
+                }
+                for document in documents {
+                    write!(out, "source: {} ({}", document.blob, document.root)?;
+                    if let Some(language) = &rendition.language {
+                        write!(out, ", {language}")?;
+                    }
+                    writeln!(out, ", {} bytes)", document.blob_size)?;
+                    if let Some(url) = service.blob_url(&document.blob) {
+                        writeln!(out, "{url}")?;
+                    }
+                }
             }
             if let Some(stamp) = &decision.known_since {
                 writeln!(out, "as the publisher served it since {stamp}")?;
@@ -957,15 +976,36 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 )?;
             }
 
+            // Where the package holds more than one document, a span is a range
+            // of the document named above it.
+            let mut reading = None;
             for paragraph in &a.data.paragraphs {
-                let name = match (paragraph.kind.as_str(), &paragraph.section_path) {
+                if documents.len() > 1
+                    && let Some(document) = paragraph.document.as_deref()
+                    && reading != Some(document)
+                {
+                    let root = documents
+                        .iter()
+                        .find(|held| held.blob == document)
+                        .map_or("document", |held| held.root.as_str());
+                    writeln!(out, "\n{root}: {document}")?;
+                    reading = Some(document);
+                }
+
+                let mut name = match (paragraph.kind.as_str(), &paragraph.section_path) {
                     ("inhoudsindicatie", _) => "inhoudsindicatie".to_string(),
+                    ("keywords", _) => "keywords".to_string(),
                     ("title", Some(path)) => format!("section {path}"),
                     ("title", None) => "section".to_string(),
                     ("footnote", Some(path)) => path.clone(),
                     (_, Some(path)) => format!("{path}, paragraph {}", paragraph.ordinal),
                     _ => format!("paragraph {}", paragraph.ordinal),
                 };
+                // The Court's number is how its paragraph is cited; the ordinal
+                // stays beside it, because --offset counts ordinals.
+                if let Some(number) = &paragraph.number {
+                    name = format!("point {number}, {name}");
+                }
                 writeln!(
                     out,
                     "\n{name}  ({}..{})",
@@ -1128,7 +1168,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
 
         Answer::DecisionHits(a) => {
             for hit in &a.data.hits {
-                let mut row = format!("{}  {}", hit.ecli, hit.form);
+                let mut row = format!("{}  {}", hit.id, hit.form);
                 if let Some(court) = &hit.court {
                     let _ = write!(row, "  {court}");
                 }
@@ -2466,6 +2506,10 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::DirectiveBindsStates => "note: a directive binds the Member States: conduct in \
              the Netherlands is governed by the law that transposes it."
             .to_string(),
+        Caveat::RelationsNotRead => "note: CELLAR states which provisions a case interprets and \
+             which rulings it cites. bron does not read that yet, so an empty list does not mean \
+             there are none."
+            .to_string(),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
@@ -2939,7 +2983,7 @@ mod tests {
 
         let text = printed(&Answer::Decision {
             answered: Box::new(answered(ruling)),
-            blob_url: Some("https://bron.steddle.com/api/v1/blobs/de3e".into()),
+            service: Service::at("https://bron.steddle.com"),
             offset: None,
         });
 
@@ -2969,7 +3013,7 @@ mod tests {
     #[test]
     fn a_cut_ruling_says_where_to_read_on() {
         let ruling: bron::service::DecisionParagraphs = serde_json::from_str(
-            r#"{"decision":{"id":"ECLI:NL:HR:2024:1780","form":"ruling","has_body":true,"superseded":[],"native":{}},
+            r#"{"decision":{"id":"ECLI:NL:HR:2024:1780","register":"rechtspraak","form":"ruling","has_body":true,"superseded":[],"native":{}},
               "paragraphs":[
                 {"ordinal":11,"kind":"para","span":{"start":1,"end":2},"content_hash":"a","rendered":"Een."},
                 {"ordinal":12,"kind":"para","span":{"start":3,"end":4},"content_hash":"b","rendered":"Twee."}]}"#,
@@ -2980,7 +3024,7 @@ mod tests {
 
         let text = printed(&Answer::Decision {
             answered: Box::new(answered),
-            blob_url: None,
+            service: Service::at("https://bron.test"),
             offset: Some("10".into()),
         });
 
@@ -2999,7 +3043,7 @@ mod tests {
     #[test]
     fn case_search_names_each_ruling_and_says_what_it_searched() {
         let hits: bron::service::DecisionSearch = serde_json::from_str(
-            r#"{"hits":[{"ecli":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","form":"ruling",
+            r#"{"hits":[{"id":"ECLI:NL:HR:2024:1780","ecli":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","form":"ruling",
               "court":"Hoge Raad","decided_on":"2024-11-29","paragraphs":{"from":40,"to":42},
               "content_hashes":["a","b","c"],"blob":"d","distance":0.2134}]}"#,
         )

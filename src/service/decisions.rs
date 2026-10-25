@@ -16,11 +16,14 @@ use super::client::Answered;
 use super::model::Span;
 use super::{Service, window};
 
-/// A ruling or a conclusie under its ECLI.
+/// A ruling or a conclusie under its ECLI, or a judgment or an opinion of the
+/// EU's courts.
 #[derive(Debug, Deserialize)]
 pub struct Decision {
     /// The ECLI, in capitals.
     pub id: String,
+    /// Who published it: `rechtspraak`, `cellar` for the EU's courts, `acm`.
+    pub register: String,
     /// `ruling`, or `opinion` for the conclusie of an advocate-general.
     pub form: String,
     pub court: Option<String>,
@@ -57,12 +60,25 @@ impl Decision {
     }
 }
 
-/// The document a ruling's spans point into.
+/// The document a ruling's spans point into, or of a case of the EU the
+/// documents its package holds, each paragraph naming its own.
 #[derive(Debug, Deserialize)]
 pub struct DecisionRendition {
     pub language: Option<String>,
-    pub blob: String,
+    pub blob: Option<String>,
     pub blob_size: Option<u64>,
+    #[serde(default)]
+    pub documents: Vec<DecisionDocument>,
+}
+
+/// One Formex document of a case of the EU.
+#[derive(Debug, Deserialize)]
+pub struct DecisionDocument {
+    pub blob: String,
+    pub blob_size: u64,
+    /// `JUDGMENT`, `CONCLUSION`, or `REPORT.HEARING` for the report for the
+    /// hearing an older case prints beside its judgment.
+    pub root: String,
 }
 
 /// A ruling and the units of its text, each at its span in the bytes held.
@@ -77,7 +93,12 @@ pub struct DecisionParagraphs {
 #[derive(Debug, Deserialize)]
 pub struct DecisionParagraph {
     pub ordinal: u32,
+    /// Of a case of the EU, the document the span points into.
+    pub document: Option<String>,
     pub kind: String,
+    /// Of a case of the EU, the number the Court prints, `45`, or `1)` in
+    /// the operative part, which is how a paragraph is cited.
+    pub number: Option<String>,
     /// How the court numbered the sections around it, `2/2.1`, or
     /// `voetnoot 3`. Absent where it stands in none.
     pub section_path: Option<String>,
@@ -136,6 +157,8 @@ pub struct DecisionQuery<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub form: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub register: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<&'a str>,
 }
 
@@ -149,7 +172,9 @@ pub struct DecisionSearch {
 /// first.
 #[derive(Debug, Deserialize)]
 pub struct DecisionHit {
-    pub ecli: String,
+    /// The ECLI, or `acm:` and the node of a besluit of the ACM, which states
+    /// no ECLI.
+    pub id: String,
     pub form: String,
     pub court: Option<String>,
     pub decided_on: Option<NaiveDate>,
@@ -297,12 +322,14 @@ impl Service {
         self.read(client, client.post(&url).json(ask))
     }
 
-    /// A ruling and its text, rendered. `limit` and `offset` page its units.
+    /// A ruling and its text, rendered. `limit` and `offset` page its units,
+    /// and `lang` names the language a case of the EU is read in.
     pub fn decision(
         &self,
         client: &Client,
         ecli: &str,
         raw: bool,
+        lang: Option<&str>,
         limit: Option<&str>,
         offset: Option<&str>,
     ) -> Outcome<Answered<DecisionParagraphs>> {
@@ -312,6 +339,9 @@ impl Service {
         window(&mut query, limit, offset);
         if raw {
             query.push(("raw", "1"));
+        }
+        if let Some(lang) = lang {
+            query.push(("lang", lang));
         }
 
         self.read(client, client.get(&url).query(&query))

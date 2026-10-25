@@ -577,6 +577,10 @@ pub enum Caveat {
     /// The act is a directive, which binds the Member States.
     DirectiveBindsStates,
 
+    /// CELLAR states what a case of the EU interprets, cites and was referred
+    /// by, and bron reads none of it yet: no relation answered says nothing.
+    RelationsNotRead,
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -807,6 +811,7 @@ impl Caveat {
                 in_force_from: NaiveDate,
             },
             DirectiveBindsStates,
+            RelationsNotRead,
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -954,6 +959,7 @@ impl Caveat {
             }
             Ok(Stated::NotYetInForce { in_force_from }) => Self::NotYetInForce { in_force_from },
             Ok(Stated::DirectiveBindsStates) => Self::DirectiveBindsStates,
+            Ok(Stated::RelationsNotRead) => Self::RelationsNotRead,
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
@@ -1156,6 +1162,17 @@ mod tests {
             assert!(!matches!(read, Caveat::Unrecognised { .. }), "{stated}");
             assert_eq!(serde_json::to_value(read).unwrap(), stated);
         }
+    }
+
+    #[test]
+    fn the_limit_on_the_relations_of_a_case_of_the_eu_keeps_its_name() {
+        let stated = serde_json::json!({"kind": "relations_not_read"});
+
+        assert_eq!(Caveat::stated(&stated), Caveat::RelationsNotRead);
+        assert_eq!(
+            serde_json::to_value(Caveat::RelationsNotRead).unwrap(),
+            stated
+        );
     }
 
     #[test]

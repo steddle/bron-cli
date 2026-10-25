@@ -649,7 +649,7 @@ async fn find_sends_a_jurisdiction_as_typed() {
 /// and prints the service's envelope as sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn case_search_sends_the_question_in_the_body_and_prints_what_came_back() {
-    const HITS: &str = r#"{"bron":1,"grade":"authority","data":{"hits":[{"ecli":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Hoge Raad","decided_on":"2024-11-29","paragraphs":{"from":40,"to":42},"content_hashes":["a"],"blob":"d","distance":0.21}]},"caveats":[{"kind":"search_upcoming","count":7}]}"#;
+    const HITS: &str = r#"{"bron":1,"grade":"authority","data":{"hits":[{"id":"ECLI:NL:HR:2024:1780","ecli":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Hoge Raad","decided_on":"2024-11-29","paragraphs":{"from":40,"to":42},"content_hashes":["a"],"blob":"d","distance":0.21}]},"caveats":[{"kind":"search_upcoming","count":7}]}"#;
 
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -6229,4 +6229,265 @@ async fn a_text_of_the_eu_bron_does_not_hold_crosses_under_its_code() {
             "{human:?}"
         );
     }
+}
+
+// -- the EU's courts -----------------------------------------------------
+
+/// A judgment of the Court of Justice, as production answered its first
+/// three units on 2026-10-25: the court, the day, the CELEX, the document
+/// each span points into with its root and length, and the keywords the
+/// Court sets under its title.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_reads_a_judgment_of_the_eu_s_courts() {
+    let sent = fixture("bron-decision-ECLI-EU-C-2019-773-limit-3.json");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions/ECLI:EU:C:2019:773/paragraphs"))
+        .and(query_param("limit", "3"))
+        .and(query_param_is_missing("lang"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sent.as_str(), "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = ["case", "show", "ECLI:EU:C:2019:773", "--limit", "3"];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+    let judgment = "02702d0c861a2f75b8caf966a25153cb7c4109e3b8ab365d13094d24f99a800e";
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    assert!(human.status.success(), "{human:?}");
+    assert!(
+        text.starts_with(&format!(
+            "ECLI:EU:C:2019:773\nHof van Justitie\ndecided 2019-09-24\ncelex 62017CJ0136\n\
+             source: {judgment} (JUDGMENT, nl, 101621 bytes)\n{}/api/v1/blobs/{judgment}\n",
+            server.uri()
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nsection  (791..1014)\nArrest van het Hof (Grote kamer)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nkeywords  (1028..2146)\n„Prejudiciële verwijzing"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nparagraph 3  (2176..2201)\nIn zaak C-136/17,"),
+        "{text}"
+    );
+    assert!(
+        text.contains("note: units 1 to 3 shown; read on with --offset 3"),
+        "{text}"
+    );
+    assert!(!text.contains("rechtspraak"), "{text}");
+}
+
+/// `--lang en` reads the English text, and a paragraph the Court numbers is
+/// named by its number, its ordinal beside it for `--offset`.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_reads_a_case_of_the_eu_in_english_under_the_court_s_numbers() {
+    let sent = fixture("bron-decision-ECLI-EU-C-2019-773-lang-en-offset-127-limit-4.json");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions/ECLI:EU:C:2019:773/paragraphs"))
+        .and(query_param("lang", "en"))
+        .and(query_param("offset", "127"))
+        .and(query_param("limit", "4"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sent.as_str(), "application/json"))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let args = [
+        "case",
+        "show",
+        "ECLI:EU:C:2019:773",
+        "--lang",
+        "en",
+        "--offset",
+        "127",
+        "--limit",
+        "4",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    assert!(
+        text.contains(
+            "source: 343c6ada007904ea8fbbfb908a6bf1e50579cee923ea253f45cba7fee202e250 (JUDGMENT, en, 94653 bytes)"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "\npoint 1, paragraph 128  (89623..90587)\nThe provisions of Article 8(1) and (5)"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nparagraph 131  (94594..94613)\n[Signatures]"),
+        "{text}"
+    );
+}
+
+/// An older case prints the report for the hearing beside its judgment, two
+/// documents: where the page crosses from one into the other, the document
+/// the spans below point into is named.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_names_the_document_the_spans_of_a_case_of_the_eu_point_into() {
+    let sent = fixture("bron-decision-ECLI-EU-C-1990-257-offset-60-limit-6.json");
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:EU:C:1990:257/paragraphs",
+        &sent,
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &[
+            "case",
+            "show",
+            "ECLI:EU:C:1990:257",
+            "--offset",
+            "60",
+            "--limit",
+            "6",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+    let judgment = "eeecd69cc2da9d2883a9267b487d9bf5ccf96b7fb5c97a498ddca93baca9ef83";
+    let report = "95d6560b511dfd3bf94b8e139d78539fe8902259ef9b8afafbf515c764642c13";
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(&format!("source: {judgment} (JUDGMENT, nl, 22567 bytes)\n")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "source: {report} (REPORT.HEARING, nl, 62107 bytes)\n"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "\nJUDGMENT: {judgment}\n\nparagraph 61  (22319..22424)\nUitgesproken ter openbare terechtzitting"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("O. Due\n\nREPORT.HEARING: {report}\n\nsection  (")),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches(&format!("JUDGMENT: {judgment}")).count(),
+        1,
+        "{text}"
+    );
+}
+
+/// The relations of a case of the EU are not read yet, and the answer says
+/// so rather than reading as a case that has none.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_relations_of_a_case_of_the_eu_says_they_are_not_read() {
+    let sent = fixture("bron-decision-relations-ECLI-EU-C-2019-773.json");
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:EU:C:2019:773/relations",
+        &sent,
+    )
+    .await;
+
+    let output = bron(&server, &["case", "relations", "ECLI:EU:C:2019:773"]).await;
+    let said = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        said.contains("bron does not read that yet, so an empty list does not mean there are none"),
+        "{said}"
+    );
+    assert!(!said.contains("has no sentence for"), "{said}");
+}
+
+/// `--register` goes in the body as typed: the EU's courts are ranked only
+/// where asked.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_sends_the_register_as_typed() {
+    let sent = fixture("bron-decision-search-register-cellar-limit-3.json");
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/decisions/search"))
+        .and(body_json(serde_json::json!({
+            "q": "recht op vergetelheid zoekmachine", "register": "cellar", "limit": "3"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sent.as_str(), "application/json"))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let args = [
+        "case",
+        "search",
+        "recht",
+        "op",
+        "vergetelheid",
+        "zoekmachine",
+        "--register",
+        "cellar",
+        "--limit",
+        "3",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    assert!(
+        stdout(&human).starts_with(
+            "ECLI:EU:C:2019:773  ruling  Hof van Justitie  2019-09-24\n  unit 96  --offset 95"
+        ),
+        "{human:?}"
+    );
+}
+
+/// A besluit of the ACM ranks beside the rulings and states no ECLI, so a
+/// hit is named by its `id`, as production answered on 2026-10-25.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_names_a_besluit_of_the_acm_by_its_id() {
+    let sent = fixture("bron-decision-search-limit-5.json");
+    let server = answering("POST", "/api/v1/decisions/search", &sent).await;
+
+    let output = bron(
+        &server,
+        &[
+            "case",
+            "search",
+            "boete",
+            "consument",
+            "misleidende",
+            "reclame",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "acm:18937  administrative  Autoriteit Consument en Markt  2019-12-27\n  units 1 to 11"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.starts_with("ECLI:NL:PHR:2009:BH2162  opinion  Parket bij de Hoge Raad"),
+        "{text}"
+    );
 }
