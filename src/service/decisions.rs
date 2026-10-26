@@ -129,12 +129,32 @@ pub struct DecisionRelation {
     /// The publisher's word for which way the other lies: `eerdereAanleg` or
     /// `latereAanleg`. Absent on a relation that states no instance.
     pub aanleg: Option<String>,
+    /// `cites`, or `cited_by` where the other cites this one. Absent on a
+    /// relation that states an instance.
+    pub direction: Option<String>,
     pub to: Target,
+    /// Under `cited_by`, CELLAR's fragment for the place in this case the
+    /// other cites, `N81`.
+    pub part: Option<String>,
+    /// The place `to.part` or `part` names, where the service reads its
+    /// grammar.
+    pub place: Option<Pinpoint>,
     /// `publisher` where the document states it, `machine` where bron read it.
     pub asserted: String,
     pub stated_by: String,
     /// The digest of the document that states it.
     pub stated_in: Option<String>,
+}
+
+/// A place inside a work, as the service reads CELLAR's fragment: `A08P2LE`
+/// is article 8, paragraph 2, point e, `C26` recital 26, `N81` point 81 of a
+/// judgment.
+#[derive(Debug, Deserialize)]
+pub struct Pinpoint {
+    pub article: Option<String>,
+    pub paragraph: Option<String>,
+    pub point: Option<String>,
+    pub recital: Option<String>,
 }
 
 /// What a relation points at, under its own scheme.
@@ -226,10 +246,13 @@ impl Citing<'_> {
     }
 }
 
-/// The rulings LiDO found that cite one article, newest decided first.
+/// The rulings LiDO found that cite one article, or the cases CELLAR states
+/// interpret or cite an article of an act of the EU, newest decided first.
 #[derive(Debug, Deserialize)]
 pub struct ArticleDecisions {
     pub regulation_id: String,
+    /// `bwb`, or `cellar` for an act of the EU.
+    pub register: String,
     pub number: String,
     /// How many rulings the question matches, of which `decisions` is a page.
     pub count: u64,
@@ -251,6 +274,15 @@ pub struct CitingDecision {
     /// the service's arithmetic. Absent where the ruling states no day or no
     /// rendition was in force on it.
     pub rendition: Option<String>,
+    pub links: Vec<CitingLink>,
+}
+
+/// One statement that a ruling cites the article.
+#[derive(Debug, Deserialize)]
+pub struct CitingLink {
+    /// Of a case of the EU, CELLAR's fragment for the place cited, `A08P1`.
+    pub part: Option<String>,
+    pub place: Option<Pinpoint>,
 }
 
 /// The rulings with a text rechtspraak's feed listed, newest decided first.

@@ -169,7 +169,8 @@ pub enum Law {
         /// its CELEX, e.g. celex:32016R0679.
         id: String,
 
-        /// Article number as printed, e.g. 162 or 162a.
+        /// The number as printed, e.g. 162 or 162a, or 6:162 on a book of the
+        /// BW.
         #[arg(long)]
         article: Option<String>,
 
@@ -355,18 +356,22 @@ pub enum Law {
         moment: Moment,
     },
 
-    /// The rulings LiDO found that cite one article, newest decided first.
+    /// The rulings LiDO found that cite one article, or on an act of the EU
+    /// the cases CELLAR states interpret or cite it, newest decided first.
     ///
     /// Each ruling names the rendition of the law in force on the day it was
     /// decided. That is not necessarily the text the court applied, which
-    /// turns on the day of the facts and transitional law. How many rulings
-    /// LiDO misses is not measured, so an answer says how many were found and
-    /// never that no ruling cites the article.
+    /// turns on the day of the facts and transitional law. A case of the EU
+    /// names the places in the article it cites. How many LiDO or CELLAR
+    /// misses is not measured, so an answer says how many were found and never
+    /// that no ruling cites the article.
     Decisions {
-        /// BWB identifier, e.g. BWBR0005289.
+        /// BWB identifier, e.g. BWBR0005289, or an act of the EU as celex: and
+        /// its CELEX, e.g. celex:32016R0679.
         id: String,
 
-        /// The number as printed, e.g. 162 or 162a.
+        /// The number as printed, e.g. 162 or 162a, or 6:162 on a book of the
+        /// BW.
         #[arg(long)]
         article: String,
 
@@ -415,7 +420,8 @@ pub enum Law {
         /// BWB identifier, e.g. BWBR0005289.
         id: String,
 
-        /// The number as printed, e.g. 119a, or a bijlage's with --kind.
+        /// The number as printed, e.g. 162 or 162a, or 6:162 on a book of the
+        /// BW, or a bijlage's with --kind.
         #[arg(long)]
         article: String,
 
@@ -563,6 +569,7 @@ pub enum Law {
     /// Whether a change reaches conduct from before it is transitional law, and
     /// not a question bron answers. The act that made each change is named.
     Changes {
+        /// BWB identifier, e.g. BWBR0005289.
         id: String,
 
         /// The earlier date, resolved against geldigheid. Sent to the service
@@ -584,8 +591,9 @@ pub enum Law {
         #[arg(long)]
         kind: Option<String>,
 
-        /// Only units carrying this number as printed on either side: an
-        /// article's, or with --kind a bijlage's.
+        /// Only units carrying this number as printed on either side, e.g.
+        /// 162 or 162a, or 6:162 on a book of the BW, or a bijlage's with
+        /// --kind.
         #[arg(long)]
         article: Option<String>,
 

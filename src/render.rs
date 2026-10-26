@@ -13,7 +13,7 @@ use chrono::NaiveDate;
 
 use bron::service::{
     Article, CitingDecision, Consolidated, ContentsPart, CourtCount, Dossier, Expression, Had,
-    Lineage, LinkedDecree, ListedDecision, Place, Produced, Regulation, Relation, Remark,
+    Lineage, LinkedDecree, ListedDecision, Pinpoint, Place, Produced, Regulation, Relation, Remark,
     SearchData, SearchLid, Service, Upcoming, name,
 };
 use bron::wire::Caveat;
@@ -1061,9 +1061,22 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     Some(aanleg) => format!("{aanleg}  {}", relation.kind),
                     None => relation.kind.clone(),
                 };
-                let _ = write!(row, "  {}", relation.to.id);
-                if let Some(part) = &relation.to.part {
-                    let _ = write!(row, " {part}");
+                // Under `cited_by` the place is in this ruling, not in the
+                // other, so it stands before the other's id.
+                if relation.direction.as_deref() == Some("cited_by") {
+                    row.push_str("  ");
+                    if let Some(place) = pinpoint(relation.place.as_ref(), relation.part.as_deref())
+                    {
+                        let _ = write!(row, "{place} ");
+                    }
+                    let _ = write!(row, "cited by {}", relation.to.id);
+                } else {
+                    let _ = write!(row, "  {}", relation.to.id);
+                    if let Some(place) =
+                        pinpoint(relation.place.as_ref(), relation.to.part.as_deref())
+                    {
+                        let _ = write!(row, " {place}");
+                    }
                 }
                 if relation.asserted == "machine" {
                     row.push_str("  (bron's reading)");
@@ -1221,11 +1234,15 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             offset,
         } => {
             let found = &a.data;
+            let cellar = found.register == "cellar";
 
             writeln!(
                 err,
-                "{} ruling(s) found for article {} of {}",
-                found.count, found.number, found.regulation_id
+                "{} {} found for article {} of {}",
+                found.count,
+                if cellar { "case(s)" } else { "ruling(s)" },
+                found.number,
+                found.regulation_id
             )?;
             court_counts(err, &found.courts)?;
 
@@ -1253,24 +1270,37 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 if let Some(rendition) = &ruling.rendition {
                     let _ = write!(row, "  version {rendition}");
                 }
+                let mut places: Vec<String> = Vec::new();
+                for link in &ruling.links {
+                    if let Some(place) = pinpoint(link.place.as_ref(), link.part.as_deref())
+                        && !places.contains(&place)
+                    {
+                        places.push(place);
+                    }
+                }
+                if !places.is_empty() {
+                    let _ = write!(row, "  {}", places.join(", "));
+                }
                 writeln!(out, "{row}")?;
             }
 
             // `truncated` on a paged list says where the next page starts, and
-            // `links_not_shown` is worded for one ruling's relations elsewhere.
+            // `rulings_found` on an act of the EU names CELLAR rather than LiDO.
             let notes: Vec<String> = a
                 .caveats
                 .iter()
                 .map(|caveat| match caveat {
                     Caveat::Truncated { window } => read_on(
+                        if cellar { "cases" } else { "rulings" },
                         offset.as_deref(),
                         found.decisions.len(),
                         found.count,
                         *window,
                     ),
-                    Caveat::LinksNotShown => "note: the citations LiDO's computer recognised are \
-                         held and not shown until their accuracy is measured, so these are the \
-                         rulings whose own Wetsverwijzing names the article"
+                    Caveat::RulingsFound if cellar => "note: these are the cases CELLAR states \
+                         interpret or cite the article, as the Publications Office documents \
+                         them. How many it misses is not measured, so a case missing here may \
+                         still cite the article."
                         .to_string(),
                     other => caveat_line(other),
                 })
@@ -1336,6 +1366,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 .iter()
                 .map(|caveat| match caveat {
                     Caveat::Truncated { window } => read_on(
+                        "rulings",
                         offset.as_deref(),
                         listed.decisions.len(),
                         listed.count,
@@ -2053,15 +2084,35 @@ fn court_counts(err: &mut impl Write, courts: &[CourtCount]) -> io::Result<()> {
     Ok(())
 }
 
+/// A place as a reader cites it, `art. 8(2)(e)`, `recital 26` or `point 81`,
+/// else CELLAR's fragment as it writes it.
+fn pinpoint(place: Option<&Pinpoint>, part: Option<&str>) -> Option<String> {
+    let read = place.and_then(|place| {
+        if let Some(article) = &place.article {
+            let mut cited = format!("art. {article}");
+            for sub in [&place.paragraph, &place.point].into_iter().flatten() {
+                let _ = write!(cited, "({sub})");
+            }
+            Some(cited)
+        } else if let Some(recital) = &place.recital {
+            Some(format!("recital {recital}"))
+        } else {
+            place.point.as_ref().map(|point| format!("point {point}"))
+        }
+    });
+
+    read.or_else(|| part.map(str::to_string))
+}
+
 /// Where the next page of a list of rulings starts, from the `truncated`
 /// caveat's window.
-fn read_on(offset: Option<&str>, shown: usize, count: u64, window: u32) -> String {
+fn read_on(noun: &str, offset: Option<&str>, shown: usize, count: u64, window: u32) -> String {
     // The service accepted the offset, so it is a whole number.
     let from = offset
         .and_then(|typed| typed.parse::<u64>().ok())
         .unwrap_or(0);
     format!(
-        "note: rulings {} to {} of {count} shown; read on with --offset {}",
+        "note: {noun} {} to {} of {count} shown; read on with --offset {}",
         from + 1,
         from + shown as u64,
         from + u64::from(window)
@@ -2459,10 +2510,6 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: search over case law is still to come. This ranked the {count} ruling(s) \
              bron has read, not all case law: a ruling missing here may still exist."
         ),
-        Caveat::LinksNotShown => "note: the articles and rulings LiDO's computer recognised in \
-             this ruling are held and not shown until their accuracy is measured, so these are \
-             the publisher's relations alone"
-            .to_string(),
         Caveat::LinksNotRead => "note: LiDO was not asked yet or did not answer what this ruling \
              cites, so the articles and rulings it cites are missing, and their absence says nothing"
             .to_string(),
@@ -2516,8 +2563,8 @@ fn caveat_line(caveat: &Caveat) -> String {
              the Netherlands is governed by the law that transposes it."
             .to_string(),
         Caveat::RelationsNotRead => "note: CELLAR states which provisions a case interprets and \
-             which rulings it cites. bron does not read that yet, so an empty list does not mean \
-             there are none."
+             which rulings it cites. bron has not read that for this case yet, so an empty list \
+             does not mean there are none."
             .to_string(),
         // Never `because`, as on the withheld line of `case show`.
         Caveat::TextWithheld { .. } => "note: bron keeps the digests of what it held of this \
@@ -3123,42 +3170,6 @@ mod tests {
         );
     }
 
-    /// The envelope production answered for ECLI:NL:HR:2026:1494 on
-    /// 2026-10-01: the publisher's relation, and the machine-read links held
-    /// back, said in words rather than as a key.
-    #[test]
-    fn case_relations_says_the_machine_read_links_are_held_back() {
-        let envelope: serde_json::Value = serde_json::from_str(
-            r#"{"bron":1,"grade":"authority","data":{"id":"ECLI:NL:HR:2026:1494","register":"rechtspraak","jurisdiction":"nl",
-              "relations":[{"kind":"cassatie","aanleg":"eerdereAanleg","to":{"scheme":"ecli","id":"ECLI:NL:GHDHA:2025:1555"},
-              "asserted":"publisher","stated_by":"rechtspraak","stated_in":"d856291936043cbfd968fcbf251c44dea02d8fd999fc4890eccde11f5cc20e06"}]},
-              "caveats":[{"kind":"links_not_shown"}]}"#,
-        )
-        .unwrap();
-        let relations: bron::service::DecisionRelations =
-            serde_json::from_value(envelope["data"].clone()).unwrap();
-        let mut answered = answered(relations);
-        answered.caveats = envelope["caveats"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(Caveat::stated)
-            .collect();
-
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        super::answer(
-            &Answer::DecisionRelations(Box::new(answered)),
-            &mut out,
-            &mut err,
-        )
-        .unwrap();
-        let err = String::from_utf8(err).unwrap();
-
-        assert!(!err.contains("no sentence for"), "{err}");
-        assert!(err.contains("LiDO"), "{err}");
-        assert!(err.contains("the publisher's relations alone"), "{err}");
-    }
-
     /// A limit on what LiDO answered names what is missing and why.
     #[test]
     fn the_links_caveats_say_what_is_missing() {
@@ -3175,6 +3186,83 @@ mod tests {
         assert!(unresolved.contains("3 article(s)"), "{unresolved}");
     }
 
+    /// A place reads as a reader cites it, and a fragment the service reads no
+    /// grammar for stands as CELLAR writes it.
+    #[test]
+    fn a_place_reads_as_it_is_cited() {
+        let read = |place: serde_json::Value, part: Option<&str>| {
+            let place: Option<Pinpoint> = serde_json::from_value(place).unwrap();
+            super::pinpoint(place.as_ref(), part)
+        };
+
+        assert_eq!(
+            read(
+                serde_json::json!({"article": "8", "paragraph": "2", "point": "e"}),
+                Some("A08P2LE")
+            )
+            .as_deref(),
+            Some("art. 8(2)(e)")
+        );
+        assert_eq!(
+            read(
+                serde_json::json!({"article": "2", "point": "b"}),
+                Some("A02LB")
+            )
+            .as_deref(),
+            Some("art. 2(b)")
+        );
+        assert_eq!(
+            read(serde_json::json!({"recital": "26"}), Some("C26")).as_deref(),
+            Some("recital 26")
+        );
+        assert_eq!(
+            read(serde_json::json!({"point": "81"}), Some("N81")).as_deref(),
+            Some("point 81")
+        );
+        assert_eq!(
+            read(serde_json::Value::Null, Some("A08P5L1")).as_deref(),
+            Some("A08P5L1")
+        );
+        assert_eq!(read(serde_json::Value::Null, None), None);
+    }
+
+    /// A case of the EU names each place in the article it cites once,
+    /// however CELLAR spells the fragment.
+    #[test]
+    fn law_decisions_on_an_act_of_the_eu_names_each_place_once() {
+        let found: bron::service::ArticleDecisions = serde_json::from_str(
+            r#"{"regulation_id":"celex:31995L0046","register":"cellar","jurisdiction":"eu","number":"8","count":1,
+              "courts":[{"court":"Hof van Justitie","count":1}],
+              "decisions":[{"ecli":"ECLI:EU:C:2019:773","register":"cellar","jurisdiction":"eu","court":"Hof van Justitie",
+                "decided_on":"2019-09-24","held":true,"links":[
+                 {"kind":"work_cites_work","asserted":"publisher","part":"A08P1","place":{"article":"8","paragraph":"1"},"stated_by":"cellar","stated_in":"ab"},
+                 {"kind":"work_cites_work","asserted":"publisher","part":"A8P1","place":{"article":"8","paragraph":"1"},"stated_by":"cellar","stated_in":"ab"},
+                 {"kind":"work_cites_work","asserted":"publisher","part":"A08P5L1","stated_by":"cellar","stated_in":"ab"}]}]}"#,
+        )
+        .unwrap();
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        super::answer(
+            &Answer::ArticleDecisions {
+                answered: Box::new(answered(found)),
+                offset: None,
+            },
+            &mut out,
+            &mut err,
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "2019-09-24  Hof van Justitie  ECLI:EU:C:2019:773  art. 8(1), A08P5L1\n"
+        );
+        assert!(
+            String::from_utf8(err)
+                .unwrap()
+                .starts_with("1 case(s) found for article 8 of celex:31995L0046\n")
+        );
+    }
+
     /// The rulings under an article, in the shape the service's
     /// ArticleDecisionController answers: a ruling LiDO names no court, day
     /// or rendition for carries none of those keys.
@@ -3189,7 +3277,7 @@ mod tests {
                 "links":[{"kind":"rvr-referentie","asserted":"publisher","stated_by":"lido","stated_in":"ab"}]},
                {"ecli":"ECLI:NL:XX:2015:1","register":"rechtspraak","jurisdiction":"nl","held":true,
                 "links":[{"kind":"rvr-referentie","asserted":"publisher","stated_by":"lido"}]}]},
-              "caveats":[{"kind":"rulings_found"},{"kind":"links_not_shown"},{"kind":"truncated","window":2}]}"#,
+              "caveats":[{"kind":"rulings_found"},{"kind":"truncated","window":2}]}"#,
         )
         .unwrap();
         let found: bron::service::ArticleDecisions =
@@ -3232,11 +3320,6 @@ mod tests {
         );
         assert!(err.contains("the rulings LiDO found"), "{err}");
         assert!(err.contains("is not measured"), "{err}");
-        assert!(
-            err.contains("own Wetsverwijzing names the article"),
-            "{err}"
-        );
-        assert!(!err.contains("this ruling"), "{err}");
         assert!(
             err.contains("rulings 41 to 42 of 12274 shown; read on with --offset 42"),
             "{err}"

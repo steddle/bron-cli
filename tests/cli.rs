@@ -745,6 +745,61 @@ async fn law_decisions_sends_every_narrowing_as_typed_and_prints_what_came_back(
     );
 }
 
+/// On an act of the EU the list is the cases CELLAR states, each with the
+/// places in the article it cites.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_decisions_on_an_act_of_the_eu_names_cellar_and_the_places_cited() {
+    let sent = fixture("bron-article-decisions-celex-32016R0679-17-limit-3.json");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/regulations/celex:32016R0679/articles/17/decisions",
+        ))
+        .and(query_param("limit", "3"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sent.as_str(), "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "law",
+        "decisions",
+        "celex:32016R0679",
+        "--article",
+        "17",
+        "--limit",
+        "3",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let said = String::from_utf8_lossy(&human.stderr);
+
+    assert!(human.status.success(), "{human:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    assert_eq!(
+        stdout(&human),
+        "2026-06-04  Hof van Justitie  ECLI:EU:C:2026:449  not held  art. 17, art. 17(1), \
+         art. 17(1)(a), art. 17(1)(d), art. 17(3), art. 17(3)(b)\n\
+         2025-09-04  Hof van Justitie  ECLI:EU:C:2025:671  not held  art. 17, art. 17(1), \
+         art. 17(1)(a), art. 17(1)(d), art. 17(3), art. 17(3)(b)\n\
+         2025-03-13  Hof van Justitie  ECLI:EU:C:2025:172  not held  art. 17\n"
+    );
+    assert!(
+        said.starts_with(
+            "41 case(s) found for article 17 of celex:32016R0679\n  41  Hof van Justitie\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("these are the cases CELLAR states interpret or cite the article"),
+        "{said}"
+    );
+    assert!(!said.contains("LiDO"), "{said}");
+    assert!(
+        said.contains("cases 1 to 3 of 41 shown; read on with --offset 3"),
+        "{said}"
+    );
+}
+
 /// An untyped narrowing is left out, so the service's own window answers, and
 /// an article the regulation never printed is not found as the service said.
 #[tokio::test(flavor = "multi_thread")]
@@ -6394,8 +6449,8 @@ async fn case_show_names_the_document_the_spans_of_a_case_of_the_eu_point_into()
     );
 }
 
-/// The relations of a case of the EU are not read yet, and the answer says
-/// so rather than reading as a case that has none.
+/// A case of the EU whose relations bron has not read yet says so, rather
+/// than reading as a case that has none.
 #[tokio::test(flavor = "multi_thread")]
 async fn case_relations_of_a_case_of_the_eu_says_they_are_not_read() {
     let sent = fixture("bron-decision-relations-ECLI-EU-C-2019-773.json");
@@ -6411,10 +6466,49 @@ async fn case_relations_of_a_case_of_the_eu_says_they_are_not_read() {
 
     assert!(output.status.success(), "{output:?}");
     assert!(
-        said.contains("bron does not read that yet, so an empty list does not mean there are none"),
+        said.contains(
+            "bron has not read that for this case yet, so an empty list does not mean there are none"
+        ),
         "{said}"
     );
     assert!(!said.contains("has no sentence for"), "{said}");
+}
+
+/// What a case of the EU cites reads as a reader cites it, and a point of
+/// this case another case cites stands before that case's ECLI.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_relations_of_a_case_of_the_eu_reads_each_place() {
+    let sent = fixture("bron-decision-relations-ECLI-EU-C-2019-773-read.json");
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:EU:C:2019:773/relations",
+        &sent,
+    )
+    .await;
+
+    let json = bron(
+        &server,
+        &["--json", "case", "relations", "ECLI:EU:C:2019:773"],
+    )
+    .await;
+    let human = bron(&server, &["case", "relations", "ECLI:EU:C:2019:773"]).await;
+    let rows = stdout(&human);
+    let own = "e7bc7afe3fa8a92f93786f9c5aba6b11c837b062aa8dcddc9887d3f1012b5bc4";
+
+    assert!(human.status.success(), "{human:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    for row in [
+        format!("work_cites_work  31995L0046 art. 8(2)(e)  stated in {own}\n"),
+        format!("work_cites_work  31995L0046 art. 2(b)  stated in {own}\n"),
+        format!("work_cites_work  32016R0679 recital 51  stated in {own}\n"),
+        format!("work_cites_work  ECLI:EU:C:2014:317 point 81  stated in {own}\n"),
+        format!("work_cites_work  31995L0046 A08P5L1  stated in {own}\n"),
+        "work_cites_work  point 33 cited by ECLI:EU:C:2020:158  stated in \
+         22e192d9163866cef69fbc0f00084f099f1c3a6a0f9dc01bfc43bc9293fff9d1\n"
+            .to_string(),
+    ] {
+        assert!(rows.contains(&row), "{row}{rows}");
+    }
 }
 
 /// `--register` goes in the body as typed: the EU's courts are ranked only
