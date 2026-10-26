@@ -6511,6 +6511,63 @@ async fn case_relations_of_a_case_of_the_eu_reads_each_place() {
     }
 }
 
+/// An article LiDO recognised in a Dutch ruling reads by its label and its
+/// regulation's title, and the note on stderr says whose reading it is.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_relations_of_a_dutch_ruling_names_each_article_by_its_label() {
+    let sent = fixture("bron-decision-relations-ECLI-NL-HR-2024-1780.json");
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:NL:HR:2024:1780/relations",
+        &sent,
+    )
+    .await;
+
+    let json = bron(
+        &server,
+        &["--json", "case", "relations", "ECLI:NL:HR:2024:1780"],
+    )
+    .await;
+    let human = bron(&server, &["case", "relations", "ECLI:NL:HR:2024:1780"]).await;
+    let rows = stdout(&human);
+    let said = String::from_utf8_lossy(&human.stderr);
+    let lido = "489358aee765ad8e6ba97712d1a7522099a86103e6a8633f0fb198c97dfe4ac9";
+
+    assert!(human.status.success(), "{human:?}");
+    assert_eq!(stdout(&json), format!("{sent}\n"));
+    for row in [
+        format!(
+            "lx-referentie  BWBR0001827 Artikel 392  Wetboek van Burgerlijke Rechtsvordering  \
+             (bron's reading)  stated in {lido}\n"
+        ),
+        format!(
+            "lx-referentie  BWBR0005289 Artikel 127  Burgerlijk Wetboek Boek 6  \
+             (bron's reading)  stated in {lido}\n"
+        ),
+        format!(
+            "lx-referentie  BWBR0045063  Wet maximering huurprijsverhogingen geliberaliseerde \
+             huurovereenkomsten  (bron's reading)  stated in {lido}\n"
+        ),
+        format!("lx-referentie  ECLI:EU:C:2012:144  (bron's reading)  stated in {lido}\n"),
+        "lx-referentie  cited by ECLI:NL:GHAMS:2025:704  (bron's reading)  stated in \
+         6208b4664c6b306fadfbb02c2ea413cac18ee405d7515df3cd3e6800e17ba0d4\n"
+            .to_string(),
+    ] {
+        assert!(rows.contains(&row), "{row}{rows}");
+    }
+    assert!(!rows.contains("3214533"), "{rows}");
+    assert!(
+        said.contains(
+            "note: the articles and rulings marked (bron's reading) are the references LiDO's \
+             computer recognised in the ruling's text, which no publisher states. A reference it \
+             recognised can name another regulation than the one the court meant, so read each \
+             beside the ruling."
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("passages and amendementen"), "{said}");
+}
+
 /// `--register` goes in the body as typed: the EU's courts are ranked only
 /// where asked.
 #[tokio::test(flavor = "multi_thread")]

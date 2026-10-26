@@ -139,6 +139,10 @@ pub struct DecisionRelation {
     /// The place `to.part` or `part` names, where the service reads its
     /// grammar.
     pub place: Option<Pinpoint>,
+    /// Of an article or bijlage of the BWB, its label, `Artikel 392`.
+    pub label: Option<String>,
+    /// Of a regulation of the BWB, what the index calls it.
+    pub title: Option<String>,
     /// `publisher` where the document states it, `machine` where bron read it.
     pub asserted: String,
     pub stated_by: String,

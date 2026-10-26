@@ -1072,10 +1072,15 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     let _ = write!(row, "cited by {}", relation.to.id);
                 } else {
                     let _ = write!(row, "  {}", relation.to.id);
-                    if let Some(place) =
-                        pinpoint(relation.place.as_ref(), relation.to.part.as_deref())
+                    if let Some(place) = relation
+                        .label
+                        .clone()
+                        .or_else(|| pinpoint(relation.place.as_ref(), relation.to.part.as_deref()))
                     {
                         let _ = write!(row, " {place}");
+                    }
+                    if let Some(title) = &relation.title {
+                        let _ = write!(row, "  {title}");
                     }
                 }
                 if relation.asserted == "machine" {
@@ -1093,7 +1098,23 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 "A relation is the publisher's statement. None says whether an appeal was lodged."
             )?;
 
-            caveats(&a.caveats, err)
+            let notes: Vec<String> = a
+                .caveats
+                .iter()
+                .map(|caveat| match caveat {
+                    Caveat::MachineReading { .. } => "note: the articles and rulings marked \
+                         (bron's reading) are the references LiDO's computer recognised in the \
+                         ruling's text, which no publisher states. A reference it recognised can \
+                         name another regulation than the one the court meant, so read each \
+                         beside the ruling."
+                        .to_string(),
+                    other => caveat_line(other),
+                })
+                .collect();
+            if !notes.is_empty() {
+                writeln!(err, "\n{}", notes.join("\n"))?;
+            }
+            Ok(())
         }
 
         Answer::Publication(a) => {

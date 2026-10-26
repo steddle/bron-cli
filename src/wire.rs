@@ -418,7 +418,8 @@ pub enum Caveat {
     /// The answer carries `passages` for `articles`: bron read which passage
     /// of the parliamentary papers explains each out of the passage's heading
     /// and the bill's formula, and no publisher states it. `readings` are the
-    /// versions of that reading.
+    /// versions of that reading. On a ruling's relations, `articles` are what
+    /// LiDO's computer recognised the ruling cites, and `readings` is empty.
     MachineReading {
         articles: Vec<String>,
         readings: Vec<u32>,
