@@ -6538,30 +6538,30 @@ async fn case_relations_of_a_dutch_ruling_names_each_article_by_its_label() {
     for row in [
         format!(
             "lx-referentie  BWBR0001827 Artikel 392  Wetboek van Burgerlijke Rechtsvordering  \
-             (bron's reading)  stated in {lido}\n"
+             (LiDO's reading)  stated in {lido}\n"
         ),
         format!(
             "lx-referentie  BWBR0005289 Artikel 127  Burgerlijk Wetboek Boek 6  \
-             (bron's reading)  stated in {lido}\n"
+             (LiDO's reading)  stated in {lido}\n"
         ),
         format!(
             "lx-referentie  BWBR0045063  Wet maximering huurprijsverhogingen geliberaliseerde \
-             huurovereenkomsten  (bron's reading)  stated in {lido}\n"
+             huurovereenkomsten  (LiDO's reading)  stated in {lido}\n"
         ),
-        format!("lx-referentie  ECLI:EU:C:2012:144  (bron's reading)  stated in {lido}\n"),
-        "lx-referentie  cited by ECLI:NL:GHAMS:2025:704  (bron's reading)  stated in \
+        format!("lx-referentie  ECLI:EU:C:2012:144  (LiDO's reading)  stated in {lido}\n"),
+        "lx-referentie  cited by ECLI:NL:GHAMS:2025:704  (LiDO's reading)  stated in \
          6208b4664c6b306fadfbb02c2ea413cac18ee405d7515df3cd3e6800e17ba0d4\n"
             .to_string(),
     ] {
         assert!(rows.contains(&row), "{row}{rows}");
     }
     assert!(!rows.contains("3214533"), "{rows}");
+    assert!(!rows.contains("bron's reading"), "{rows}");
     assert!(
         said.contains(
-            "note: the articles and rulings marked (bron's reading) are the references LiDO's \
-             computer recognised in the ruling's text, which no publisher states. A reference it \
-             recognised can name another regulation than the one the court meant, so read each \
-             beside the ruling."
+            "note: LiDO's computer recognised the articles and rulings marked (LiDO's reading) in \
+             the ruling's text, and no publisher states them. A reference it recognised can name \
+             another regulation than the one the court meant, so read each beside the ruling."
         ),
         "{said}"
     );

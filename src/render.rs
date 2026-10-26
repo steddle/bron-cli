@@ -1084,7 +1084,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     }
                 }
                 if relation.asserted == "machine" {
-                    row.push_str("  (bron's reading)");
+                    row.push_str("  (LiDO's reading)");
                 }
                 if let Some(digest) = &relation.stated_in {
                     let _ = write!(row, "  stated in {digest}");
@@ -1102,11 +1102,10 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 .caveats
                 .iter()
                 .map(|caveat| match caveat {
-                    Caveat::MachineReading { .. } => "note: the articles and rulings marked \
-                         (bron's reading) are the references LiDO's computer recognised in the \
-                         ruling's text, which no publisher states. A reference it recognised can \
-                         name another regulation than the one the court meant, so read each \
-                         beside the ruling."
+                    Caveat::MachineReading { .. } => "note: LiDO's computer recognised the \
+                         articles and rulings marked (LiDO's reading) in the ruling's text, and no \
+                         publisher states them. A reference it recognised can name another \
+                         regulation than the one the court meant, so read each beside the ruling."
                         .to_string(),
                     other => caveat_line(other),
                 })

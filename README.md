@@ -101,14 +101,14 @@ HOGE RAAD DER NEDERLANDEN
 
 $ bron case relations ECLI:NL:HR:2024:1780
 eerdereAanleg  conclusie  ECLI:NL:PHR:2024:771  stated in 828d100ec9d102ad8f51c7aa9096b077c19504945de9bc07635b3ff31de801ce
-lx-referentie  BWBR0001827 Artikel 392  Wetboek van Burgerlijke Rechtsvordering  (bron's reading)  stated in 489358aee765ad8e6ba97712d1a7522099a86103e6a8633f0fb198c97dfe4ac9
+lx-referentie  BWBR0001827 Artikel 392  Wetboek van Burgerlijke Rechtsvordering  (LiDO's reading)  stated in 489358aee765ad8e6ba97712d1a7522099a86103e6a8633f0fb198c97dfe4ac9
 [...]
-lx-referentie  BWBR0049889  Wet betaalbare huur  (bron's reading)  stated in 489358aee765ad8e6ba97712d1a7522099a86103e6a8633f0fb198c97dfe4ac9
-lx-referentie  cited by ECLI:NL:GHAMS:2025:704  (bron's reading)  stated in 6208b4664c6b306fadfbb02c2ea413cac18ee405d7515df3cd3e6800e17ba0d4
+lx-referentie  BWBR0049889  Wet betaalbare huur  (LiDO's reading)  stated in 489358aee765ad8e6ba97712d1a7522099a86103e6a8633f0fb198c97dfe4ac9
+lx-referentie  cited by ECLI:NL:GHAMS:2025:704  (LiDO's reading)  stated in 6208b4664c6b306fadfbb02c2ea413cac18ee405d7515df3cd3e6800e17ba0d4
 [...]
 A relation is the publisher's statement. None says whether an appeal was lodged.
 
-note: the articles and rulings marked (bron's reading) are the references LiDO's computer recognised in the ruling's text, which no publisher states. A reference it recognised can name another regulation than the one the court meant, so read each beside the ruling.
+note: LiDO's computer recognised the articles and rulings marked (LiDO's reading) in the ruling's text, and no publisher states them. A reference it recognised can name another regulation than the one the court meant, so read each beside the ruling.
 ```
 
 `law show` and `law changes` read one law. Two more read the register as a whole, and the

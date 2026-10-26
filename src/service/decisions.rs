@@ -143,7 +143,8 @@ pub struct DecisionRelation {
     pub label: Option<String>,
     /// Of a regulation of the BWB, what the index calls it.
     pub title: Option<String>,
-    /// `publisher` where the document states it, `machine` where bron read it.
+    /// `publisher` where the document states it, `machine` where LiDO's
+    /// computer read it.
     pub asserted: String,
     pub stated_by: String,
     /// The digest of the document that states it.
