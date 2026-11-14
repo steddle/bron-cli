@@ -6700,6 +6700,36 @@ async fn case_show_says_bron_does_not_show_a_withheld_ruling_and_never_why() {
     }
 }
 
+/// A tuchtcollege's ruling is a record on rechtspraak and a text on
+/// tuchtrecht.overheid.nl: a person reads where the text is, never that there
+/// is none. ECLI:NL:TGZRAMS:2020:1 as production answered it on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_names_where_a_tuchtcollege_publishes_its_text() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"decision":{"id":"ECLI:NL:TGZRAMS:2020:1","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Regionaal Tuchtcollege voor de Gezondheidszorg Amsterdam","decided_on":"2020-01-06","published_on":"2020-01-07","known_since":"2020-01-07T11:04:59+01:00","has_body":false,"rendition":{"language":"nl","blob":"0ad751e8c19c4b613799899fe192c12dbbbd14bff4174dc67b9a3c53049aa0a0","blob_size":2217},"superseded":[],"native":{"type":"Uitspraak","creator":"http://standaarden.overheid.nl/owms/terms/tgzrams","procedure":[],"zaaknummer":["2019/362"],"subject":[],"vindplaatsen":[]}},"paragraphs":[]},"caveats":[{"kind":"text_published_elsewhere","publisher":"tuchtrecht.overheid.nl"}]}"#;
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:NL:TGZRAMS:2020:1/paragraphs",
+        SENT,
+    )
+    .await;
+
+    let output = bron(&server, &["case", "show", "ECLI:NL:TGZRAMS:2020:1"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.ends_with(
+            "\nrechtspraak publishes ECLI:NL:TGZRAMS:2020:1 as its record alone.\n\n\
+             note: the text of this ruling is published on tuchtrecht.overheid.nl, which bron \
+             does not read yet.\n"
+        ),
+        "{text}"
+    );
+    for never in ["has no text", "no sentence for"] {
+        assert!(!text.contains(never), "{never}: {text}");
+    }
+}
+
 /// A withheld ruling in the feed's list reads `withheld` and nothing more,
 /// and not `not held`, which reads as not yet: it is never fetched.
 #[tokio::test(flavor = "multi_thread")]

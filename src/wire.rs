@@ -582,6 +582,15 @@ pub enum Caveat {
     /// answers none of it, `because` as it states it.
     TextWithheld { because: String },
 
+    /// A tuchtcollege's ruling, which rechtspraak serves as its record alone:
+    /// the text is published by `publisher`, which bron does not read yet.
+    TextPublishedElsewhere { publisher: String },
+
+    /// From `from`, the feed's stamp, the service has not yet read under which
+    /// area of law the feed lists the rulings: a walk by `since` stops there
+    /// and `subject` leaves them out.
+    SubjectNotRead { from: String },
+
     /// The service stated a limit this bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
@@ -815,6 +824,12 @@ impl Caveat {
             TextWithheld {
                 because: String,
             },
+            TextPublishedElsewhere {
+                publisher: String,
+            },
+            SubjectNotRead {
+                from: String,
+            },
         }
 
         match <Stated as serde::Deserialize>::deserialize(value) {
@@ -963,6 +978,10 @@ impl Caveat {
             Ok(Stated::DirectiveBindsStates) => Self::DirectiveBindsStates,
             Ok(Stated::RelationsNotRead) => Self::RelationsNotRead,
             Ok(Stated::TextWithheld { because }) => Self::TextWithheld { because },
+            Ok(Stated::TextPublishedElsewhere { publisher }) => {
+                Self::TextPublishedElsewhere { publisher }
+            }
+            Ok(Stated::SubjectNotRead { from }) => Self::SubjectNotRead { from },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
             },
@@ -1176,6 +1195,29 @@ mod tests {
             serde_json::to_value(Caveat::RelationsNotRead).unwrap(),
             stated
         );
+    }
+
+    #[test]
+    fn the_limits_on_a_tuchtcollege_text_and_an_unread_subject_keep_their_fields() {
+        for (stated, named) in [
+            (
+                serde_json::json!({"kind": "text_published_elsewhere", "publisher": "tuchtrecht.overheid.nl"}),
+                Caveat::TextPublishedElsewhere {
+                    publisher: "tuchtrecht.overheid.nl".into(),
+                },
+            ),
+            (
+                serde_json::json!({"kind": "subject_not_read", "from": "2026-11-01T09:03:24Z"}),
+                Caveat::SubjectNotRead {
+                    from: "2026-11-01T09:03:24Z".into(),
+                },
+            ),
+        ] {
+            let read = Caveat::stated(&stated);
+
+            assert_eq!(read, named);
+            assert_eq!(serde_json::to_value(read).unwrap(), stated);
+        }
     }
 
     #[test]

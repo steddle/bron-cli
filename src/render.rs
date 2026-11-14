@@ -973,6 +973,18 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 (Some(_), "acm") => writeln!(out, "\nbron does not show this besluit.")?,
                 (Some(_), _) => writeln!(out, "\nbron does not show this ruling.")?,
                 (None, _) if decision.has_body => {}
+                // A tuchtcollege's text is elsewhere, which its caveat names.
+                (None, "rechtspraak")
+                    if a.caveats
+                        .iter()
+                        .any(|caveat| matches!(caveat, Caveat::TextPublishedElsewhere { .. })) =>
+                {
+                    writeln!(
+                        out,
+                        "\nrechtspraak publishes {} as its record alone.",
+                        decision.id
+                    )?
+                }
                 (None, "rechtspraak") => writeln!(
                     out,
                     "\nrechtspraak publishes {} as metadata alone, so it has no text.",
@@ -2590,6 +2602,15 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::TextWithheld { .. } => "note: bron keeps the digests of what it held of this \
              text and none of its bytes, and answers none of it."
             .to_string(),
+        Caveat::TextPublishedElsewhere { publisher } => format!(
+            "note: the text of this ruling is published on {publisher}, which bron does not read \
+             yet."
+        ),
+        Caveat::SubjectNotRead { from } => format!(
+            "note: from {from} on, bron has not yet read under which area of law the feed lists \
+             the rulings, so a walk by --since stops there and --subject leaves them out until \
+             the next night's walk."
+        ),
         Caveat::Unrecognised { stated } => {
             format!("note: the service stated a limit this bron has no sentence for: {stated}")
         }
