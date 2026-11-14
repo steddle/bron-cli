@@ -6511,20 +6511,20 @@ async fn case_show_reads_one_rechtsoverweging_by_its_number() {
 
 /// A ruling the service has not read for its numbers answers `--number` with
 /// `numbers_not_read`, under `corpus`: carried through as stated, exit 4, and
-/// the message says to read it by offset. The body is what
-/// `DecisionController::rechtsoverweging` states.
+/// the message says to read it by offset. ECLI:NL:PHR:2018:616 r.o. 2.2 as
+/// production answered it on 2026-11-14, a 500.
 #[tokio::test(flavor = "multi_thread")]
 async fn case_show_number_carries_numbers_not_read_as_the_service_stated_it() {
-    const SENT: &str = r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"numbers_not_read","message":"the paragraphs of ECLI:NL:HR:2024:1780 have not been read for the rechtsoverweging each opens; read it by offset","detail":["numbers_not_read"]}}"#;
+    const SENT: &str = r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"numbers_not_read","message":"the paragraphs of ECLI:NL:PHR:2018:616 have not been read for the rechtsoverweging each opens; read it by offset","detail":["numbers_not_read"]}}"#;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/decisions/ECLI:NL:HR:2024:1780/paragraphs"))
-        .and(query_param("number", "3.2"))
+        .and(path("/api/v1/decisions/ECLI:NL:PHR:2018:616/paragraphs"))
+        .and(query_param("number", "2.2"))
         .respond_with(ResponseTemplate::new(500).set_body_raw(SENT, "application/json"))
         .mount(&server)
         .await;
 
-    let args = ["case", "show", "ECLI:NL:HR:2024:1780", "--number", "3.2"];
+    let args = ["case", "show", "ECLI:NL:PHR:2018:616", "--number", "2.2"];
     let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
     let human = bron(&server, &args).await;
 
@@ -6534,7 +6534,7 @@ async fn case_show_number_carries_numbers_not_read_as_the_service_stated_it() {
     let said = String::from_utf8_lossy(&human.stderr);
     assert!(
         said.contains(
-            "the paragraphs of ECLI:NL:HR:2024:1780 have not been read for the rechtsoverweging \
+            "the paragraphs of ECLI:NL:PHR:2018:616 have not been read for the rechtsoverweging \
              each opens; read it by offset"
         ),
         "{said}"
