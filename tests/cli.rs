@@ -6443,6 +6443,30 @@ async fn case_show_names_a_dutch_number_as_a_rechtsoverweging() {
     assert!(!text.contains("point"), "{text}");
 }
 
+/// An Advocate General's conclusie numbers its points and holds no
+/// rechtsoverweging, so its number reads as a point, as the Court's opinions
+/// do. ECLI:NL:PHR:2009:BH2162 as production answered it on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_names_a_number_of_a_conclusie_a_point() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"decision":{"id":"ECLI:NL:PHR:2009:BH2162","register":"rechtspraak","jurisdiction":"nl","form":"opinion","court":"Parket bij de Hoge Raad","decided_on":"2009-11-27","published_on":"2009-11-27","known_since":"2025-05-23T10:08:03+02:00","has_body":true,"rendition":{"language":"nl","blob":"9f02d9a78a14365cc779bae8c85db4df34c8bfa28b5a3d0cdf34a7423142be20","blob_size":663667},"superseded":[],"native":{"type":"Conclusie","creator":"http://standaarden.overheid.nl/owms/terms/Parket_bij_de_Hoge_Raad","procedure":[],"zaaknummer":["07/11104"],"subject":["Civiel recht","Civiel recht; Ondernemingsrecht"],"vindplaatsen":["Rechtspraak.nl","RvdW 2009, 1403","RF 2010, 13","RO 2010, 8","RN 2010, 32","NJ 2014/201 met annotatie van C.E. du Perron","NJB 2009, 2251","Ondernemingsrecht 2010, 21 met annotatie van H.M. Vletter-van Dort","JE 2010, 13","JWB 2009/447","JWB 2009/40","JOR 2010/43 met annotatie van mr. K. Frielink"],"replaces":"BH2162"}},"paragraphs":[{"ordinal":35,"kind":"para","number":"2.4","span":{"start":16241,"end":16972},"content_hash":"9206f94f981c39180250fc2491e299ac24b75ec061ed793cebd4cf3b923c5c83","rendered":"2.4. ABN AMRO en Goldman Sachs waren joint global coordinator, joint lead manager en joint bookrunner voor de introductie op de Amsterdamse effectenbeurs van aandelen World on Line. Ten behoeve van die introductie is op 3 maart 2000 een voorlopig prospectus gepubliceerd en op 16 maart 2000 een definitief prospectus (voor zover gelijkluidend hierna tezamen: het prospectus, waarbij de pagina-aanduiding, tenzij anders vermeld, verwijst naar beide prospectussen) voor de uitgifte van 67.562.819 gewone aandelen World Online. Blijkens het prospectus is WOL per 1 maart 2000 een dochteronderneming van World Online geworden en hebben de aandeelhouders van WOL voor ieder aandeel WOL 415 aandelen World Online ontvangen."}]},"caveats":[{"kind":"truncated","window":1}]}"#;
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:NL:PHR:2009:BH2162/paragraphs",
+        SENT,
+    )
+    .await;
+
+    let output = bron(&server, &["case", "show", "ECLI:NL:PHR:2009:BH2162"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("\npoint 2.4, paragraph 35  (16241..16972)\n"),
+        "{text}"
+    );
+    assert!(!text.contains("r.o."), "{text}");
+}
+
 /// `--number` reads one rechtsoverweging, as typed, and a page of it says how
 /// to read on inside it: the service counts `offset` from the first paragraph
 /// the number opens. ECLI:NL:HR:2024:1780 r.o. 3.2 as production answered it

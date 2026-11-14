@@ -1019,14 +1019,16 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     (_, Some(path)) => format!("{path}, paragraph {}", paragraph.ordinal),
                     _ => format!("paragraph {}", paragraph.ordinal),
                 };
-                // The number is how the paragraph is cited, as a point of the
-                // Court's or a Dutch court's rechtsoverweging; the ordinal stays
-                // beside it, because --offset counts ordinals.
+                // The number is how the paragraph is cited: a Dutch court's
+                // rechtsoverweging, or a point of an opinion or of the Court's;
+                // the ordinal stays beside it, because --offset counts ordinals.
                 if let Some(number) = &paragraph.number {
-                    let cited = if decision.register == "cellar" {
-                        "point"
-                    } else {
+                    let cited = if decision.register == "rechtspraak"
+                        && decision.form.as_deref() != Some("opinion")
+                    {
                         "r.o."
+                    } else {
+                        "point"
                     };
                     name = format!("{cited} {number}, {name}");
                 }
