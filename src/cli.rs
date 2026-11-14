@@ -724,9 +724,10 @@ pub enum Case {
         /// One rechtsoverweging of a Dutch ruling as the court prints it,
         /// e.g. 3.2.10, with the paragraphs that continue it and those
         /// numbered under it. Sent exactly as typed: the service refuses it
-        /// for a case of the EU and a besluit of the ACM, and answers
-        /// numbers_not_read for a ruling it has not read for its numbers:
-        /// read that one by --offset.
+        /// for a case of the EU and a besluit of the ACM. A ruling it has not
+        /// read for its numbers yet answers numbers_not_read with the seconds
+        /// to wait before asking again, and one it could not read answers it
+        /// with none: read either by --offset.
         #[arg(long)]
         number: Option<String>,
     },

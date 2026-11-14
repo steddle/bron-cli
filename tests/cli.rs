@@ -6546,13 +6546,58 @@ async fn case_show_number_names_the_paragraphs_that_print_it_too_and_a_quoted_co
     );
 }
 
-/// A ruling the service has not read for its numbers answers `--number` with
-/// `numbers_not_read`, under `corpus`: carried through as stated, exit 4, and
-/// the message says to read it by offset. ECLI:NL:PHR:2018:616 r.o. 2.2 as
-/// production answered it on 2026-11-14, a 500.
+/// A ruling the service has not read for its numbers yet answers `--number`
+/// with `numbers_not_read`, a 503 under `corpus` that asks again after 300
+/// seconds: carried through as stated with its wait, exit 4, and the message
+/// says to read it by offset meanwhile. ECLI:NL:RBZWB:2026:11048 r.o. 2.1 as
+/// production answered it on 2026-11-14.
 #[tokio::test(flavor = "multi_thread")]
-async fn case_show_number_carries_numbers_not_read_as_the_service_stated_it() {
-    const SENT: &str = r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"numbers_not_read","message":"the paragraphs of ECLI:NL:PHR:2018:616 have not been read for the rechtsoverweging each opens; read it by offset","detail":["numbers_not_read"]}}"#;
+async fn case_show_number_carries_numbers_not_read_yet_with_its_wait() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"numbers_not_read","message":"the paragraphs of ECLI:NL:RBZWB:2026:11048 have not been read for the rechtsoverweging each opens yet; read it by offset","detail":["numbers_not_read"],"retry_after":300}}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/decisions/ECLI:NL:RBZWB:2026:11048/paragraphs",
+        ))
+        .and(query_param("number", "2.1"))
+        .respond_with(
+            ResponseTemplate::new(503)
+                .insert_header("Retry-After", "300")
+                .set_body_raw(SENT, "application/json"),
+        )
+        .mount(&server)
+        .await;
+
+    let args = [
+        "case",
+        "show",
+        "ECLI:NL:RBZWB:2026:11048",
+        "--number",
+        "2.1",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert_eq!(json.status.code(), Some(4), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert_eq!(human.status.code(), Some(4), "{human:?}");
+    let said = String::from_utf8_lossy(&human.stderr);
+    assert!(
+        said.contains(
+            "the paragraphs of ECLI:NL:RBZWB:2026:11048 have not been read for the \
+             rechtsoverweging each opens yet; read it by offset (the service asked for 300s)"
+        ),
+        "{said}"
+    );
+}
+
+/// A ruling the service reached and could not read for its numbers answers
+/// `numbers_not_read` as a 500 with no wait, since none changes it: exit 4,
+/// and no delay is invented. The body is what `DecisionController` states
+/// for it; production served no such ruling to capture on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_number_carries_numbers_not_read_without_a_wait() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"numbers_not_read","message":"the paragraphs of ECLI:NL:PHR:2018:616 could not be read for the rechtsoverweging each opens; read it by offset","detail":["numbers_not_read"]}}"#;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/decisions/ECLI:NL:PHR:2018:616/paragraphs"))
@@ -6571,11 +6616,12 @@ async fn case_show_number_carries_numbers_not_read_as_the_service_stated_it() {
     let said = String::from_utf8_lossy(&human.stderr);
     assert!(
         said.contains(
-            "the paragraphs of ECLI:NL:PHR:2018:616 have not been read for the rechtsoverweging \
+            "the paragraphs of ECLI:NL:PHR:2018:616 could not be read for the rechtsoverweging \
              each opens; read it by offset"
         ),
         "{said}"
     );
+    assert!(!said.contains("asked for"), "{said}");
 }
 
 /// An older case prints the report for the hearing beside its judgment, two
