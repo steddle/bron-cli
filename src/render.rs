@@ -1315,6 +1315,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     court(ruling),
                     ruling.ecli
                 );
+                if let Some(form) = &ruling.form {
+                    let _ = write!(row, "  {form}");
+                }
                 if !ruling.held {
                     let _ = write!(row, "  {NOT_HELD}");
                 }

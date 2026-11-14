@@ -745,6 +745,34 @@ async fn law_decisions_sends_every_narrowing_as_typed_and_prints_what_came_back(
     );
 }
 
+/// A case of the EU is a judgment or an Advocate General's opinion, and each
+/// row says which. Production's answer on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn law_decisions_on_an_act_of_the_eu_names_the_form_of_each_case() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"regulation_id":"celex:32016R0679","register":"cellar","jurisdiction":"eu","number":"17","count":41,"courts":[{"court":"Hof van Justitie","count":41}],"decisions":[{"ecli":"ECLI:EU:C:2026:449","register":"cellar","jurisdiction":"eu","form":"ruling","court":"Hof van Justitie","decided_on":"2026-06-04","held":true,"links":[{"kind":"work_cites_work","asserted":"publisher","part":"A17","place":{"article":"17"},"stated_by":"cellar","stated_in":"23752aa14a41528a308f8c10ff477887158b09dbf286fb89458829dfd9a7556f"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P1","place":{"article":"17","paragraph":"1"},"stated_by":"cellar","stated_in":"23752aa14a41528a308f8c10ff477887158b09dbf286fb89458829dfd9a7556f"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P1LA","place":{"article":"17","paragraph":"1","point":"a"},"stated_by":"cellar","stated_in":"23752aa14a41528a308f8c10ff477887158b09dbf286fb89458829dfd9a7556f"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P1LD","place":{"article":"17","paragraph":"1","point":"d"},"stated_by":"cellar","stated_in":"23752aa14a41528a308f8c10ff477887158b09dbf286fb89458829dfd9a7556f"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P3","place":{"article":"17","paragraph":"3"},"stated_by":"cellar","stated_in":"23752aa14a41528a308f8c10ff477887158b09dbf286fb89458829dfd9a7556f"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P3LB","place":{"article":"17","paragraph":"3","point":"b"},"stated_by":"cellar","stated_in":"23752aa14a41528a308f8c10ff477887158b09dbf286fb89458829dfd9a7556f"}]},{"ecli":"ECLI:EU:C:2025:671","register":"cellar","jurisdiction":"eu","form":"opinion","court":"Hof van Justitie","decided_on":"2025-09-04","held":true,"links":[{"kind":"work_cites_work","asserted":"publisher","part":"A17","place":{"article":"17"},"stated_by":"cellar","stated_in":"693137e8d1715513ca0538e4cf2168ae5527ad456da856abd5bb8e035db80737"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P1","place":{"article":"17","paragraph":"1"},"stated_by":"cellar","stated_in":"693137e8d1715513ca0538e4cf2168ae5527ad456da856abd5bb8e035db80737"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P1LA","place":{"article":"17","paragraph":"1","point":"a"},"stated_by":"cellar","stated_in":"693137e8d1715513ca0538e4cf2168ae5527ad456da856abd5bb8e035db80737"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P1LD","place":{"article":"17","paragraph":"1","point":"d"},"stated_by":"cellar","stated_in":"693137e8d1715513ca0538e4cf2168ae5527ad456da856abd5bb8e035db80737"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P3","place":{"article":"17","paragraph":"3"},"stated_by":"cellar","stated_in":"693137e8d1715513ca0538e4cf2168ae5527ad456da856abd5bb8e035db80737"},{"kind":"work_cites_work","asserted":"publisher","part":"A17P3LB","place":{"article":"17","paragraph":"3","point":"b"},"stated_by":"cellar","stated_in":"693137e8d1715513ca0538e4cf2168ae5527ad456da856abd5bb8e035db80737"}]}]},"caveats":[{"kind":"rulings_found"},{"kind":"truncated","window":2}]}"#;
+    let server = answering(
+        "GET",
+        "/api/v1/regulations/celex:32016R0679/articles/17/decisions",
+        SENT,
+    )
+    .await;
+
+    let output = bron(
+        &server,
+        &["law", "decisions", "celex:32016R0679", "--article", "17"],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        "2026-06-04  Hof van Justitie  ECLI:EU:C:2026:449  ruling  art. 17, art. 17(1), \
+         art. 17(1)(a), art. 17(1)(d), art. 17(3), art. 17(3)(b)\n\
+         2025-09-04  Hof van Justitie  ECLI:EU:C:2025:671  opinion  art. 17, art. 17(1), \
+         art. 17(1)(a), art. 17(1)(d), art. 17(3), art. 17(3)(b)\n"
+    );
+}
+
 /// On an act of the EU the list is the cases CELLAR states, each with the
 /// places in the article it cites.
 #[tokio::test(flavor = "multi_thread")]

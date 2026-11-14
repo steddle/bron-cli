@@ -308,6 +308,8 @@ pub struct ArticleDecisions {
 #[derive(Debug, Deserialize)]
 pub struct CitingDecision {
     pub ecli: String,
+    /// Of a case of the EU, `ruling` or `opinion`; LiDO states none.
+    pub form: Option<String>,
     /// Absent where LiDO names no court for the ruling.
     pub court: Option<String>,
     pub decided_on: Option<NaiveDate>,
