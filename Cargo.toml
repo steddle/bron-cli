@@ -5,12 +5,14 @@ name = "bron"
 # the tag exists would make it false.
 version = "0.0.0"
 edition = "2024"
-# Edition 2024 needs 1.85, which is also what the README promises. Stated here
-# so cargo enforces the claim rather than the prose carrying it alone.
-rust-version = "1.85"
+# Let chains in `if` are stable from 1.88.
+rust-version = "1.88"
 description = "Dutch primary legal sources, quotable to the byte: wetgeving, rechtspraak, kamerstukken"
+homepage = "https://bron.steddle.com"
+documentation = "https://bron.steddle.com/en/docs/cli"
 repository = "https://github.com/steddle/bron-cli"
 readme = "README.md"
+include = ["/src", "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 keywords = ["law", "netherlands", "legal", "citation", "rechtspraak"]
 categories = ["command-line-utilities"]
 license = "MIT"
@@ -19,34 +21,27 @@ license = "MIT"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-# rustls rather than the house default of native-tls: bron is installed on
-# developer machines and CI images, and native-tls needs OpenSSL headers present
-# at build time on Linux. rustls has no system dependency on either platform.
+# rustls, not native-tls: native-tls needs OpenSSL headers to build on Linux.
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "json",
     "charset",
     "http2",
-    # Native roots rather than the bundled Mozilla set, because BRON_MIRROR
-    # points at a service whose certificate is issued by whatever CA that
-    # deployment trusts, including a local development CA. Reading the platform
-    # trust store needs no OpenSSL headers, so the reason rustls was chosen over
-    # native-tls still holds.
+    # The platform's roots, not the bundled Mozilla set: BRON_MIRROR can name a
+    # deployment whose certificate a local development CA issued.
     "rustls-tls-native-roots",
 ] }
 serde = { version = "1", features = ["derive"] }
-# raw_value keeps a failure the service states as it arrived, so `--json`
-# prints its error object byte for byte and a field added later still crosses.
+# raw_value: `--json` prints the service's error object byte for byte.
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
-# Word-level diffing, for rendering only. The JSON contract always carries
-# both full texts so a consumer never has to trust our diff.
+# Word diffs in human output only; the JSON carries both full texts.
 similar = "3.1"
 thiserror = "2"
 
 [dev-dependencies]
-# The transport's refusal, retry-after and freeze-before-decode paths cannot be
-# proved against a fixture file: they need a server that misbehaves on cue.
+# The transport's refusal and retry-after paths need a server that misbehaves
+# on cue, which a fixture file cannot be.
 wiremock = "0.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 

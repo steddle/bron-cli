@@ -45,7 +45,7 @@ impl FromStr for BlobId {
         }
 
         let mut digest = [0u8; 32];
-        for (slot, pair) in digest.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
+        for (slot, pair) in digest.iter_mut().zip(text.as_bytes().as_chunks::<2>().0) {
             let hex = std::str::from_utf8(pair).map_err(|_| invalid())?;
             *slot = u8::from_str_radix(hex, 16).map_err(|_| invalid())?;
         }
