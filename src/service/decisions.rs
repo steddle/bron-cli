@@ -100,8 +100,9 @@ pub struct DecisionParagraph {
     /// Of a case of the EU, the document the span points into.
     pub document: Option<String>,
     pub kind: String,
-    /// Of a case of the EU, the number the Court prints, `45`, or `1)` in
-    /// the operative part, which is how a paragraph is cited.
+    /// The number the court prints, which is how a paragraph is cited: a
+    /// rechtsoverweging, `3.2.10`, or of a case of the EU `45`, or `1)` in
+    /// the operative part.
     pub number: Option<String>,
     /// How the court numbered the sections around it, `2/2.1`, or
     /// `voetnoot 3`. Absent where it stands in none.

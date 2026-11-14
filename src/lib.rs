@@ -2,9 +2,8 @@
 //!
 //! bron reads wetgeving, court decisions and official publications through
 //! [`service`], which holds them and names the blob each answer came out of.
-//! The point is not search. The point is that a claim made from bron can name
-//! the document and the characters it rests on, and that the same question
-//! asked twice gives the same answer.
+//! A claim made from bron can name the document and the characters it rests
+//! on, and the same question asked twice gives the same answer.
 //!
 //! Three rules run through the whole crate:
 //!
@@ -12,8 +11,8 @@
 //!   publication id. Never a URL.
 //! - **Provenance is not optional.** Every value carries the digest of the
 //!   document it came from, which the service froze and serves by that digest.
-//! - **Nothing in the resolution path is nondeterministic.** No clock reads
-//!   inside writes, no generated identifiers in requests, no model anywhere.
+//! - **Nothing in the resolution path is nondeterministic.** No generated
+//!   identifiers in requests, no model anywhere.
 
 #![deny(clippy::all)]
 
