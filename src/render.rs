@@ -1252,6 +1252,10 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     hit.paragraphs.from.saturating_sub(1),
                     hit.distance
                 )?;
+                if let Some(excerpt) = &hit.excerpt {
+                    let cut = if excerpt.cut { "…" } else { "" };
+                    writeln!(out, "  {}{cut}", excerpt.text)?;
+                }
             }
 
             let (cut, rest): (Vec<Caveat>, Vec<Caveat>) = a

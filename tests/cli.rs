@@ -6677,6 +6677,37 @@ async fn case_search_sends_the_register_as_typed() {
 
 /// A besluit of the ACM ranks beside the rulings and states no ECLI, so a
 /// hit is named by its `id`, as production answered on 2026-10-25.
+/// Each hit prints the words of the run's first paragraph under it, cut where
+/// the service cut them. Production's answer on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_prints_the_words_of_each_hit() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"hits":[{"id":"ECLI:NL:RBOVE:2026:4322","ecli":"ECLI:NL:RBOVE:2026:4322","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Rechtbank Overijssel","decided_on":"2026-07-07","paragraphs":{"from":1,"to":1},"content_hashes":["47baf3f7a90093c522ec0b9dd2e4a68fd3c2439a0d732c3b93947c2688eaa150"],"blob":"5d4a3713e7cb6b46df9f5bcf89c945614c701013dcb3824d7f80c006b520483f","excerpt":{"ordinal":1,"text":"Tussenvonnis: tekortkoming in de nakoming bij huurovereenkomst. Huurder is aansprakelijk.","span":{"start":3083,"end":3456},"content_hash":"47baf3f7a90093c522ec0b9dd2e4a68fd3c2439a0d732c3b93947c2688eaa150"},"lookup":{"tool":"get-case","route":"GET /v1/decisions/{ecli}/paragraphs","args":{"ecli":"ECLI:NL:RBOVE:2026:4322","offset":0,"limit":1}},"distance":0.334498},{"id":"ECLI:NL:RBNNE:2026:3908","ecli":"ECLI:NL:RBNNE:2026:3908","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Rechtbank Noord-Nederland","decided_on":"2026-09-10","paragraphs":{"from":34,"to":34},"content_hashes":["72c5cfcf4b04ed10b82d71b43414268d1183c7d27f3c28ca6c04077e77e3825e"],"blob":"5255cdec0ca8c909b2a110624edde98ea2471da2420cba5b923b20e3cfda5ed0","excerpt":{"ordinal":34,"text":"Daarbij geldt als uitgangspunt dat iedere tekortkoming in de nakoming in beginsel kan leiden tot ontbinding van een huurovereenkomst. Dat geldt niet als de tekortkoming, gelet op haar bijzondere aard of geringe betekenis, de ontbinding niet rechtvaardigt. Het is in dat geval aan de huurder die tekort is geschoten om te stellen en te onderbouwen dat de tekortkoming de ontbinding niet rechtvaardigt. Daarbij kunnen alle omstandigheden van het geval van belang zijn. Op voorhand is niet te zeggen dat","span":{"start":9282,"end":10207},"content_hash":"72c5cfcf4b04ed10b82d71b43414268d1183c7d27f3c28ca6c04077e77e3825e","cut":true,"section_path":"4/4.4."},"lookup":{"tool":"get-case","route":"GET /v1/decisions/{ecli}/paragraphs","args":{"ecli":"ECLI:NL:RBNNE:2026:3908","offset":33,"limit":1}},"distance":0.367646}],"line":0.48,"held_back":0,"close_hit":true},"caveats":[{"kind":"search_upcoming","count":132928},{"kind":"truncated","window":2}]}"#;
+    let server = answering("POST", "/api/v1/decisions/search", SENT).await;
+
+    let output = bron(
+        &server,
+        &[
+            "case",
+            "search",
+            "tekortkoming in de nakoming huurovereenkomst",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "  unit 1  --offset 0  distance 0.3345\n  Tussenvonnis: tekortkoming in de nakoming bij huurovereenkomst. Huurder is aansprakelijk.\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.ends_with(" Op voorhand is niet te zeggen dat…\n"),
+        "{text}"
+    );
+}
+
 /// A question no ruling bron holds is close to answers no hit, and a person
 /// reads why: how many stood past the line and were held back, and the flag
 /// that shows them. Production's answer on 2026-11-14.

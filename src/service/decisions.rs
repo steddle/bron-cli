@@ -236,9 +236,19 @@ pub struct DecisionHit {
     pub content_hashes: Vec<String>,
     pub blob: String,
     pub distance: f64,
+    /// The words of the run's first unit, read from what the service holds.
+    pub excerpt: Option<Excerpt>,
     /// The hit stands past the line, answered because `beyond_line` was asked.
     #[serde(default)]
     pub beyond_line: bool,
+}
+
+/// The words of a unit a hit names, which the service may cut.
+#[derive(Debug, Deserialize)]
+pub struct Excerpt {
+    pub text: String,
+    #[serde(default)]
+    pub cut: bool,
 }
 
 /// A run of a ruling's units, by their ordinals.
