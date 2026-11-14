@@ -289,6 +289,18 @@ impl Citing<'_> {
     }
 }
 
+/// Which of the rulings rechtspraak's feed listed to answer: `citing`'s
+/// narrowing, and the feed's own. Sent as typed, as `Citing` is.
+#[derive(Debug)]
+pub struct Listing<'a> {
+    pub citing: Citing<'a>,
+    /// An area of law the feed lists the rulings under, `civiel` or `straf`.
+    pub subject: Option<&'a str>,
+    /// A stamp of the feed's, or an earlier answer's `next`: a walk in the
+    /// order the feed stamped the rulings, after that moment.
+    pub since: Option<&'a str>,
+}
+
 /// The rulings LiDO found that cite one article, or the cases CELLAR states
 /// interpret or cite an article of an act of the EU, newest decided first.
 #[derive(Debug, Deserialize)]
@@ -339,6 +351,8 @@ pub struct RecentDecisions {
     /// whatever `court` asked.
     pub courts: Vec<CourtCount>,
     pub decisions: Vec<ListedDecision>,
+    /// Of a walk by `since`, the stamp to come back with.
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -386,11 +400,19 @@ impl Service {
     pub fn recent_decisions(
         &self,
         client: &Client,
-        ask: &Citing<'_>,
+        ask: &Listing<'_>,
     ) -> Outcome<Answered<RecentDecisions>> {
         let url = self.route(&["decisions"])?;
 
-        self.read(client, client.get(&url).query(&ask.query()))
+        let mut query = ask.citing.query();
+        if let Some(subject) = ask.subject {
+            query.push(("subject", subject));
+        }
+        if let Some(since) = ask.since {
+            query.push(("since", since));
+        }
+
+        self.read(client, client.get(&url).query(&query))
     }
 
     /// The rulings the service holds, ranked against a question.

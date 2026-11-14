@@ -33,8 +33,8 @@ pub use client::Answered;
 pub use decisions::{
     ArticleDecisions, Citing, CitingDecision, CitingLink, CourtCount, Decision, DecisionDocument,
     DecisionHit, DecisionParagraph, DecisionParagraphs, DecisionQuery, DecisionRelation,
-    DecisionRelations, DecisionRendition, DecisionSearch, ListedDecision, OrdinalRange, Pinpoint,
-    RecentDecisions, RulingText, Target,
+    DecisionRelations, DecisionRendition, DecisionSearch, ListedDecision, Listing, OrdinalRange,
+    Pinpoint, RecentDecisions, RulingText, Target,
 };
 pub use dossiers::{DossierAct, DossierPaper, DossierPapers, DossierRegulation, Fate};
 pub use model::{

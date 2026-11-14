@@ -739,6 +739,18 @@ pub enum Case {
         /// How many rulings to skip; untyped, none. Sent exactly as typed.
         #[arg(long, allow_negative_numbers = true)]
         offset: Option<String>,
+
+        /// Only rulings the feed lists under civil law, `civiel`, or criminal
+        /// law, `straf`. Sent exactly as typed.
+        #[arg(long)]
+        subject: Option<String>,
+
+        /// Walk the feed in the order it stamped the rulings, after this
+        /// moment with its offset, e.g. 2026-10-26T23:00:00Z, or the `next` of
+        /// an earlier answer. A walk pages by `next` and never by --offset.
+        /// Sent exactly as typed.
+        #[arg(long)]
+        since: Option<String>,
     },
 }
 

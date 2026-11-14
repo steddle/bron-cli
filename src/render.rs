@@ -1377,6 +1377,10 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 listed.count
             )?;
             court_counts(err, &listed.courts)?;
+            // A walk's cursor, which a shell script takes from --json.
+            if let Some(next) = &listed.next {
+                writeln!(err, "next {next}")?;
+            }
 
             let court = |ruling: &ListedDecision| ruling.court.clone().unwrap_or_default();
             let court_width = listed
@@ -1418,15 +1422,21 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             let notes: Vec<String> = a
                 .caveats
                 .iter()
-                .map(|caveat| match caveat {
-                    Caveat::Truncated { window } => read_on(
+                .map(|caveat| match (caveat, &listed.next) {
+                    // A walk pages by `next` and the service refuses an offset.
+                    (Caveat::Truncated { .. }, Some(next)) => format!(
+                        "note: rulings 1 to {} of {} shown; read on with --since {next}",
+                        listed.decisions.len(),
+                        listed.count
+                    ),
+                    (Caveat::Truncated { window }, None) => read_on(
                         "rulings",
                         offset.as_deref(),
                         listed.decisions.len(),
                         listed.count,
                         *window,
                     ),
-                    other => caveat_line(other),
+                    (other, _) => caveat_line(other),
                 })
                 .collect();
             if !notes.is_empty() {

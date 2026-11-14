@@ -595,15 +595,21 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
             to,
             limit,
             offset,
+            subject,
+            since,
         } => service
             .recent_decisions(
                 &client,
-                &service::Citing {
-                    court: court.as_deref(),
-                    from: from.as_deref(),
-                    to: to.as_deref(),
-                    limit: limit.as_deref(),
-                    offset: offset.as_deref(),
+                &service::Listing {
+                    citing: service::Citing {
+                        court: court.as_deref(),
+                        from: from.as_deref(),
+                        to: to.as_deref(),
+                        limit: limit.as_deref(),
+                        offset: offset.as_deref(),
+                    },
+                    subject: subject.as_deref(),
+                    since: since.as_deref(),
                 },
             )
             .map(|answered| Answer::RecentDecisions {

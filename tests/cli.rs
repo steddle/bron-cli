@@ -6957,6 +6957,54 @@ async fn case_show_names_where_a_tuchtcollege_publishes_its_text() {
     }
 }
 
+/// `--since` walks the feed in the order it stamped the rulings and
+/// `--subject` narrows it to an area of law, both sent as typed. A walk pages
+/// by `next` and never by offset, so a person reads the stamp to come back
+/// with. Production's answer on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_recent_walks_the_feed_since_a_stamp_and_names_the_next() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"count":212,"next":"2026-11-13T06:08:10Z","courts":[{"court":"Rechtbank Midden-Nederland","count":42},{"court":"Rechtbank Den Haag","count":23},{"court":"Rechtbank Amsterdam","count":20},{"court":"Hoge Raad","count":19},{"court":"Gerechtshof Arnhem-Leeuwarden","count":17},{"court":"Rechtbank Limburg","count":17},{"court":"Rechtbank Zeeland-West-Brabant","count":16},{"court":"Gerechtshof Amsterdam","count":12},{"court":"Rechtbank Overijssel","count":10},{"court":"Rechtbank Rotterdam","count":8},{"court":"Gerechtshof Den Haag","count":7},{"court":"Rechtbank Gelderland","count":6},{"court":"Rechtbank Noord-Nederland","count":6},{"court":"Gerechtshof 's-Hertogenbosch","count":4},{"court":"Centrale Grondkamer","count":1},{"court":"Gemeenschappelijk Hof van Justitie van Aruba, Curaçao, Sint Maarten en van Bonaire, Sint Eustatius en Saba","count":1},{"court":"Gerecht in eerste aanleg van Curaçao","count":1},{"court":"Rechtbank Noord-Holland","count":1},{"court":"Rechtbank Oost-Brabant","count":1}],"decisions":[{"ecli":"ECLI:NL:HR:2026:1241","register":"rechtspraak","jurisdiction":"nl","court":"Hoge Raad","decided_on":"2026-07-10","case_numbers":"25/02614","summary":"Art. 81 lid 1 RO. Bestuurdersaansprakelijkheid. Beklamelnorm. Wisten bestuurders bij aangaan van verbintenissen of behoorden zij toen redelijkerwijze te begrijpen dat vennootschap haar verplichtingen niet zou kunnen voldoen en geen verhaal zou bieden? Motiveringsklachten.","form":"ruling","held":true,"updated":"2026-11-13T06:06:04Z","stated_by":"rechtspraak","stated_in":"e5ee9faeccb16e6997f635b0aa6f52e60871bbeb3f2d9014bbed1ab131cd3e30"},{"ecli":"ECLI:NL:RBGEL:2026:6842","register":"rechtspraak","jurisdiction":"nl","court":"Rechtbank Gelderland","decided_on":"2026-09-02","case_numbers":"C/05/461055 / HA RK 25-183","summary":"Verzoek voorlopig getuigenverhoor. Nieuw bewijsrecht. Artikel 196 en 197 Rv. Verzoek deels en onder voorwaarden toegewezen. Voorlopig getuigenverhoor toegestaan op beperkte onderwerpen, namelijk onderwerpen die relevant zijn met het oog op een (of meer) procedure(s) bij de burgerlijke rechter over de (schade als gevolg van de) opeising van een lening. Het door de Ondernemingskamer gelaste onder...","form":"ruling","held":true,"updated":"2026-11-13T06:08:10Z","stated_by":"rechtspraak","stated_in":"e5ee9faeccb16e6997f635b0aa6f52e60871bbeb3f2d9014bbed1ab131cd3e30"}]},"caveats":[{"kind":"rulings_listed"},{"kind":"truncated","window":2}]}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions"))
+        .and(query_param("since", "2026-11-13T00:00:00Z"))
+        .and(query_param("subject", "civiel"))
+        .and(query_param("limit", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "case",
+        "recent",
+        "--since",
+        "2026-11-13T00:00:00Z",
+        "--subject",
+        "civiel",
+        "--limit",
+        "2",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let said = String::from_utf8_lossy(&human.stderr);
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert!(human.status.success(), "{human:?}");
+    assert!(
+        stdout(&human).starts_with("2026-07-10  Hoge Raad             ECLI:NL:HR:2026:1241"),
+        "{human:?}"
+    );
+    assert!(said.contains("\nnext 2026-11-13T06:08:10Z\n"), "{said}");
+    assert!(
+        said.contains(
+            "note: rulings 1 to 2 of 212 shown; read on with --since 2026-11-13T06:08:10Z\n"
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("--offset"), "{said}");
+}
+
 /// A withheld ruling in the feed's list reads `withheld` and nothing more,
 /// and not `not held`, which reads as not yet: it is never fetched.
 #[tokio::test(flavor = "multi_thread")]
