@@ -995,6 +995,16 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 (None, _) => writeln!(out, "\nThe service answers no text of {}.", decision.id)?,
             }
 
+            // A Dutch court's rechtsoverweging, or a point of an opinion or of
+            // the Court's.
+            let cited = if decision.register == "rechtspraak"
+                && decision.form.as_deref() != Some("opinion")
+            {
+                "r.o."
+            } else {
+                "point"
+            };
+
             // Where the package holds more than one document, a span is a range
             // of the document named above it.
             let mut reading = None;
@@ -1020,17 +1030,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     (_, Some(path)) => format!("{path}, paragraph {}", paragraph.ordinal),
                     _ => format!("paragraph {}", paragraph.ordinal),
                 };
-                // The number is how the paragraph is cited: a Dutch court's
-                // rechtsoverweging, or a point of an opinion or of the Court's;
-                // the ordinal stays beside it, because --offset counts ordinals.
+                // The ordinal stays beside the number, because --offset counts
+                // ordinals.
                 if let Some(number) = &paragraph.number {
-                    let cited = if decision.register == "rechtspraak"
-                        && decision.form.as_deref() != Some("opinion")
-                    {
-                        "r.o."
-                    } else {
-                        "point"
-                    };
                     name = format!("{cited} {number}, {name}");
                 }
                 writeln!(
@@ -1058,7 +1060,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     .unwrap_or(0);
                 let shown = a.data.paragraphs.len() as u64;
                 let (of, whole) = match number {
-                    Some(number) => (format!(" of r.o. {number}"), "the whole of it"),
+                    Some(number) => (format!(" of {cited} {number}"), "the whole of it"),
                     None => (String::new(), "the whole ruling"),
                 };
                 writeln!(
@@ -3322,6 +3324,33 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("filtered over a window"), "{text}");
+    }
+
+    /// A page of one number of a conclusie names it a point, as its paragraphs
+    /// are named.
+    #[test]
+    fn a_cut_page_of_a_conclusie_names_its_number_a_point() {
+        let ruling: bron::service::DecisionParagraphs = serde_json::from_str(
+            r#"{"decision":{"id":"ECLI:NL:PHR:2018:616","register":"rechtspraak","form":"opinion","has_body":true,"superseded":[],"native":{}},
+              "paragraphs":[
+                {"ordinal":11,"kind":"para","number":"2.2","span":{"start":1,"end":2},"content_hash":"a","rendered":"Een."}]}"#,
+        )
+        .unwrap();
+        let mut answered = answered(ruling);
+        answered.caveats = vec![Caveat::Truncated { window: 1 }];
+
+        let text = printed(&Answer::Decision {
+            answered: Box::new(answered),
+            service: Service::at("https://bron.test"),
+            offset: None,
+            number: Some("2.2".into()),
+        });
+
+        assert!(text.contains("\npoint 2.2, paragraph 11"), "{text}");
+        assert!(
+            text.contains("note: units 1 to 1 of point 2.2 shown; read on with --offset 1"),
+            "{text}"
+        );
     }
 
     /// A ruling a question ranked, by identifier and the run of units that
