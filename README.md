@@ -1,4 +1,9 @@
-# bron
+<a href="https://bron.steddle.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
+    <img src=".github/assets/banner-light.png" alt="Bron: the law as it stood, at the source.">
+  </picture>
+</a>
 
 [![Version](https://img.shields.io/github/v/release/steddle/bron-cli?label=version)](https://github.com/steddle/bron-cli/releases)
 [![License](https://img.shields.io/github/license/steddle/bron-cli)](LICENSE)
