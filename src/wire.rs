@@ -591,6 +591,10 @@ pub enum Caveat {
     /// a passage the ruling quotes.
     AmbiguousNumber { number: String, ordinals: Vec<u32> },
 
+    /// A conclusie quotes the courts below in paragraphs numbered like its
+    /// own, so a number it answers may be a quoted court's.
+    NumbersMayBeQuoted,
+
     /// From `from`, the feed's stamp, the service has not yet read under which
     /// area of law the feed lists the rulings: a walk by `since` stops there
     /// and `subject` leaves them out.
@@ -836,6 +840,7 @@ impl Caveat {
                 number: String,
                 ordinals: Vec<u32>,
             },
+            NumbersMayBeQuoted,
             SubjectNotRead {
                 from: String,
             },
@@ -993,6 +998,7 @@ impl Caveat {
             Ok(Stated::AmbiguousNumber { number, ordinals }) => {
                 Self::AmbiguousNumber { number, ordinals }
             }
+            Ok(Stated::NumbersMayBeQuoted) => Self::NumbersMayBeQuoted,
             Ok(Stated::SubjectNotRead { from }) => Self::SubjectNotRead { from },
             Err(_) => Self::Unrecognised {
                 stated: value.clone(),
@@ -1228,6 +1234,17 @@ mod tests {
             assert_eq!(read, named);
             assert_eq!(serde_json::to_value(read).unwrap(), stated);
         }
+    }
+
+    #[test]
+    fn the_limit_on_the_numbers_of_a_conclusie_keeps_its_name() {
+        let stated = serde_json::json!({"kind": "numbers_may_be_quoted"});
+
+        assert_eq!(Caveat::stated(&stated), Caveat::NumbersMayBeQuoted);
+        assert_eq!(
+            serde_json::to_value(Caveat::NumbersMayBeQuoted).unwrap(),
+            stated
+        );
     }
 
     #[test]

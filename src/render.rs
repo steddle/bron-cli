@@ -2823,6 +2823,9 @@ fn caveat_line(caveat: &Caveat) -> String {
                 ),
             }
         }
+        Caveat::NumbersMayBeQuoted => "note: a conclusie quotes the courts below in paragraphs \
+             numbered like its own, so a number here may be a quoted court's"
+            .to_string(),
         Caveat::SubjectNotRead { from } => format!(
             "note: from {from} on, bron has not yet read under which area of law the feed lists \
              the rulings, so a walk by --since stops there and --subject leaves them out until \
@@ -3533,6 +3536,19 @@ mod tests {
             "note: paragraph 42 prints 2.2 too, and bron cannot tell the court's own number \
              from a quotation's: read it before citing, with case show --offset 41 --limit 1, without \
              --number"
+        );
+    }
+
+    #[test]
+    fn a_conclusie_says_its_numbers_may_be_a_quoted_courts() {
+        let line = super::caveat_line(&Caveat::stated(
+            &serde_json::json!({"kind": "numbers_may_be_quoted"}),
+        ));
+
+        assert_eq!(
+            line,
+            "note: a conclusie quotes the courts below in paragraphs numbered like its own, so \
+             a number here may be a quoted court's"
         );
     }
 
