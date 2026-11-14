@@ -7049,3 +7049,201 @@ async fn case_recent_marks_a_withheld_ruling_withheld_and_nothing_more() {
          2026-10-01  Rechtbank Rotterdam  ECLI:NL:RBROT:2026:11912  not held\n"
     );
 }
+
+// -- quote check ---------------------------------------------------------
+
+/// One quotation from the command line, sent as typed, and found where it
+/// cites: exit 0, and a person reads the unit that holds it. The verdict is
+/// production's on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_finds_a_quotation_in_the_lid_it_cites() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"quotes":[{"verdict":"quote_found","cited":{"text":"Hij die jegens een ander een onrechtmatige daad pleegt, welke hem kan worden toegerekend, is verplicht de schade die de ander dientengevolge lijdt, te vergoeden.","regulation":"BWBR0005289","article":"6:162","paragraph":"1"},"register":"bwb","jurisdiction":"nl","rendition":"2026-07-16_0","blob":"091f3702115565abb5061a2fccdc751c16debfed6614d92e0d3b2a186744bd87","as_of":"2026-11-14","as_known_on":"2026-11-14","unit":{"number":"162","label":"Artikel 162 lid 1","content_hash":"e75fd42c13161b9e29d84cf780cf07ce1c950ebdc8878b0e7d2fcf079e84991d","span":{"start":507288,"end":507815}},"caveats":[{"kind":"provenance_of_article","articles":["162"],"fields":["amended_by","dossiers","commenced_by","in_force_from","effect","remarks"]}]}]}}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/quotes"))
+        .and(body_json(serde_json::json!({"quotes": [{
+            "text": "Hij die jegens een ander een onrechtmatige daad pleegt, welke hem kan worden toegerekend, is verplicht de schade die de ander dientengevolge lijdt, te vergoeden.",
+            "regulation": "BWBR0005289", "article": "6:162", "paragraph": "1"
+        }]})))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let args = [
+        "quote",
+        "check",
+        "Hij die jegens een ander een onrechtmatige daad pleegt, welke hem kan worden \
+         toegerekend, is verplicht de schade die de ander dientengevolge lijdt, te vergoeden.",
+        "--regulation",
+        "BWBR0005289",
+        "--article",
+        "6:162",
+        "--paragraph",
+        "1",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+
+    assert_eq!(json.status.code(), Some(0), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert_eq!(human.status.code(), Some(0), "{human:?}");
+    assert!(
+        text.starts_with("1  found  Artikel 162 lid 1  (507288..507815)\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "   source: 091f3702115565abb5061a2fccdc751c16debfed6614d92e0d3b2a186744bd87\n"
+        ),
+        "{text}"
+    );
+}
+
+/// A paragraph of a ruling is named by its ordinal, which the service reads as
+/// a number: typed digits cross as one, and the service judges the rest. The
+/// service's own read of one paragraph is a page of the ruling, which says
+/// nothing of the verdict and is not printed as a filter that missed matches.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_sends_an_ordinal_as_a_number() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"quotes":[{"verdict":"quote_found","cited":{"text":"Daarbij kunnen alle omstandigheden van het geval van belang zijn","ecli":"ECLI:NL:RBNNE:2026:3908","ordinal":34},"register":"rechtspraak","jurisdiction":"nl","blob":"5255cdec0ca8c909b2a110624edde98ea2471da2420cba5b923b20e3cfda5ed0","unit":{"ordinal":34,"kind":"para","section_path":"4/4.4.","span":{"start":9282,"end":10207},"content_hash":"72c5cfcf4b04ed10b82d71b43414268d1183c7d27f3c28ca6c04077e77e3825e"},"caveats":[{"kind":"truncated","window":1}]}]}}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/quotes"))
+        .and(body_json(serde_json::json!({"quotes": [{
+            "text": "Daarbij kunnen alle omstandigheden van het geval van belang zijn",
+            "ecli": "ECLI:NL:RBNNE:2026:3908", "ordinal": 34
+        }]})))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "quote",
+            "check",
+            "Daarbij kunnen alle omstandigheden van het geval van belang zijn",
+            "--ecli",
+            "ECLI:NL:RBNNE:2026:3908",
+            "--ordinal",
+            "34",
+        ],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        text.starts_with("1  found  ECLI:NL:RBNNE:2026:3908 paragraph 34  (9282..10207)\n"),
+        "{text}"
+    );
+    assert!(!text.contains("matches may be missing"), "{text}");
+}
+
+/// Quotations from a file are sent as the file holds them, a name the service
+/// does not take included, so its refusal is the answer. A verdict other than
+/// found exits 6, with the service's envelope on stdout as sent. Production's
+/// verdicts on 2026-11-14: found, two mismatches, an unresolved citation and a
+/// ruling.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_reads_quotations_from_a_file_and_exits_6_on_one_not_found() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"quotes":[{"verdict":"quote_found","cited":{"text":"Hij die jegens een ander een onrechtmatige daad pleegt, welke hem kan worden toegerekend, is verplicht de schade die de ander dientengevolge lijdt, te vergoeden.","regulation":"BWBR0005289","article":"6:162","paragraph":"1"},"register":"bwb","jurisdiction":"nl","rendition":"2026-07-16_0","blob":"091f3702115565abb5061a2fccdc751c16debfed6614d92e0d3b2a186744bd87","as_of":"2026-11-14","as_known_on":"2026-11-14","unit":{"number":"162","label":"Artikel 162 lid 1","content_hash":"e75fd42c13161b9e29d84cf780cf07ce1c950ebdc8878b0e7d2fcf079e84991d","span":{"start":507288,"end":507815}},"caveats":[{"kind":"provenance_of_article","articles":["162"],"fields":["amended_by","dossiers","commenced_by","in_force_from","effect","remarks"]}]},{"verdict":"quote_mismatch","cited":{"text":"Hij die jegens een ander een onrechtmatige daad begaat, welke hem kan worden toegerekend, is verplicht de schade te vergoeden.","regulation":"BWBR0005289","article":"6:162","paragraph":"1"},"register":"bwb","jurisdiction":"nl","rendition":"2026-07-16_0","blob":"091f3702115565abb5061a2fccdc751c16debfed6614d92e0d3b2a186744bd87","as_of":"2026-11-14","as_known_on":"2026-11-14","caveats":[{"kind":"provenance_of_article","articles":["162"],"fields":["amended_by","dossiers","commenced_by","in_force_from","effect","remarks"]}],"divergence":{"unit":{"number":"162","label":"Artikel 162 lid 1","content_hash":"e75fd42c13161b9e29d84cf780cf07ce1c950ebdc8878b0e7d2fcf079e84991d","span":{"start":507288,"end":507815}},"differences":[{"text":"pleegt,","quoted":"begaat,","at":{"start":48,"end":55}},{"text":"","quoted":"te vergoeden.","at":{"start":112,"end":112}}]}},{"verdict":"quote_mismatch","cited":{"text":"Als onrechtmatige daad worden aangemerkt een inbreuk op een recht","regulation":"BWBR0005289","article":"6:162","paragraph":"1"},"register":"bwb","jurisdiction":"nl","rendition":"2026-07-16_0","blob":"091f3702115565abb5061a2fccdc751c16debfed6614d92e0d3b2a186744bd87","as_of":"2026-11-14","as_known_on":"2026-11-14","caveats":[{"kind":"provenance_of_article","articles":["162"],"fields":["amended_by","dossiers","commenced_by","in_force_from","effect","remarks"]}],"found_elsewhere":{"number":"162","label":"Artikel 162","content_hash":"f8125445cab2e8d849dacd4a7d5e01fdb8c4b7dad0de796c4f64afafe1626130","span":{"start":506858,"end":510215}}},{"verdict":"citation_unresolved","cited":{"text":"iets","regulation":"BWBR0005289","article":"6:9999"},"error":{"kind":"not_found","code":"article_not_found","message":"no article of BWBR0005289 rendition 2026-07-16_0 [9999]","detail":[]}},{"verdict":"quote_found","cited":{"text":"Daarbij kunnen alle omstandigheden van het geval van belang zijn","ecli":"ECLI:NL:RBNNE:2026:3908","ordinal":34},"register":"rechtspraak","jurisdiction":"nl","blob":"5255cdec0ca8c909b2a110624edde98ea2471da2420cba5b923b20e3cfda5ed0","unit":{"ordinal":34,"kind":"para","section_path":"4/4.4.","span":{"start":9282,"end":10207},"content_hash":"72c5cfcf4b04ed10b82d71b43414268d1183c7d27f3c28ca6c04077e77e3825e"},"caveats":[{"kind":"truncated","window":1}]}]}}"#;
+    let quotes = serde_json::json!([
+        {"text": "a", "regulation": "BWBR0005289", "article": "6:162", "paragraph": "1"},
+        {"text": "b", "ecli": "ECLI:NL:RBNNE:2026:3908", "ordinal": 34, "later_name": true}
+    ]);
+    let file = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("quotes.json");
+    std::fs::write(&file, quotes.to_string()).unwrap();
+    let file = file.to_str().unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/quotes"))
+        .and(body_json(serde_json::json!({"quotes": quotes})))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let json = bron(&server, &["--json", "quote", "check", "--file", file]).await;
+    let human = bron(&server, &["quote", "check", "--file", file]).await;
+    let text = stdout(&human);
+
+    assert_eq!(json.status.code(), Some(6), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert_eq!(human.status.code(), Some(6), "{human:?}");
+    for said in [
+        "1  found  Artikel 162 lid 1  (507288..507815)\n",
+        "2  not as quoted  Artikel 162 lid 1  (507288..507815)\n   \"pleegt,\" where the \
+         quotation has \"begaat,\"\n   nothing where the quotation has \"te vergoeden.\"\n",
+        "3  not where cited, BWBR0005289 6:162 lid 1; found in Artikel 162  (506858..510215)\n",
+        "4  citation unresolved, BWBR0005289 6:9999: no article of BWBR0005289 rendition \
+         2026-07-16_0 [9999]\n",
+        "5  found  ECLI:NL:RBNNE:2026:3908 paragraph 34  (9282..10207)\n",
+    ] {
+        assert!(text.contains(said), "{said}\n{text}");
+    }
+}
+
+/// A verdict this build has never heard of is printed by name and is not
+/// found: exit 6, never a failure of bron's own.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_prints_a_verdict_it_has_no_name_for_and_exits_6() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"quotes":[{"verdict":"quote_paraphrased","cited":{"text":"x","ecli":"ECLI:NL:HR:2024:1780"}}]}}"#;
+    let server = answering("POST", "/api/v1/quotes", SENT).await;
+
+    let output = bron(
+        &server,
+        &["quote", "check", "x", "--ecli", "ECLI:NL:HR:2024:1780"],
+    )
+    .await;
+
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
+    assert_eq!(
+        stdout(&output),
+        "1  quote_paraphrased, ECLI:NL:HR:2024:1780\n"
+    );
+}
+
+/// The service refusing the whole question is a failure like any other: its
+/// usage exits 1, not 6.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_carries_a_refusal_of_the_whole_question() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/quotes"))
+        .respond_with(ResponseTemplate::new(400).set_body_raw(
+            r#"{"bron":1,"grade":"authority","error":{"kind":"usage","code":"missing_parameter","message":"quotes.0 cites a regulation and its article, or an ECLI","detail":[]}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let output = bron(&server, &["quote", "check", "x", "--article", "6:162"]).await;
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("quotes.0 cites a regulation and its article, or an ECLI"),
+        "{output:?}"
+    );
+}
+
+/// A quotation is a text and its citation, or a file of them; bron refuses
+/// neither and both itself, because no route takes either.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_takes_a_text_or_a_file() {
+    let server = MockServer::start().await;
+
+    for args in [
+        &["quote", "check", "--regulation", "BWBR0005289"][..],
+        &["quote", "check", "x", "--file", "quotes.json"][..],
+    ] {
+        let output = bron(&server, args).await;
+
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

@@ -18,7 +18,8 @@ use clap::{Args, Parser, Subcommand};
     long_about = "Answers what Dutch law said on a date, and what the courts and the \
                   official publications say, naming the document behind every answer and \
                   the byte range inside it.\n\n\
-                  Exit codes: 0 ok, 1 usage, 2 not found, 3 network, 4 upstream, 5 local."
+                  Exit codes: 0 ok, 1 usage, 2 not found, 3 network, 4 upstream, 5 local, \
+                  6 a quotation `quote check` read is not found where it cites."
 )]
 pub struct Cli {
     /// Machine-readable output.
@@ -50,6 +51,10 @@ pub enum Command {
     /// behind a text the service holds names it.
     #[command(subcommand)]
     Dossier(DossierCmd),
+
+    /// Quotations, read again in the texts they cite.
+    #[command(subcommand)]
+    Quote(QuoteCmd),
 
     /// Answers which article, from a question or from a citation.
     ///
@@ -111,6 +116,74 @@ pub enum Command {
         /// A byte range to cut, as an answer prints it: 349072..361267.
         #[arg(long, value_name = "START..END", value_parser = byte_range)]
         span: Option<(usize, usize)>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum QuoteCmd {
+    /// Whether the text a quotation cites holds it, word for word once white
+    /// space and quotation marks are folded alike, and never by meaning.
+    ///
+    /// One quotation from the command line, citing an article of a regulation
+    /// or a ruling by its ECLI, or up to ten from --file. Each answers a
+    /// verdict: found, with the unit that holds it; not as quoted, with each
+    /// difference; not where cited, with the unit of the same article or
+    /// ruling that holds it; or citation unresolved, with what the service
+    /// answered. Exits 0 where every quotation is found and 6 where one is
+    /// not, so a script can branch without reading the verdicts.
+    Check {
+        /// The quotation, as it stands in the text that relies on it.
+        #[arg(required_unless_present = "file", conflicts_with = "file")]
+        text: Option<String>,
+
+        /// The regulation it cites, as `law show` takes it: a BWB id or
+        /// celex:32016R0679. Sent exactly as typed.
+        #[arg(long)]
+        regulation: Option<String>,
+
+        /// The article of that regulation, e.g. 6:162. Sent exactly as typed.
+        #[arg(long)]
+        article: Option<String>,
+
+        /// One lid of that article. Sent exactly as typed.
+        #[arg(long)]
+        paragraph: Option<String>,
+
+        /// The day the text applied, YYYY-MM-DD. Sent exactly as typed.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        as_of: Option<String>,
+
+        /// The day the register is read on (zicht). Sent exactly as typed.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        as_known_on: Option<String>,
+
+        /// The ruling it cites, by its ECLI. Sent exactly as typed.
+        #[arg(long)]
+        ecli: Option<String>,
+
+        /// One rechtsoverweging of that ruling, e.g. 3.2.10. Sent exactly as
+        /// typed.
+        #[arg(long)]
+        number: Option<String>,
+
+        /// One paragraph of that ruling by its ordinal, as `case show` prints
+        /// it. Digits are sent as a number, anything else as typed.
+        #[arg(long, allow_negative_numbers = true)]
+        ordinal: Option<String>,
+
+        /// A JSON list of quotations, each an object as the service takes it:
+        /// `text` with `regulation` and `article` (and `paragraph`, `as_of`,
+        /// `as_known_on`), or with `ecli` (and `number` or `ordinal`). `-`
+        /// reads stdin. Sent as the file holds it.
+        #[arg(
+            long,
+            value_name = "FILE",
+            conflicts_with_all = [
+                "regulation", "article", "paragraph", "as_of", "as_known_on", "ecli", "number",
+                "ordinal",
+            ]
+        )]
+        file: Option<std::path::PathBuf>,
     },
 }
 

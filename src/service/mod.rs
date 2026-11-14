@@ -24,6 +24,7 @@ pub mod decisions;
 pub mod dossiers;
 pub mod model;
 pub mod publications;
+pub mod quotes;
 pub mod search;
 
 use crate::error::{Fault, Outcome};
@@ -48,6 +49,7 @@ pub use publications::{
     Manifestation, Publication, PublicationDossier, PublicationHit, PublicationQuery,
     PublicationSearch, PublicationUnit,
 };
+pub use quotes::{QuoteVerdict, QuoteVerdicts};
 pub use search::{Cited, Place, RankedLid, SearchData, SearchHit, SearchLid, SearchRequest};
 
 /// Where the service lives. Overrides [`DEFAULT`].

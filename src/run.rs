@@ -8,12 +8,12 @@ use std::io::{self, Write};
 use chrono::Utc;
 use serde::Serialize;
 
-use bron::error::{Fault, Outcome};
+use bron::error::{Fault, Outcome, exit};
 use bron::service::{self, Answered, Service};
 use bron::transport::Client;
 use bron::wire::{self, Envelope};
 
-use crate::cli::{Case, Cli, Command, DossierCmd, Law, Moment, Publication};
+use crate::cli::{Case, Cli, Command, DossierCmd, Law, Moment, Publication, QuoteCmd};
 use crate::render;
 
 /// One command's result, ready to be written out either way.
@@ -99,6 +99,7 @@ pub enum Answer {
     PublicationHits(Answered<service::PublicationSearch>),
     Publication(Box<Answered<service::Publication>>),
     Dossier(Box<Answered<service::DossierPapers>>),
+    Quotes(Box<Answered<service::QuoteVerdicts>>),
     Blob {
         envelope: Envelope<Box<wire::Blob>>,
         /// The bytes handed over, the whole document or the span cut from
@@ -142,7 +143,19 @@ impl Answer {
             Self::PublicationHits(a) => sent(out, &a.envelope),
             Self::Publication(a) => sent(out, &a.envelope),
             Self::Dossier(a) => sent(out, &a.envelope),
+            Self::Quotes(a) => sent(out, &a.envelope),
             Self::Blob { envelope, .. } => write(out, envelope),
+        }
+    }
+
+    /// The exit code of an answer the service gave: 0, or for `quote check`
+    /// 6 where a quotation is not found where it cites.
+    pub fn exit(&self) -> u8 {
+        match self {
+            Self::Quotes(a) if a.data.quotes.iter().any(|q| q.verdict != "quote_found") => {
+                exit::NOT_QUOTED
+            }
+            _ => exit::OK,
         }
     }
 
@@ -160,6 +173,7 @@ pub fn execute(cli: &Cli) -> Outcome<Answer> {
         Command::Case(case) => run_case(case, &service),
         Command::Publication(pub_) => run_publication(pub_, &service),
         Command::Dossier(dossier) => run_dossier(dossier, &service),
+        Command::Quote(quote) => run_quote(quote, &service),
         Command::Find {
             query,
             regulation,
@@ -713,6 +727,74 @@ fn run_dossier(cmd: &DossierCmd, service: &Service) -> Outcome<Answer> {
             )
             .map(|answered| Answer::Dossier(Box::new(answered))),
     }
+}
+
+// -- quotations ----------------------------------------------------------
+
+fn run_quote(cmd: &QuoteCmd, service: &Service) -> Outcome<Answer> {
+    let QuoteCmd::Check {
+        text,
+        regulation,
+        article,
+        paragraph,
+        as_of,
+        as_known_on,
+        ecli,
+        number,
+        ordinal,
+        file,
+    } = cmd;
+
+    let quotes = match (file, text) {
+        (Some(file), _) => quotations(file)?,
+        (None, Some(text)) => {
+            let mut quote = serde_json::Map::new();
+            quote.insert("text".into(), text.as_str().into());
+            for (name, value) in [
+                ("regulation", regulation),
+                ("article", article),
+                ("paragraph", paragraph),
+                ("as_of", as_of),
+                ("as_known_on", as_known_on),
+                ("ecli", ecli),
+                ("number", number),
+            ] {
+                if let Some(value) = value {
+                    quote.insert(name.into(), value.as_str().into());
+                }
+            }
+            // The service reads an ordinal as a JSON number, and a string of
+            // digits is not one; what is no integer goes as typed, for the
+            // service to refuse.
+            if let Some(ordinal) = ordinal {
+                let sent = ordinal
+                    .parse::<i64>()
+                    .map_or_else(|_| ordinal.as_str().into(), serde_json::Value::from);
+                quote.insert("ordinal".into(), sent);
+            }
+            serde_json::Value::Array(vec![quote.into()])
+        }
+        // clap requires a text where no file is named.
+        (None, None) => return Err(Fault::usage("quote check takes a text or --file")),
+    };
+
+    service
+        .quotes(&client()?, &quotes)
+        .map(|answered| Answer::Quotes(Box::new(answered)))
+}
+
+/// The quotations a file holds, as it holds them: bron reads the JSON to carry
+/// it and judges nothing in it.
+fn quotations(file: &std::path::Path) -> Outcome<serde_json::Value> {
+    let read = if file == std::path::Path::new("-") {
+        io::read_to_string(io::stdin())
+    } else {
+        std::fs::read_to_string(file)
+    }
+    .map_err(|e| Fault::usage(format!("cannot read {}: {e}", file.display())))?;
+
+    serde_json::from_str(&read)
+        .map_err(|e| Fault::usage(format!("{} holds no JSON: {e}", file.display())))
 }
 
 // -- shared --------------------------------------------------------------

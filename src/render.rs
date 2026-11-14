@@ -11,6 +11,7 @@ use std::io::{self, Write};
 
 use chrono::NaiveDate;
 
+use bron::service::quotes::{QuoteVerdict, QuotedUnit};
 use bron::service::{
     Article, CitingDecision, Consolidated, ContentsPart, CourtCount, Dossier, Expression, Had,
     Lineage, LinkedDecree, ListedDecision, Pinpoint, Place, Produced, Regulation, Relation, Remark,
@@ -1213,6 +1214,18 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             caveats(&a.caveats, out)
         }
 
+        // A block per quotation, its verdict first and what bears on it
+        // beneath, in the order asked.
+        Answer::Quotes(a) => {
+            for (at, quote) in a.data.quotes.iter().enumerate() {
+                if at > 0 {
+                    writeln!(out)?;
+                }
+                verdict(out, at + 1, quote)?;
+            }
+            caveats(&a.caveats, out)
+        }
+
         // The bytes on stdout exactly as they hashed, and nothing else there:
         // anything written beside them would change what a pipe hashes. What
         // was checked goes to stderr.
@@ -2168,6 +2181,118 @@ fn pinpoint(place: Option<&Pinpoint>, part: Option<&str>) -> Option<String> {
     });
 
     read.or_else(|| part.map(str::to_string))
+}
+
+/// One quotation's verdict, the unit it names, and the limits on it.
+fn verdict(out: &mut impl Write, at: usize, quote: &QuoteVerdict) -> io::Result<()> {
+    let cited = citation(&quote.cited);
+    let ruling = quote.cited.get("ecli").and_then(serde_json::Value::as_str);
+    let name = |unit: &QuotedUnit| {
+        let mut name = match (&unit.label, ruling, unit.ordinal) {
+            (Some(label), ..) => label.clone(),
+            (None, Some(ecli), Some(ordinal)) => format!("{ecli} paragraph {ordinal}"),
+            _ => cited.clone(),
+        };
+        if let Some(span) = &unit.span {
+            let _ = write!(name, "  ({}..{})", span.start, span.end);
+        }
+        name
+    };
+
+    match (
+        quote.verdict.as_str(),
+        &quote.unit,
+        &quote.found_elsewhere,
+        &quote.divergence,
+        &quote.error,
+    ) {
+        ("quote_found", Some(unit), ..) => writeln!(out, "{at}  found  {}", name(unit))?,
+        ("quote_mismatch", _, Some(elsewhere), ..) => writeln!(
+            out,
+            "{at}  not where cited, {cited}; found in {}",
+            name(elsewhere)
+        )?,
+        ("quote_mismatch", _, None, Some(divergence), _) => {
+            writeln!(out, "{at}  not as quoted  {}", name(&divergence.unit))?;
+            let side = |words: &str| {
+                if words.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    format!("\"{words}\"")
+                }
+            };
+            for difference in &divergence.differences {
+                writeln!(
+                    out,
+                    "   {} where the quotation has {}",
+                    side(&difference.text),
+                    side(&difference.quoted)
+                )?;
+            }
+        }
+        ("quote_mismatch", ..) => writeln!(out, "{at}  not found in {cited}")?,
+        ("citation_unresolved", .., Some(failure)) => writeln!(
+            out,
+            "{at}  citation unresolved, {cited}: {}",
+            failure.message
+        )?,
+        (verdict, ..) => writeln!(out, "{at}  {verdict}, {cited}")?,
+    }
+
+    if let Some(rendition) = &quote.rendition {
+        let mut read = format!("   rendition {rendition}");
+        if let Some(day) = &quote.as_of {
+            let _ = write!(read, ", as of {day}");
+        }
+        if let Some(day) = &quote.as_known_on {
+            let _ = write!(read, ", as known on {day}");
+        }
+        writeln!(out, "{read}")?;
+    }
+    if let Some(blob) = &quote.blob {
+        writeln!(out, "   source: {blob}")?;
+    }
+    for caveat in quote.caveats.iter().map(Caveat::stated) {
+        // The service reads a cited paragraph as a page of the ruling one
+        // unit long: a window of the read, and no filter that missed matches.
+        let line = match caveat {
+            Caveat::Truncated { window } => {
+                format!("note: the service read the {window} unit(s) cited and no more")
+            }
+            other => caveat_line(&other),
+        };
+        writeln!(out, "   {line}")?;
+    }
+    Ok(())
+}
+
+/// What a quotation cites, as it was asked: a regulation's article and lid,
+/// or a ruling and its number or paragraph.
+fn citation(cited: &serde_json::Value) -> String {
+    let named = |name: &str| match cited.get(name) {
+        Some(serde_json::Value::String(value)) => Some(value.clone()),
+        Some(serde_json::Value::Null) | None => None,
+        Some(value) => Some(value.to_string()),
+    };
+
+    let mut citation = match named("ecli") {
+        Some(ecli) => ecli,
+        None => [named("regulation"), named("article")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    for (name, word) in [
+        ("paragraph", "lid"),
+        ("number", ""),
+        ("ordinal", "paragraph"),
+    ] {
+        if let Some(value) = named(name) {
+            let _ = write!(citation, " {}", format!("{word} {value}").trim_start());
+        }
+    }
+    citation
 }
 
 /// What the service's line did to a search: which hits it held back, or

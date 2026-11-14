@@ -74,7 +74,7 @@ fn main() -> ExitCode {
                 eprintln!("bron: cannot write output: {e}");
                 return ExitCode::from(exit::LOCAL);
             }
-            ExitCode::SUCCESS
+            ExitCode::from(answer.exit())
         }
         Err(fault) => {
             report(&fault, cli.json);

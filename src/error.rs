@@ -27,6 +27,8 @@ pub mod exit {
     pub const NETWORK: u8 = 3;
     pub const UPSTREAM: u8 = 4;
     pub const LOCAL: u8 = 5;
+    /// `quote check` answered, and a quotation is not found where it cites.
+    pub const NOT_QUOTED: u8 = 6;
 }
 
 #[derive(Debug, thiserror::Error)]
