@@ -1018,10 +1018,16 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     (_, Some(path)) => format!("{path}, paragraph {}", paragraph.ordinal),
                     _ => format!("paragraph {}", paragraph.ordinal),
                 };
-                // The Court's number is how its paragraph is cited; the ordinal
-                // stays beside it, because --offset counts ordinals.
+                // The number is how the paragraph is cited, as a point of the
+                // Court's or a Dutch court's rechtsoverweging; the ordinal stays
+                // beside it, because --offset counts ordinals.
                 if let Some(number) = &paragraph.number {
-                    name = format!("point {number}, {name}");
+                    let cited = if decision.register == "cellar" {
+                        "point"
+                    } else {
+                        "r.o."
+                    };
+                    name = format!("{cited} {number}, {name}");
                 }
                 writeln!(
                     out,

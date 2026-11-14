@@ -6391,6 +6391,30 @@ async fn case_show_reads_a_case_of_the_eu_in_english_under_the_court_s_numbers()
     );
 }
 
+/// A Dutch court numbers its rechtsoverwegingen, and a lawyer cites one as
+/// r.o.: 'point' is how the Court of Justice's numbers are cited and no Dutch
+/// court's. ECLI:NL:HR:2026:1939 as production answered it on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_names_a_dutch_number_as_a_rechtsoverweging() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"decision":{"id":"ECLI:NL:HR:2026:1939","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Hoge Raad","decided_on":"2026-11-13","published_on":"2026-11-13","known_since":"2026-11-13T12:01:49+01:00","has_body":true,"rendition":{"language":"nl","blob":"eb82873845023b2c5c8674e245abc333e9077672f1598a50eadae67ed4f5e304","blob_size":7482},"superseded":[],"native":{"type":"Uitspraak","creator":"http://standaarden.overheid.nl/owms/terms/Hoge_Raad_der_Nederlanden","procedure":["Cassatie"],"zaaknummer":["26/02216"],"subject":["Bestuursrecht; Belastingrecht"],"vindplaatsen":["Rechtspraak.nl"]}},"paragraphs":[{"ordinal":9,"kind":"para","section_path":"1/1.1","number":"1.1","span":{"start":4528,"end":4872},"content_hash":"16a46ee142a2e14d33681a72bc359d6dc0c4bb1c540df012eb1dc5eabedc7a61"}]},"caveats":[{"kind":"truncated","window":1}]}"#;
+    let server = answering(
+        "GET",
+        "/api/v1/decisions/ECLI:NL:HR:2026:1939/paragraphs",
+        SENT,
+    )
+    .await;
+
+    let output = bron(&server, &["case", "show", "ECLI:NL:HR:2026:1939"]).await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains("\nr.o. 1.1, 1/1.1, paragraph 9  (4528..4872)\n"),
+        "{text}"
+    );
+    assert!(!text.contains("point"), "{text}");
+}
+
 /// An older case prints the report for the hearing beside its judgment, two
 /// documents: where the page crosses from one into the other, the document
 /// the spans below point into is named.
