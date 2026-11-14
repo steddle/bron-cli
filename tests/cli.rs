@@ -6505,6 +6505,39 @@ async fn case_show_reads_one_rechtsoverweging_by_its_number() {
     );
 }
 
+/// A number the rule could not tell from a quotation names every paragraph
+/// that prints it too, and says how to read one: by offset, since with
+/// `--number` the offset counts inside the rechtsoverweging. ECLI:NL:PHR:2018:616
+/// r.o. 2.2 as production answered it on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_number_names_the_paragraphs_that_print_it_too() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"decision":{"id":"ECLI:NL:PHR:2018:616","register":"rechtspraak","jurisdiction":"nl","form":"opinion","court":"Parket bij de Hoge Raad","decided_on":"2018-05-28","published_on":"2018-06-15","known_since":"2025-08-04T09:43:46+02:00","has_body":true,"rendition":{"language":"nl","blob":"8e441b7161c8ed1d69a0f48e615709bca13aa5c50496de63f432509d4c900e37","blob_size":169147},"superseded":[],"native":{"type":"Conclusie","creator":"http://standaarden.overheid.nl/owms/terms/Parket_bij_de_Hoge_Raad","procedure":[],"zaaknummer":["17/04506"],"subject":["Bestuursrecht; Belastingrecht"],"vindplaatsen":["Rechtspraak.nl","V-N Vandaag 2018/1252","NLF 2018/1434 met annotatie van Heleen Elbert","V-N 2018/35.25","NTFR 2018/1686 met annotatie van mr. J. Rolleman","FutD 2018-1624","Viditax (FutD) 2018061503"]}},"paragraphs":[{"ordinal":37,"kind":"para","section_path":"2/2.2.","number":"2.2","span":{"start":21339,"end":21580},"content_hash":"ae1074147c9d9d55d7be89903d87fd1d92ddaab66d8ac4c0efb576bcd8edb9b8","rendered":"Op 12 januari 2012 is de auto voor het eerst geregistreerd, te weten in het Duitse kentekenregister op naam van [C], bestuurder van [A] B.V., op een adres te Zwitserland. Daarbij is de auto voorzien van een Duits exportkenteken."}]},"caveats":[{"kind":"ambiguous_number","number":"2.2","ordinals":[42,228,337,342]},{"kind":"numbers_may_be_quoted"}]}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions/ECLI:NL:PHR:2018:616/paragraphs"))
+        .and(query_param("number", "2.2"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["case", "show", "ECLI:NL:PHR:2018:616", "--number", "2.2"],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        text.contains(
+            "\nnote: paragraphs 42, 228, 337 and 342 print 2.2 too, and bron cannot tell the \
+             court's own number from a quotation's: read them before citing, paragraph 42 with \
+             case show --offset 41 --limit 1, without --number\n"
+        ),
+        "{text}"
+    );
+}
+
 /// A ruling the service has not read for its numbers answers `--number` with
 /// `numbers_not_read`, under `corpus`: carried through as stated, exit 4, and
 /// the message says to read it by offset. ECLI:NL:PHR:2018:616 r.o. 2.2 as

@@ -586,6 +586,11 @@ pub enum Caveat {
     /// the text is published by `publisher`, which bron does not read yet.
     TextPublishedElsewhere { publisher: String },
 
+    /// The paragraphs at `ordinals` also print `number`, or one under it, and
+    /// the service set them aside: it cannot tell the court's own number from
+    /// a passage the ruling quotes.
+    AmbiguousNumber { number: String, ordinals: Vec<u32> },
+
     /// From `from`, the feed's stamp, the service has not yet read under which
     /// area of law the feed lists the rulings: a walk by `since` stops there
     /// and `subject` leaves them out.
@@ -827,6 +832,10 @@ impl Caveat {
             TextPublishedElsewhere {
                 publisher: String,
             },
+            AmbiguousNumber {
+                number: String,
+                ordinals: Vec<u32>,
+            },
             SubjectNotRead {
                 from: String,
             },
@@ -980,6 +989,9 @@ impl Caveat {
             Ok(Stated::TextWithheld { because }) => Self::TextWithheld { because },
             Ok(Stated::TextPublishedElsewhere { publisher }) => {
                 Self::TextPublishedElsewhere { publisher }
+            }
+            Ok(Stated::AmbiguousNumber { number, ordinals }) => {
+                Self::AmbiguousNumber { number, ordinals }
             }
             Ok(Stated::SubjectNotRead { from }) => Self::SubjectNotRead { from },
             Err(_) => Self::Unrecognised {
@@ -1189,12 +1201,19 @@ mod tests {
     }
 
     #[test]
-    fn the_limits_on_a_tuchtcollege_text_and_an_unread_subject_keep_their_fields() {
+    fn the_limits_on_a_tuchtcollege_text_a_number_and_an_unread_subject_keep_their_fields() {
         for (stated, named) in [
             (
                 serde_json::json!({"kind": "text_published_elsewhere", "publisher": "tuchtrecht.overheid.nl"}),
                 Caveat::TextPublishedElsewhere {
                     publisher: "tuchtrecht.overheid.nl".into(),
+                },
+            ),
+            (
+                serde_json::json!({"kind": "ambiguous_number", "number": "2.2", "ordinals": [42, 228]}),
+                Caveat::AmbiguousNumber {
+                    number: "2.2".into(),
+                    ordinals: vec![42, 228],
                 },
             ),
             (

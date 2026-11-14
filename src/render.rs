@@ -2266,6 +2266,18 @@ fn verdict(out: &mut impl Write, at: usize, quote: &QuoteVerdict) -> io::Result<
     Ok(())
 }
 
+/// Numbers as a sentence lists them: `42, 228 and 337`.
+fn listed(numbers: &[u32]) -> String {
+    match numbers.split_last() {
+        Some((last, rest)) if !rest.is_empty() => {
+            let rest: Vec<String> = rest.iter().map(u32::to_string).collect();
+            format!("{} and {last}", rest.join(", "))
+        }
+        Some((last, _)) => last.to_string(),
+        None => String::new(),
+    }
+}
+
 /// What a quotation cites, as it was asked: a regulation's article and lid,
 /// or a ruling and its number or paragraph.
 fn citation(cited: &serde_json::Value) -> String {
@@ -2792,6 +2804,25 @@ fn caveat_line(caveat: &Caveat) -> String {
             "note: the text of this ruling is published on {publisher}, which bron does not read \
              yet."
         ),
+        Caveat::AmbiguousNumber { number, ordinals } => {
+            let first = ordinals.first().copied().unwrap_or_default();
+            let read = format!(
+                "case show --offset {} --limit 1, without --number",
+                first.saturating_sub(1)
+            );
+            match ordinals.as_slice() {
+                [one] => format!(
+                    "note: paragraph {one} prints {number} too, and bron cannot tell the court's \
+                     own number from a quotation's: read it before citing, with {read}"
+                ),
+                _ => format!(
+                    "note: paragraphs {} print {number} too, and bron cannot tell the court's own \
+                     number from a quotation's: read them before citing, paragraph {first} with \
+                     {read}",
+                    listed(ordinals)
+                ),
+            }
+        }
         Caveat::SubjectNotRead { from } => format!(
             "note: from {from} on, bron has not yet read under which area of law the feed lists \
              the rulings, so a walk by --since stops there and --subject leaves them out until \
@@ -3479,6 +3510,30 @@ mod tests {
         assert!(read.contains("not asked yet or did not answer"), "{read}");
         assert!(!unresolved.contains("no sentence for"), "{unresolved}");
         assert!(unresolved.contains("3 article(s)"), "{unresolved}");
+    }
+
+    /// Every paragraph the rule set aside is named, and the way to read one
+    /// works without `--number`, whose offset counts from the rechtsoverweging.
+    #[test]
+    fn an_ambiguous_number_names_every_paragraph_that_prints_it() {
+        let line = |ordinals: serde_json::Value| {
+            super::caveat_line(&Caveat::stated(&serde_json::json!({
+                "kind": "ambiguous_number", "number": "2.2", "ordinals": ordinals,
+            })))
+        };
+
+        assert_eq!(
+            line(serde_json::json!([42, 228, 337, 342])),
+            "note: paragraphs 42, 228, 337 and 342 print 2.2 too, and bron cannot tell the \
+             court's own number from a quotation's: read them before citing, paragraph 42 with \
+             case show --offset 41 --limit 1, without --number"
+        );
+        assert_eq!(
+            line(serde_json::json!([42])),
+            "note: paragraph 42 prints 2.2 too, and bron cannot tell the court's own number \
+             from a quotation's: read it before citing, with case show --offset 41 --limit 1, without \
+             --number"
+        );
     }
 
     /// A place reads as a reader cites it, and a fragment the service reads no
