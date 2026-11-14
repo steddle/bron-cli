@@ -725,8 +725,8 @@ pub enum Case {
         /// e.g. 3.2.10, with the paragraphs that continue it and those
         /// numbered under it. Sent exactly as typed: the service refuses it
         /// for a case of the EU and a besluit of the ACM, and answers
-        /// numbers_not_read for a ruling it has not read for its numbers,
-        /// which --offset reads.
+        /// numbers_not_read for a ruling it has not read for its numbers:
+        /// read that one by --offset.
         #[arg(long)]
         number: Option<String>,
     },
