@@ -1,9 +1,6 @@
 [package]
 name = "bron"
-# 0.0.0 until the first tag. The changelog states the JSON contract is not
-# stable until there is a v0.1.0, and a manifest claiming that version before
-# the tag exists would make it false.
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 # Let chains in `if` are stable from 1.88.
 rust-version = "1.88"
