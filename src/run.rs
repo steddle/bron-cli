@@ -1,4 +1,4 @@
-//! What each command actually does.
+//! What each command does.
 //!
 //! Every arm returns an [`Answer`]. Nothing here prints: that happens once, at
 //! the edge, so the two output formats cannot describe different things.

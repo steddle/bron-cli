@@ -2,8 +2,8 @@
 //!
 //! Every call to the service goes through `Service::read`, so there is one
 //! place that knows what a bron envelope is and one place that turns a failure
-//! into a [`Fault`]. A second path around it is how `bron find` came to report
-//! that nothing matched a question the service had never been asked.
+//! into a [`Fault`]. A second path around it could report that nothing
+//! matched a question the service was never asked.
 
 use std::fmt::Write as _;
 
@@ -43,9 +43,9 @@ pub struct Answered<T> {
 /// Deliberately permissive, and no serde tag makes the pair an enum. `caveats`
 /// sits beside both fields, so a tagged enum fights the third field, and an
 /// untagged one answers a real deserialisation failure with "matched no
-/// variant", stripped of the field and position — on exactly the failure this
-/// module exists to diagnose. The wire shape stays loose;
-/// [`Answer::settle`] collapses it exactly once.
+/// variant", stripped of the field and position, on the failure this module
+/// exists to diagnose. The wire shape stays loose; [`Answer::settle`]
+/// collapses it once.
 #[derive(Debug, Deserialize)]
 struct Envelope<T> {
     data: Option<T>,

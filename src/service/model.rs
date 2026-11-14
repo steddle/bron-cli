@@ -2,9 +2,9 @@
 //!
 //! Received shapes and nothing else: no rendering, no policy, no decisions.
 //! Only the fields bron reads are named, so a field the service adds later does
-//! not break a build here. A named field is required exactly where
-//! `public/openapi.json` requires it: the service leaves a null out, so a field
-//! the document does not require is absent on some row of some answer.
+//! not break a build here. A named field is required exactly where the
+//! service's OpenAPI document requires it: the service leaves a null out, so a
+//! field the document does not require is absent on some row of some answer.
 
 use chrono::NaiveDate;
 use serde::Deserialize;

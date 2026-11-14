@@ -206,9 +206,9 @@ const RANKING: &str = r#"{"bron":1,"grade":"authority","data":{"kind":"ranking",
              "content_hash":"a61a","distance":0.21,"places":1,"found_by":["vector"]}]},
   "caveats":[{"kind":"truncated","window":20}]}"#;
 
-/// Search went round the one place that reads an envelope, so a failure from it
-/// was classified by status code: a `usage` answer came back as `upstream`,
-/// exit 4, where the same failure on any other endpoint exits 1.
+/// A failure from search is read from its envelope like one from any other
+/// endpoint: a `usage` answer exits 1, and a status code never turns it into
+/// `upstream`, exit 4.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_search_failure_keeps_the_kind_the_service_gave_it() {
     let body = r#"{"bron":1,"grade":"authority","error":{
@@ -473,7 +473,7 @@ async fn a_citation_that_resolves_to_nothing_is_not_found() {
 /// Told apart by shape instead, every one of these falls out the same way: the
 /// ranking fails to match, the lookup fails too, and all that comes back is
 /// that the answer matched no variant of an untagged enum. No field, no type,
-/// no position, on exactly the kind of failure this has to catch.
+/// no position, on the kind of failure this has to catch.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_broken_ranking_is_reported_against_the_ranking() {
     async fn refused(body: &str) -> String {
@@ -610,7 +610,7 @@ async fn a_reading_the_service_contradicts_itself_about_still_arrives() {
     assert!(resolved[1].content_hash.is_none());
 }
 
-/// A response the service really sent, frozen under `tests/fixtures/`.
+/// A response the service sent, frozen under `tests/fixtures/`.
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -833,8 +833,8 @@ async fn a_publication_passed_through_is_not_held() {
     );
 }
 
-/// A refused lookup carries the service's own code, exactly as `law show`'s
-/// failures do: the CLI judges nothing the service judges, an unrecognised
+/// A refused lookup carries the service's own code, as `law show`'s failures
+/// do: the CLI judges nothing the service judges, an unrecognised
 /// collection prefix included.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_publication_id_the_service_refuses_carries_its_code() {

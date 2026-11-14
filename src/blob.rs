@@ -73,8 +73,6 @@ mod tests {
     use super::*;
 
     /// One name for one sequence of bytes, and a different one for any other.
-    /// That is the whole of what makes a span into a document resolvable by
-    /// someone who was not there when it was read.
     #[test]
     fn a_digest_is_the_content_and_nothing_else() {
         assert_eq!(

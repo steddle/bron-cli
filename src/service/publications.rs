@@ -1,10 +1,10 @@
 //! Reading the officiële publicaties through the bron service.
 //!
-//! The service holds what step 0 of `research/26-09-23-the-order-from-here.md`
-//! measured to name no person outside an office, passes on unkept what it has
-//! not measured, and refuses what it knows to name private persons. bron keeps
-//! no publisher client of its own for this lane any more: a lookup and a
-//! search are each one call, read the same way `law show` and `find` are.
+//! The service holds what it has measured to name no person outside an
+//! office, passes on unkept what it has not measured, and refuses what it
+//! knows to name private persons. bron has no publisher client of its own: a
+//! lookup and a search are each one call, read the same way `law show` and
+//! `find` are.
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};

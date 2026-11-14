@@ -125,8 +125,8 @@ impl Service {
     /// Regulations whose name matches a term.
     ///
     /// The service matches on every name the register gives a regulation in its
-    /// WTI, so `Awb` finds the Algemene wet bestuursrecht where a title search
-    /// never did.
+    /// WTI, so `Awb` finds the Algemene wet bestuursrecht, which a title search
+    /// misses.
     pub fn regulations(
         &self,
         client: &Client,
@@ -622,8 +622,8 @@ mod tests {
     }
 
     /// A setting is refused for naming no service, not for surviving
-    /// `normalise` badly. Two of these reached the first request and came back
-    /// as `upstream`, which charged the service for what the caller typed.
+    /// `normalise` badly. Carried to the first request, these would come back
+    /// as `upstream` and charge the service for what the caller typed.
     #[test]
     fn a_setting_that_names_no_service_is_a_usage_failure() {
         for named in [
@@ -694,7 +694,7 @@ mod tests {
 
     #[test]
     fn a_base_that_already_names_the_api_version_is_accepted() {
-        // The obvious thing to paste is the URL you were just reading, and that
+        // The obvious thing to paste is the URL you were reading, and that
         // one ends in /api/v1. Both spellings have to land on the same place.
         assert_eq!(
             normalise("https://bron.steddle.com/api/v1"),

@@ -316,8 +316,8 @@ async fn a_person_reads_both_coordinates_the_service_bound_the_answer_to() {
     assert!(text.contains("Artikel 162"), "{text}");
 }
 
-/// A field and a caveat this build has no name for, on both new routes, so the
-/// pass-through is proved by what survives rather than by what is read.
+/// A field and a caveat this build has no name for, so the pass-through is
+/// proved by what survives rather than by what is read.
 const PUBLISHED: &str = r#"{"bron":1,"grade":"authority",
  "data":[{"regulation_id":"BWBR0020368","label":"2026-09-01_0","in_force":{"from":"2026-09-01"},"withdrawn":false,"held":true,"upstream_hash_check":"matches","later_field":9}],
  "caveats":[{"kind":"something_later","window":50}]}"#;
@@ -2089,7 +2089,7 @@ fn side(kind: &str, status: &str, in_force_from: &str, text: &str) -> serde_json
 }
 
 /// The Opiumwet between 2026-09-16 and 2026-09-17 as the service compares it:
-/// Lijst I amended, which a comparison of its articles alone never saw, beside
+/// Lijst I amended, which a comparison of its articles alone misses, beside
 /// an article that commenced.
 fn changes_of_the_opiumwet() -> String {
     let expression = |label: &str, blob: &str| {
@@ -2737,8 +2737,6 @@ async fn law_show_prints_no_address_for_a_digest_that_is_no_digest() {
     assert!(!text.contains("/api/v1/blobs/"), "{text}");
 }
 
-// -- slice 2: the rows a person reads -----------------------------------
-
 /// Which rendition answered is part of the answer: a person reading 'as in
 /// force on 2019-06-01' is otherwise not told which text that date resolved to.
 #[tokio::test(flavor = "multi_thread")]
@@ -2810,8 +2808,8 @@ async fn law_parts_puts_the_waiting_line_first_and_names_its_dossiers() {
 }
 
 /// `dossiers` absent, from a rendition never read for them, and `dossiers: []`,
-/// from one read that states none, both leave the act's line as it always
-/// was: only a stated dossier earns the words.
+/// from one read that states none, both leave the act's line without them:
+/// only a stated dossier earns the words.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_parts_names_no_dossier_where_the_service_states_none() {
     for dossiers in ["", r#""dossiers":[],"#] {
@@ -3188,8 +3186,6 @@ async fn a_lookup_says_the_lid_and_the_name_it_read() {
         "{text}"
     );
 }
-
-// -- slice 3: the routes nothing reached ---------------------------------
 
 /// A document the service holds, and the digest of its own bytes.
 const DOCUMENT: &[u8] = b"<toestand><artikel>Eerste lid.</artikel></toestand>";
@@ -3684,10 +3680,10 @@ async fn law_relations_says_in_words_that_the_register_states_none() {
     );
 }
 
-/// Every name a route declares that a command had no way to send. A list cut
-/// at its window is unreadable past it without `--offset`, a comparison cannot
-/// be asked what the register showed, a question cannot be put to one law, and
-/// a search cannot be narrowed or dated.
+/// Every name a route declares, a command can send. Without them a list cut
+/// at its window is unreadable past it, a comparison cannot be asked what the
+/// register showed, a question cannot be put to one law, and a search cannot
+/// be narrowed or dated.
 #[tokio::test(flavor = "multi_thread")]
 async fn every_name_the_routes_declare_can_be_sent() {
     let server = MockServer::start().await;
@@ -3957,7 +3953,7 @@ async fn law_show_names_the_besluit_that_put_an_article_in_force_apart_from_its_
 }
 
 /// Production's ranking for 'schadevergoeding bij onrechtmatige daad' at a
-/// window of 3 on 2026-09-24, folded by hand as the service now folds it:
+/// window of 3 on 2026-09-24, folded by hand as the service folds it:
 /// artikel 6:162 BW lid 1, which ranked as a hit of its own, stands under
 /// its article in `leden`. The article and its lid are each given one other
 /// place, in the rendition before, so the answer holds `also` on both.
@@ -4085,7 +4081,7 @@ async fn an_untyped_page_is_left_to_the_service() {
     }
 }
 
-/// A response the service really sent, frozen under `tests/fixtures/`.
+/// A response the service sent, frozen under `tests/fixtures/`.
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -5037,9 +5033,8 @@ async fn law_relations_with_a_limit_of_zero_is_the_services_refusal() {
     .await;
 }
 
-/// `law search` is a route this change moved off a local `u32`: `--limit 0`
-/// reaches the service exactly as typed, and its refusal is the service's,
-/// not clap's own exit 2.
+/// `law search` takes `--limit` as text: `--limit 0` reaches the service
+/// exactly as typed, and its refusal is the service's, not clap's own exit 2.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_search_with_a_limit_of_zero_is_the_services_refusal() {
     refused_by_the_service(
@@ -5699,7 +5694,7 @@ async fn dossier_show_exits_on_the_code_the_service_states() {
 /// `papers_not_held` says how many of the papers the publisher lists the
 /// answer leaves out while bron reads them. The fixture is production's
 /// answer for 34608 on 2026-09-24 with the caveat added by hand, in the shape
-/// `openapi.json` states: `papers` the count listed, `count` the count left
+/// the service's OpenAPI document states: `papers` the count listed, `count` the count left
 /// out. No dossier production answered that day carried it.
 #[tokio::test(flavor = "multi_thread")]
 async fn dossier_show_says_how_many_papers_are_not_held_yet() {
@@ -5761,7 +5756,8 @@ async fn dossier_show_prints_each_papers_citation_and_what_replaced_it() {
 /// `fates_not_read` says bron has not asked the Tweede Kamer about a
 /// dossier's amendementen yet, and such a paper prints no besluit at all,
 /// because 'no besluit stated' would say the Kamer answered. The fixture is
-/// production's answer for 36195 on 2026-09-25, before `bron:fates` first ran.
+/// production's answer for 36195 on 2026-09-25, before the service first
+/// asked the Tweede Kamer about it.
 #[tokio::test(flavor = "multi_thread")]
 async fn dossier_show_prints_no_besluit_where_the_tweede_kamer_was_not_asked() {
     let answer = publication_fixture("bron-dossier-36195-fates-not-read.json");
@@ -5815,7 +5811,7 @@ async fn publication_search_says_how_many_hits_are_left_out() {
     assert_eq!(stdout(&json), format!("{page}\n"));
 }
 
-/// `publication search` posts the body the routes declares and reads its
+/// `publication search` posts the body the route declares and reads its
 /// `next`: `tests/fixtures/bron-publication-search-dossier-36195.json` is a
 /// real page against production on 2026-09-23.
 #[tokio::test(flavor = "multi_thread")]
@@ -6259,7 +6255,7 @@ async fn a_route_that_reads_no_act_of_the_eu_is_the_service_s_refusal() {
 /// A text of the EU owed in a language and not read yet is the service's
 /// `corpus` failure, exit 4, and one CELLAR serves in no form bron reads its
 /// not-found, exit 2. Both cross under the service's code. The bodies are
-/// written as `CellarActs` states them; production held every text asked.
+/// written as the service states them; production held every text asked.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_text_of_the_eu_bron_does_not_hold_crosses_under_its_code() {
     for (status, kind, message, detail, exit) in [
@@ -6900,8 +6896,8 @@ async fn case_search_names_a_besluit_of_the_acm_by_its_id() {
 /// A ruling the service withholds answers its court and days and no text, and
 /// a person reads that bron does not show it, never why. Production withholds
 /// none, so both answers are ECLI:NL:HR:2024:1780 as production answered it
-/// on 2026-10-25, edited to what `DecisionController::withheld` answers: held
-/// and then withheld, and withheld before the service held it, which states
+/// on 2026-10-25, edited to what the service answers for a withheld ruling:
+/// held and then withheld, and withheld before the service held it, which states
 /// no form.
 #[tokio::test(flavor = "multi_thread")]
 async fn case_show_says_bron_does_not_show_a_withheld_ruling_and_never_why() {

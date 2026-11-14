@@ -1,7 +1,5 @@
-//! The binary.
-//!
 //! Every command produces one value, and both outputs are written from it at
-//! the very edge, so `--json` and human output cannot describe different
+//! the edge, so `--json` and human output cannot describe different
 //! things. Where that value is the service's own answer, `--json` prints the
 //! envelope as sent.
 //!
@@ -122,7 +120,6 @@ fn report(fault: &Fault, json: bool) {
     for line in chain.iter().skip(1) {
         eprintln!("  caused by: {line}");
     }
-    // What the service named beside its message, one line each.
     for line in fault
         .statement()
         .map_or(&[][..], |statement| &statement.detail)

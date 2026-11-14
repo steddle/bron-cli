@@ -60,8 +60,7 @@ pub enum Command {
     ///
     /// Distinct from `law search`, which resolves a citeertitel to a BWB id and
     /// answers which law. This answers which article, across every corpus bron
-    /// holds vectors for, and its answer says which of them it actually
-    /// searched.
+    /// holds vectors for, and its answer says which of them it searched.
     ///
     /// A term that reads as a citation is looked up rather than ranked. `3:305a`
     /// put through a vector comes back as the Wft's numerically similar articles

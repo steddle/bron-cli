@@ -20,6 +20,7 @@ use std::process::ExitCode;
 /// | 3 | network: unreachable, timed out, refused |
 /// | 4 | upstream: reachable, but no answer came of it |
 /// | 5 | local: this machine could not do its part |
+/// | 6 | not quoted: `quote check` answered, and a quotation is not found where it cites |
 pub mod exit {
     pub const OK: u8 = 0;
     pub const USAGE: u8 = 1;
@@ -172,7 +173,6 @@ impl Fault {
         }
     }
 
-    /// This failure, as one the service stated.
     pub fn stated(self, statement: Statement) -> Self {
         Self::Stated {
             fault: Box::new(self),

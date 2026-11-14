@@ -171,7 +171,7 @@ pub enum Caveat {
     /// band it applies to unless the reader knows to split the line.
     ///
     /// `cell_separator` is carried from the service rather than restated here,
-    /// so a consumer splits on the value that actually produced the line.
+    /// so a consumer splits on the value that produced the line.
     TableFlattened {
         articles: Vec<String>,
         cell_separator: String,
@@ -991,17 +991,12 @@ impl Caveat {
 
 // -- documents -----------------------------------------------------------
 
-/// Who froze the bytes an answer rests on.
-///
-/// Two facts, said outright rather than left to be inferred from whether an
-/// unrelated timestamp happens to be there. What a consumer may conclude from a
-/// span differs between them: one is bron's own reading of bytes it hashed, the
-/// other is the service's word for what stands at an offset.
+/// Who froze the bytes an answer rests on, said outright rather than left to
+/// be inferred from whether an unrelated timestamp happens to be there.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case", tag = "frozen_by")]
 pub enum Frozen {
-    /// bron. It fetched these bytes, filed them under the digest of themselves,
-    /// and knows when it did because it did it.
+    /// bron fetched these bytes and hashed them itself, so it states when.
     Bron { fetched_at: DateTime<Utc> },
 }
 
@@ -1028,10 +1023,6 @@ impl Provenance {
         }
     }
 }
-
-// -- laws ----------------------------------------------------------------
-
-// -- documents -----------------------------------------------------------
 
 /// A document bron fetched by its digest and hashed itself, and the part of it
 /// that was asked for.

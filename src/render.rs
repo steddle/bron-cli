@@ -1919,8 +1919,6 @@ fn rendition_legend(renditions: &[Expression], err: &mut impl Write) -> io::Resu
     Ok(())
 }
 
-/// Which unit a text was found as: a numbered lid, a lid the register numbers
-/// not, or the whole article.
 /// The other places the text above sits, each named as a hit is.
 ///
 /// No distance and no finder: neither is stated of another place, only of
@@ -2745,8 +2743,7 @@ fn caveat_line(caveat: &Caveat) -> String {
              conclusie, a ruling published as metadata alone and one the feed last listed before \
              then are not listed, so a ruling missing here may still have been decided."
             .to_string(),
-        // The site's sentences, from the service's lang/en/search.php, whose
-        // wording goes past the lawyer project before it changes.
+        // The site's sentences, as the service words them.
         Caveat::ConsolidationNotAuthentic { act } => format!(
             "note: this is a consolidated text by the Publications Office of the European Union, \
              for information only and not legally binding. The authentic text is that of {act} in \
@@ -3532,9 +3529,9 @@ mod tests {
         );
     }
 
-    /// The rulings under an article, in the shape the service's
-    /// ArticleDecisionController answers: a ruling LiDO names no court, day
-    /// or rendition for carries none of those keys.
+    /// The rulings under an article, in the shape the service answers them: a
+    /// ruling LiDO names no court, day or rendition for carries none of those
+    /// keys.
     #[test]
     fn law_decisions_counts_the_rulings_found_and_says_what_the_list_cannot() {
         let envelope: serde_json::Value = serde_json::from_str(
@@ -3595,9 +3592,8 @@ mod tests {
         );
     }
 
-    /// The rulings rechtspraak's feed listed, in the shape the service's
-    /// DecisionController answers: a ruling whose title names no court or day
-    /// carries neither key.
+    /// The rulings rechtspraak's feed listed, in the shape the service answers
+    /// them: a ruling whose title names no court or day carries neither key.
     #[test]
     fn case_recent_counts_the_rulings_listed_per_court_and_marks_what_is_not_held() {
         let envelope: serde_json::Value = serde_json::from_str(

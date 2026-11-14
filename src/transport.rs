@@ -14,7 +14,6 @@ use reqwest::blocking::RequestBuilder;
 
 use crate::blob::BlobId;
 
-/// Identifies bron honestly to the service it reads.
 const USER_AGENT: &str = concat!(
     "bron/",
     env!("CARGO_PKG_VERSION"),
@@ -33,7 +32,7 @@ pub struct FetchedBytes {
     /// The HTTP status they came under. The service answers its envelope
     /// under an error status too.
     pub status: u16,
-    /// The URL actually dialled.
+    /// The URL as dialled, query string included.
     pub url: String,
 }
 
@@ -44,7 +43,7 @@ pub struct Fetched {
     pub text: String,
     /// See [`FetchedBytes::status`].
     pub status: u16,
-    /// The URL actually dialled.
+    /// The URL as dialled, query string included.
     pub url: String,
 }
 
@@ -78,7 +77,7 @@ impl Client {
     }
 
     /// The URL is taken from the built request rather than from the caller, so
-    /// what is reported is the address actually dialled, query string and all.
+    /// what is reported is the address dialled, query string and all.
     fn fetch(&self, request: RequestBuilder) -> Result<FetchedBytes> {
         let request = request.build().context("cannot build request")?;
         let url = request.url().to_string();
@@ -175,9 +174,7 @@ impl Refusal {
 
 /// A rate-limit refusal, and how long the host asked us to wait.
 ///
-/// `Retry-After` is read from the header, which is where it lives. A well
-/// known MCP implementation parses it out of the response body instead, so it
-/// silently never honours it and always falls back to a default.
+/// `Retry-After` is read from the header, where RFC 9110 puts it.
 fn refusal(response: &reqwest::blocking::Response) -> Option<Refusal> {
     if !matches!(response.status().as_u16(), 429 | 503) {
         return None;

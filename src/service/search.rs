@@ -46,14 +46,13 @@ pub struct SearchRequest<'a> {
 
 /// What the term turned out to be.
 ///
-/// Read at `kind`, never guessed at from which keys are present. The two shapes
-/// do happen to share no key, so telling them apart by shape works, and it
-/// works right up until something is wrong: a renamed field or a `distance`
-/// that arrives as a string makes the ranking fail to match, falls through to
-/// the lookup, fails there too, and reports that the answer matched no variant
-/// at all. No field, no line, no column, on exactly the failure this has to
-/// catch. With the tag read first, the shape is settled before a single field
-/// is, and what is wrong with it is named.
+/// Read at `kind`, never guessed from which keys are present. The two shapes
+/// share no key, so telling them apart by shape works until something is
+/// wrong: a renamed field or a `distance` that arrives as a string makes the
+/// ranking fail to match, falls through to the lookup, fails there too, and
+/// reports that the answer matched no variant, with no field, line or column.
+/// With the tag read first, the shape is settled before any field is, and
+/// what is wrong with it is named.
 ///
 /// `kind` is the word [`crate::wire::Caveat`] and the service's own `Fault`
 /// already use for the value a consumer switches on.
@@ -114,7 +113,7 @@ pub struct Cited {
 
 #[derive(Debug, Deserialize)]
 pub struct SearchHit {
-    /// Which corpus this came from: `wetgeving` today, more later.
+    /// Which corpus this came from, such as `wetgeving`.
     pub source: String,
     /// `article` or `lid`.
     pub unit: String,
