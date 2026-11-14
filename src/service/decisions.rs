@@ -1,4 +1,4 @@
-//! Reading rulings through the bron service.
+//! Reading rulings through the Bron service.
 //!
 //! The service fetches a ruling from rechtspraak on the first read that asks
 //! for it, freezes the bytes and answers every later read from them, so a
@@ -109,7 +109,7 @@ pub struct DecisionParagraph {
     pub section_path: Option<String>,
     pub span: Span,
     pub content_hash: String,
-    /// bron's rendering, present where `rendered` was asked.
+    /// Bron's rendering, present where `rendered` was asked.
     pub rendered: Option<String>,
     /// The publisher's bytes at the span, present where `raw` was asked.
     pub raw: Option<String>,

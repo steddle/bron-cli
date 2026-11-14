@@ -67,7 +67,7 @@ pub enum Fault {
     Unanswered(String),
 
     /// Nothing that could be read came back: a 502, 503 or 504 whose body is
-    /// not the bron envelope, which is the service or something in front of
+    /// not the Bron envelope, which is the service or something in front of
     /// it not answering in time, or a 429 refusal from in front of it. Exit 4
     /// like [`Fault::Upstream`], and named for its status rather than called
     /// an unusable answer, because none was given: a 504 is asked again later
@@ -81,7 +81,7 @@ pub enum Fault {
         retry_after: Option<u64>,
     },
 
-    /// bron could not do its own part on this machine.
+    /// Bron could not do its own part on this machine.
     ///
     /// Not the network and not what came back over it: an HTTP client that
     /// would not build, a stdout that will not take the answer. Nothing here is worth retrying against
@@ -91,7 +91,7 @@ pub enum Fault {
 
     /// A failure the service stated, and what it stated about it.
     ///
-    /// `fault` is the same failure in the kinds bron exits on, so the exit
+    /// `fault` is the same failure in the kinds Bron exits on, so the exit
     /// code and the sentence a person reads are its. `statement` is the
     /// service's word, and `--json` prints its error object as it arrived: its
     /// kind, a code this build has never heard of, a field the service adds
@@ -112,7 +112,7 @@ pub enum Fault {
 #[derive(Debug, Clone)]
 pub struct Statement {
     /// The service's kind as sent: `throttled`, `corpus` and `source` among
-    /// them, which bron exits on as upstream.
+    /// them, which Bron exits on as upstream.
     pub kind: String,
     /// Which failure it is, finer than the kind. Absent where the service
     /// stated none.
@@ -135,7 +135,7 @@ impl Fault {
         }
     }
 
-    /// The kind bron exits on. Part of the JSON contract for a failure bron
+    /// The kind Bron exits on. Part of the JSON contract for a failure Bron
     /// states itself, so renaming one of these is a breaking change to every
     /// consumer; a failure the service stated carries the service's own kind
     /// in [`Statement::kind`].
@@ -151,7 +151,7 @@ impl Fault {
     }
 
     /// The `code` the service stated for this failure, as sent. Absent on a
-    /// failure bron states itself, so presence says who stated it.
+    /// failure Bron states itself, so presence says who stated it.
     pub fn stated_code(&self) -> Option<&str> {
         self.statement()
             .and_then(|statement| statement.code.as_deref())
@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(Fault::not_found("law", "BWBR0000001").exit_byte(), 2);
         assert_eq!(
             Fault::Network {
-                service: "bron",
+                service: "Bron",
                 source: anyhow::anyhow!("x")
             }
             .exit_byte(),
@@ -259,7 +259,7 @@ mod tests {
         );
         assert_eq!(
             Fault::Upstream {
-                service: "bron",
+                service: "Bron",
                 source: anyhow::anyhow!("x")
             }
             .exit_byte(),
@@ -282,7 +282,7 @@ mod tests {
             .context("cannot read the manifest for BWBR0005289");
 
         let chain = Fault::Network {
-            service: "bron",
+            service: "Bron",
             source: inner,
         }
         .chain();
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn a_non_transport_failure_is_upstream_rather_than_network() {
-        let fault = from_source("bron", anyhow::anyhow!("malformed JSON"));
+        let fault = from_source("Bron", anyhow::anyhow!("malformed JSON"));
         assert_eq!(fault.exit_byte(), exit::UPSTREAM);
     }
 

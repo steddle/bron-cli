@@ -9,7 +9,7 @@
 //!
 //! A POST, alone among these, because the term is the caller's own question
 //! rather than an identifier. A question in a URL is a question in every access
-//! log the request passes, and bron writes nothing to disk.
+//! log the request passes, and Bron writes nothing to disk.
 
 use serde::{Deserialize, Serialize};
 

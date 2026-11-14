@@ -2,7 +2,7 @@
 //!
 //! The service reads each quotation again in the unit it cites, through the
 //! routes `law show` and `case show` read, and answers a verdict per
-//! quotation. bron sends the quotations as typed and prints the verdicts.
+//! quotation. Bron sends the quotations as typed and prints the verdicts.
 
 use serde::Deserialize;
 

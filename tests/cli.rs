@@ -1,7 +1,7 @@
 //! The binary, against a service that answers on purpose.
 //!
 //! The service's JSON is the contract. For a command that is exactly one call
-//! to the service, `--json` prints what the service said and nothing bron made
+//! to the service, `--json` prints what the service said and nothing Bron made
 //! of it, so a field this build has never heard of still reaches the consumer.
 //! What has to be proved is that nothing is re-serialised on the way through,
 //! that both coordinates of a moment reach the service, and that a limit this
@@ -70,7 +70,7 @@ async fn find_prints_the_envelope_the_service_sent() {
     assert_eq!(stdout(&output), format!("{LOOKUP}\n"));
 }
 
-/// Every answer ends in one newline. Where the service already sent it, bron
+/// Every answer ends in one newline. Where the service already sent it, Bron
 /// adds none: an empty line is a record to anything reading line by line.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_envelope_that_ends_in_a_newline_ends_in_one() {
@@ -140,7 +140,7 @@ async fn both_coordinates_of_a_moment_reach_the_service() {
 }
 
 /// One date names both coordinates of a zicht question: the text for a day, as
-/// the register had it that day. The service reads it so, and bron sends it
+/// the register had it that day. The service reads it so, and Bron sends it
 /// alone rather than copying it into the other coordinate.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_zicht_date_alone_is_sent_alone() {
@@ -242,7 +242,7 @@ async fn an_unnamed_moment_is_left_to_the_service() {
     }
 }
 
-/// `--lang` is the service's to judge: bron sends it as typed on every route
+/// `--lang` is the service's to judge: Bron sends it as typed on every route
 /// that declares it, rather than refusing it locally as an unknown flag.
 #[tokio::test(flavor = "multi_thread")]
 async fn lang_reaches_every_route_that_declares_it() {
@@ -501,7 +501,7 @@ async fn a_failure_the_service_stated_carries_its_code_to_the_consumer() {
     assert!(!said.contains("regulation_not_found"), "{said}");
 }
 
-/// A command line bron cannot parse never reaches the service, so no code is
+/// A command line Bron cannot parse never reaches the service, so no code is
 /// its to carry: presence says who stated the failure.
 ///
 /// Every value a service route reads reaches it as typed, so what still fails
@@ -681,7 +681,7 @@ async fn case_search_sends_the_question_in_the_body_and_prints_what_came_back() 
     assert!(json.status.success(), "{json:?}");
     assert_eq!(String::from_utf8_lossy(&json.stdout).trim_end(), HITS);
     assert!(
-        String::from_utf8_lossy(&human.stderr).contains("ranked the 7 ruling(s) bron has read"),
+        String::from_utf8_lossy(&human.stderr).contains("ranked the 7 ruling(s) Bron has read"),
         "{human:?}"
     );
 }
@@ -1205,7 +1205,7 @@ async fn holding_two_articles_numbered_one() -> MockServer {
 }
 
 /// A number that names two articles is the service's to say: it reads the
-/// rendition and states the caveat with both paths. bron carries that one
+/// rendition and states the caveat with both paths. Bron carries that one
 /// statement and adds none of its own, so the reader is told once.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_number_naming_two_articles_is_said_once() {
@@ -1278,7 +1278,7 @@ const NEWEST_FIRST: &str = r#"{"bron":1,"grade":"authority",
          {"regulation_id":"BWBR0008691","label":"2016-07-01_0","in_force":{"from":"2016-07-01","until":"2018-12-31"},"withdrawn":false,"held":true,"upstream_hash_check":"matches"}]}"#;
 
 /// The order of a list of renditions is the service's, and every channel shows
-/// the one it sends. bron prints rows as they arrive and sorts nothing.
+/// the one it sends. Bron prints rows as they arrive and sorts nothing.
 #[tokio::test(flavor = "multi_thread")]
 async fn renditions_are_printed_in_the_order_the_service_sent_them() {
     for (route, args) in [
@@ -1530,7 +1530,7 @@ async fn commencement_pending_reaches_law_show_in_words() {
     assert!(output.status.success(), "{output:?}");
     assert!(text.contains("stb-2026-8 commences stb-2025-62"), "{text}");
     assert!(text.contains("published 2026-01-21"), "{text}");
-    assert!(text.contains("bron does not read"), "{text}");
+    assert!(text.contains("Bron does not read"), "{text}");
     assert!(!text.contains("no sentence for"), "{text}");
 }
 
@@ -1939,7 +1939,7 @@ async fn law_parts_prints_the_envelope_the_service_sent() {
     assert_eq!(stdout(&output), format!("{PARTS}\n"));
 }
 
-/// The rendition bounds `/parts`, so `none` is a limit the service takes: bron
+/// The rendition bounds `/parts`, so `none` is a limit the service takes: Bron
 /// sends it as typed rather than refusing it as a word no integer parses as.
 #[tokio::test(flavor = "multi_thread")]
 async fn law_parts_sends_limit_none_as_typed() {
@@ -1957,7 +1957,7 @@ async fn law_parts_sends_limit_none_as_typed() {
     assert!(output.status.success(), "{output:?}");
 }
 
-/// bron judges nothing the service judges: `NONE` is not the literal the
+/// Bron judges nothing the service judges: `NONE` is not the literal the
 /// service reads, but that is the service's call, not the parser's. It
 /// reaches the service as typed and comes back as the service's own refusal.
 #[tokio::test(flavor = "multi_thread")]
@@ -3225,7 +3225,7 @@ async fn bron_blob_hands_over_the_bytes_a_digest_names_and_nothing_else() {
     );
 }
 
-/// A span is cut from bytes bron hashed itself, which is what makes the slice
+/// A span is cut from bytes Bron hashed itself, which is what makes the slice
 /// a proof rather than a report.
 #[tokio::test(flavor = "multi_thread")]
 async fn bron_blob_cuts_a_span_out_of_bytes_it_hashed() {
@@ -3276,8 +3276,8 @@ async fn bron_blob_for_a_digest_that_names_nothing_is_not_found() {
     assert_eq!(envelope["error"]["code"], "blob_not_found");
 }
 
-/// A span that is no byte range, or one outside the document bron hashed, is
-/// the caller's to fix: only bron holds those bytes, so only bron can say.
+/// A span that is no byte range, or one outside the document Bron hashed, is
+/// the caller's to fix: only Bron holds those bytes, so only Bron can say.
 #[tokio::test(flavor = "multi_thread")]
 async fn bron_blob_refuses_a_span_that_is_none_or_outside_the_bytes() {
     let digest = digest_of(DOCUMENT);
@@ -3294,7 +3294,7 @@ async fn bron_blob_refuses_a_span_that_is_none_or_outside_the_bytes() {
     }
 }
 
-/// `--json` answers what was checked, in bron's own envelope: the digest, the
+/// `--json` answers what was checked, in Bron's own envelope: the digest, the
 /// address, the length and the span, and the text where the bytes are text.
 /// Bytes that are no text, an image, are left for the human form to hand over.
 #[tokio::test(flavor = "multi_thread")]
@@ -3840,7 +3840,7 @@ async fn provenance_of_article_says_the_fields_describe_the_article() {
 /// Staatsblad prints otherwise after the amendementen.
 const ARTICLE_WITH_PASSAGES: &str = "bron-articles-BWBR0005290-271-passages.json";
 
-/// A passage bron read is printed as bron's reading, with the paper's
+/// A passage Bron read is printed as Bron's reading, with the paper's
 /// citation, the digest and span it rests on, the bill's formula it went
 /// through and that it explains an earlier text, and the caveats in words.
 #[tokio::test(flavor = "multi_thread")]
@@ -3854,7 +3854,7 @@ async fn law_show_prints_the_passages_that_explain_an_article_as_bron_s_reading(
     assert!(output.status.success(), "{output:?}");
     assert!(
         text.contains(
-            "explained in Kamerstukken II 2021/22, 36195, nr. 3 (bron's reading): \
+            "explained in Kamerstukken II 2021/22, 36195, nr. 3 (Bron's reading): \
              b0de7efd6ae84c8adcdf8e6d25ffb33f0749ff8b73acacdb50c8e3634d1324af (61395..63412)"
         ),
         "{text}"
@@ -3898,7 +3898,7 @@ async fn law_show_prints_the_passages_that_explain_an_article_as_bron_s_reading(
 /// the act, the besluit taken on nr. 31.
 const ARTICLE_WITH_AMENDMENTS: &str = "bron-articles-BWBR0005290-232-amendments.json";
 
-/// An amendement's change bron read is printed as bron's reading, with the
+/// An amendement's change Bron read is printed as Bron's reading, with the
 /// paper's citation, the digest and range it rests on, and whether the act
 /// prints its words.
 #[tokio::test(flavor = "multi_thread")]
@@ -3912,7 +3912,7 @@ async fn law_show_prints_the_amendementen_that_change_an_article_as_bron_s_readi
     assert!(output.status.success(), "{output:?}");
     assert!(
         text.contains(
-            "changed by amendement Kamerstukken II 2022/23, 36195, nr. 31 (bron's reading): \
+            "changed by amendement Kamerstukken II 2022/23, 36195, nr. 31 (Bron's reading): \
              cf1191078f129bf06b8434edced2ed923ff4566500b320e3ea8cb0aa13c269ed (1867..2122)"
         ),
         "{text}"
@@ -4176,7 +4176,7 @@ async fn a_row_says_how_many_of_its_waiting_units_state_a_day() {
 }
 
 /// A regulation whose waiting units state no day is listed as waiting with no
-/// day, never with a date bron made up, and several acts are named in one
+/// day, never with a date Bron made up, and several acts are named in one
 /// column.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_regulation_whose_units_state_no_day_says_so() {
@@ -4222,7 +4222,7 @@ async fn law_upcoming_with_nothing_waiting_is_an_answer() {
 /// A row of stage `published` is an act the Staatsblad holds and the BWB
 /// consolidates nowhere. It carries no regulation, so the row says plainly
 /// that this is a publication and not a consolidated text, names it as cited,
-/// and lists its dossiers and the besluiten bron holds that name it.
+/// and lists its dossiers and the besluiten Bron holds that name it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_published_row_says_it_is_not_consolidated_and_names_its_dossiers() {
     const PUBLISHED: &str = "bron-upcoming-published-row.json";
@@ -4300,7 +4300,7 @@ async fn a_stage_this_build_does_not_know_does_not_sink_the_answer() {
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
-/// `decrees_unmatched` counts every besluit bron could not link to an act and
+/// `decrees_unmatched` counts every besluit Bron could not link to an act and
 /// names the recent ones, in words rather than as an unrecognised limit.
 #[tokio::test(flavor = "multi_thread")]
 async fn decrees_unmatched_names_the_besluiten_bron_could_not_link() {
@@ -4385,7 +4385,7 @@ async fn a_withdrawn_unit_reads_as_the_register_states_it() {
     assert_eq!(stdout(&json), format!("{sent}\n"));
 }
 
-/// A caveat the service stated is printed as it stated it: bron names no
+/// A caveat the service stated is printed as it stated it: Bron names no
 /// unit out of `not_commenced`, whatever the units beside it say.
 #[tokio::test(flavor = "multi_thread")]
 async fn not_commenced_is_printed_as_the_service_stated_it() {
@@ -5400,7 +5400,7 @@ async fn a_rendition_that_prints_no_articles_says_so_and_points_at_its_parts() {
     }
 }
 
-/// A segment an address cannot carry is the one thing bron refuses before
+/// A segment an address cannot carry is the one thing Bron refuses before
 /// asking: the URL standard drops `.` and `..`, so the question would reach
 /// another route, and no request is made. Encoded, the same characters are
 /// text like any other and go out as typed.
@@ -5505,7 +5505,7 @@ async fn publication_show_prints_a_passed_through_publication() {
 
 const NOT_HELD_MARKER: &str = "not held";
 
-/// A publication id the service refuses, refused with its own code: bron
+/// A publication id the service refuses, refused with its own code: Bron
 /// pre-validates nothing this route judges.
 #[tokio::test(flavor = "multi_thread")]
 async fn publication_show_of_an_id_the_service_refuses_exits_on_its_code() {
@@ -5526,7 +5526,7 @@ async fn publication_show_of_an_id_the_service_refuses_exits_on_its_code() {
     assert_eq!(envelope["error"]["code"], "invalid_publication_id");
 }
 
-/// A publication bron is known to keep out is refused the same way: usage,
+/// A publication Bron is known to keep out is refused the same way: usage,
 /// exit 1, the service's own code in `--json`. Real body, read from
 /// production on 2026-09-23 for `stb-1998-310`, an AMvB that names the
 /// geslachtsnaam of children of the Royal House.
@@ -5658,7 +5658,7 @@ async fn dossier_show_of_papers_before_digital_says_so() {
 }
 
 /// A dossier no held text's act names is not found, and a value that is no
-/// dossier number is the service's to refuse: bron pre-validates neither.
+/// dossier number is the service's to refuse: Bron pre-validates neither.
 #[tokio::test(flavor = "multi_thread")]
 async fn dossier_show_exits_on_the_code_the_service_states() {
     let server = MockServer::start().await;
@@ -5692,7 +5692,7 @@ async fn dossier_show_exits_on_the_code_the_service_states() {
 }
 
 /// `papers_not_held` says how many of the papers the publisher lists the
-/// answer leaves out while bron reads them. The fixture is production's
+/// answer leaves out while Bron reads them. The fixture is production's
 /// answer for 34608 on 2026-09-24 with the caveat added by hand, in the shape
 /// the service's OpenAPI document states: `papers` the count listed, `count` the count left
 /// out. No dossier production answered that day carried it.
@@ -5753,7 +5753,7 @@ async fn dossier_show_prints_each_papers_citation_and_what_replaced_it() {
     assert_eq!(stdout(&json), format!("{answer}\n"));
 }
 
-/// `fates_not_read` says bron has not asked the Tweede Kamer about a
+/// `fates_not_read` says Bron has not asked the Tweede Kamer about a
 /// dossier's amendementen yet, and such a paper prints no besluit at all,
 /// because 'no besluit stated' would say the Kamer answered. The fixture is
 /// production's answer for 36195 on 2026-09-25, before the service first
@@ -5772,7 +5772,7 @@ async fn dossier_show_prints_no_besluit_where_the_tweede_kamer_was_not_asked() {
     assert!(!rows.contains("no besluit stated"), "{rows}");
     assert!(
         notes.contains(
-            "bron has not yet asked the Tweede Kamer about 21 amendement(en) or motie(s) here"
+            "Bron has not yet asked the Tweede Kamer about 21 amendement(en) or motie(s) here"
         ),
         "{notes}"
     );
@@ -5800,7 +5800,7 @@ async fn publication_search_says_how_many_hits_are_left_out() {
     assert!(output.status.success(), "{output:?}");
     assert!(
         said.contains(
-            "2 hit(s) on this page are of a kind bron does not open and are left out; the \
+            "2 hit(s) on this page are of a kind Bron does not open and are left out; the \
              publisher's next page may still hold more."
         ),
         "{said}"
@@ -5969,7 +5969,7 @@ async fn law_show_reads_an_article_of_an_act_of_the_eu() {
     for said in [
         "the register states no zicht dates for this text",
         "for information only and not legally binding. The authentic text is that of 32005L0029",
-        "bron runs it to the day before 02005L0029-20260927 takes effect",
+        "Bron runs it to the day before 02005L0029-20260927 takes effect",
         "a directive binds the Member States",
     ] {
         assert!(text.contains(said), "{said}: {text}");
@@ -6253,7 +6253,7 @@ async fn a_route_that_reads_no_act_of_the_eu_is_the_service_s_refusal() {
 }
 
 /// A text of the EU owed in a language and not read yet is the service's
-/// `corpus` failure, exit 4, and one CELLAR serves in no form bron reads its
+/// `corpus` failure, exit 4, and one CELLAR serves in no form Bron reads its
 /// not-found, exit 2. Both cross under the service's code. The bodies are
 /// written as the service states them; production held every text asked.
 #[tokio::test(flavor = "multi_thread")]
@@ -6531,7 +6531,7 @@ async fn case_show_number_names_the_paragraphs_that_print_it_too_and_a_quoted_co
     assert!(output.status.success(), "{output:?}");
     assert!(
         text.contains(
-            "\nnote: paragraphs 42, 228, 337 and 342 print 2.2 too, and bron cannot tell the \
+            "\nnote: paragraphs 42, 228, 337 and 342 print 2.2 too, and Bron cannot tell the \
              court's own number from a quotation's: read them before citing, paragraph 42 with \
              case show --offset 41 --limit 1, without --number\n"
         ),
@@ -6682,7 +6682,7 @@ async fn case_show_names_the_document_the_spans_of_a_case_of_the_eu_point_into()
     );
 }
 
-/// A case of the EU whose relations bron has not read yet says so, rather
+/// A case of the EU whose relations Bron has not read yet says so, rather
 /// than reading as a case that has none.
 #[tokio::test(flavor = "multi_thread")]
 async fn case_relations_of_a_case_of_the_eu_says_they_are_not_read() {
@@ -6700,7 +6700,7 @@ async fn case_relations_of_a_case_of_the_eu_says_they_are_not_read() {
     assert!(output.status.success(), "{output:?}");
     assert!(
         said.contains(
-            "bron has not read that for this case yet, so an empty list does not mean there are none"
+            "Bron has not read that for this case yet, so an empty list does not mean there are none"
         ),
         "{said}"
     );
@@ -6789,7 +6789,7 @@ async fn case_relations_of_a_dutch_ruling_names_each_article_by_its_label() {
         assert!(rows.contains(&row), "{row}{rows}");
     }
     assert!(!rows.contains("3214533"), "{rows}");
-    assert!(!rows.contains("bron's reading"), "{rows}");
+    assert!(!rows.contains("Bron's reading"), "{rows}");
     assert!(
         said.contains(
             "note: LiDO's computer recognised the articles and rulings marked (LiDO's reading) in \
@@ -6911,7 +6911,7 @@ async fn case_search_prints_the_words_of_each_hit() {
     );
 }
 
-/// A question no ruling bron holds is close to answers no hit, and a person
+/// A question no ruling Bron holds is close to answers no hit, and a person
 /// reads why: how many stood past the line and were held back, and the flag
 /// that shows them. Production's answer on 2026-11-14.
 #[tokio::test(flavor = "multi_thread")]
@@ -6929,7 +6929,7 @@ async fn case_search_says_no_ruling_is_close_and_how_many_it_held_back() {
     assert_eq!(stdout(&output), "");
     assert!(
         String::from_utf8_lossy(&output.stderr).contains(
-            "note: no ruling bron holds is close to the question, which says nothing of whether \
+            "note: no ruling Bron holds is close to the question, which says nothing of whether \
              one exists: 2 held back past the line at distance 0.48; --beyond-line shows them\n"
         ),
         "{output:?}"
@@ -6974,7 +6974,7 @@ async fn case_search_beyond_line_marks_each_hit_past_the_line() {
     );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains(
-            "note: no ruling bron holds is close to the question, which says nothing of whether \
+            "note: no ruling Bron holds is close to the question, which says nothing of whether \
              one exists: the 2 marked past the line at distance 0.48 do not answer the \
              question\n"
         ),
@@ -7017,7 +7017,7 @@ async fn case_search_names_a_besluit_of_the_acm_by_its_id() {
 // -- a withheld ruling ---------------------------------------------------
 
 /// A ruling the service withholds answers its court and days and no text, and
-/// a person reads that bron does not show it, never why. Production withholds
+/// a person reads that Bron does not show it, never why. Production withholds
 /// none, so both answers are ECLI:NL:HR:2024:1780 as production answered it
 /// on 2026-10-25, edited to what the service answers for a withheld ruling:
 /// held and then withheld, and withheld before the service held it, which states
@@ -7050,12 +7050,12 @@ async fn case_show_says_bron_does_not_show_a_withheld_ruling_and_never_why() {
         assert_eq!(stdout(&json), format!("{sent}\n"), "{name}");
         assert!(human.status.success(), "{name}: {human:?}");
         assert!(
-            text.starts_with(&format!("{head}bron does not show this ruling.\n")),
+            text.starts_with(&format!("{head}Bron does not show this ruling.\n")),
             "{name}: {text}"
         );
         assert!(
             text.contains(
-                "note: bron keeps the digests of what it held of this text and none of its bytes"
+                "note: Bron keeps the digests of what it held of this text and none of its bytes"
             ),
             "{name}: {text}"
         );
@@ -7091,7 +7091,7 @@ async fn case_show_names_where_a_tuchtcollege_publishes_its_text() {
     assert!(
         text.ends_with(
             "\nrechtspraak publishes ECLI:NL:TGZRAMS:2020:1 as its record alone.\n\n\
-             note: the text of this ruling is published on tuchtrecht.overheid.nl, which bron \
+             note: the text of this ruling is published on tuchtrecht.overheid.nl, which Bron \
              does not read yet.\n"
         ),
         "{text}"
@@ -7390,7 +7390,7 @@ async fn quote_check_reads_quotations_from_a_file_and_exits_6_on_one_not_found()
 }
 
 /// A verdict this build has never heard of is printed by name and is not
-/// found: exit 6, never a failure of bron's own.
+/// found: exit 6, never a failure of Bron's own.
 #[tokio::test(flavor = "multi_thread")]
 async fn quote_check_prints_a_verdict_it_has_no_name_for_and_exits_6() {
     const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"quotes":[{"verdict":"quote_paraphrased","cited":{"text":"x","ecli":"ECLI:NL:HR:2024:1780"}}]}}"#;
@@ -7433,7 +7433,7 @@ async fn quote_check_carries_a_refusal_of_the_whole_question() {
     );
 }
 
-/// A quotation is a text and its citation, or a file of them; bron refuses
+/// A quotation is a text and its citation, or a file of them; Bron refuses
 /// neither and both itself, because no route takes either.
 #[tokio::test(flavor = "multi_thread")]
 async fn quote_check_takes_a_text_or_a_file() {

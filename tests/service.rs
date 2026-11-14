@@ -1,7 +1,7 @@
 //! The wetgeving lane, against a service that answers on purpose.
 //!
 //! Every rendition, window and span in this lane is the service's answer, so
-//! what has to be proved offline is how bron reads one: that a limit the
+//! what has to be proved offline is how Bron reads one: that a limit the
 //! service states reaches the caller, that a failure keeps the kind and the
 //! detail the service gave it, and that the two shapes an answer comes in are
 //! read apart. Search is here too, because it is the one call whose parameter is
@@ -125,7 +125,7 @@ async fn a_withdrawn_rendition_is_named_all_the_way_to_the_caller() {
         answered.caveats
     );
 
-    // A limit stated under a name this bron has never heard of is carried
+    // A limit stated under a name this Bron has never heard of is carried
     // whole rather than dropped: a reader one release behind must still be able
     // to see what was said.
     assert!(
@@ -136,7 +136,7 @@ async fn a_withdrawn_rendition_is_named_all_the_way_to_the_caller() {
         answered.caveats
     );
 
-    // The leden arrive in order and carry the numbers bron opens them with.
+    // The leden arrive in order and carry the numbers Bron opens them with.
     let leden = &answered.data.articles[0].paragraphs;
     assert_eq!(leden.len(), 2);
     assert_eq!(leden[0].number.as_deref(), Some("1"));
@@ -321,7 +321,7 @@ async fn a_citation_is_looked_up_rather_than_ranked() {
     assert_eq!(citation, "8:4");
 
     // Both readings, in the order the service read them. Picking one would be
-    // bron deciding what a citation means, which is interpretation.
+    // Bron deciding what a citation means, which is interpretation.
     assert_eq!(
         resolved
             .iter()
@@ -366,7 +366,7 @@ async fn a_reading_that_found_a_rendition_without_text_says_so() {
     };
 
     // The service's own shape: a flag and three fields that are only there when
-    // it is set. What bron answers with is one type that cannot say both.
+    // it is set. What Bron answers with is one type that cannot say both.
     assert!(!resolved[0].held);
     assert!(resolved[0].content_hash.is_none());
     assert!(resolved[0].label.is_none());
@@ -529,7 +529,7 @@ async fn a_broken_ranking_is_reported_against_the_ranking() {
     }
 }
 
-/// A shape this bron has no name for is refused rather than read as the other
+/// A shape this Bron has no name for is refused rather than read as the other
 /// one. Guessing at it would answer a question the service did not.
 ///
 /// And it says which of the two is behind. A reader that reports its own
@@ -558,7 +558,7 @@ async fn a_shape_this_bron_does_not_know_is_refused() {
         fault.1
     );
     assert!(
-        !fault.1.contains("did not answer the bron envelope"),
+        !fault.1.contains("did not answer the Bron envelope"),
         "{}",
         fault.1
     );

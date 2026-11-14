@@ -439,7 +439,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             )?;
             writeln!(
                 err,
-                "linked decrees = besluiten bron holds that name the row's act, whether or not \
+                "linked decrees = besluiten Bron holds that name the row's act, whether or not \
                  the BWB has taken them in yet, - = it holds none; a published row's dossiers \
                  are the kamerstukdossiers the act states as its own"
             )?;
@@ -965,15 +965,15 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             if !decision.superseded.is_empty() {
                 writeln!(
                     out,
-                    "replaces {} earlier text(s) the publisher withdrew, which bron does not serve",
+                    "replaces {} earlier text(s) the publisher withdrew, which Bron does not serve",
                     decision.superseded.len()
                 )?;
             }
 
-            // That bron withholds it and never why, as the site says it.
+            // That Bron withholds it and never why, as the site says it.
             match (&decision.withheld_because, decision.register.as_str()) {
-                (Some(_), "acm") => writeln!(out, "\nbron does not show this besluit.")?,
-                (Some(_), _) => writeln!(out, "\nbron does not show this ruling.")?,
+                (Some(_), "acm") => writeln!(out, "\nBron does not show this besluit.")?,
+                (Some(_), _) => writeln!(out, "\nBron does not show this ruling.")?,
                 (None, _) if decision.has_body => {}
                 // A tuchtcollege's text is elsewhere, which its caveat names.
                 (None, "rechtspraak")
@@ -1080,7 +1080,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             if ruling.relations.is_empty() {
                 writeln!(
                     out,
-                    "No document bron holds states a relation for {}.",
+                    "No document Bron holds states a relation for {}.",
                     ruling.id
                 )?;
             }
@@ -1524,7 +1524,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     let _ = write!(row, "  {day}");
                 }
                 let _ = write!(row, "  {}", paper.kind.as_deref().unwrap_or("-"));
-                // Absent on a kind nobody votes on and where bron has not
+                // Absent on a kind nobody votes on and where Bron has not
                 // asked the Tweede Kamer; empty where it states no besluit,
                 // which is not a vote against.
                 match paper.fates.as_deref() {
@@ -1667,13 +1667,13 @@ fn write_unit(
     {
         writeln!(out, "in force through {besluit}")?;
     }
-    // bron's reading and not the publisher's, so each line says so and
+    // Bron's reading and not the publisher's, so each line says so and
     // carries the digest and span a reader checks it against.
     for passage in unit.passages.as_deref().unwrap_or_default() {
         let paper = passage.citation.as_deref().unwrap_or(&passage.paper);
         writeln!(
             out,
-            "explained in {paper} (bron's reading): {} ({}..{})",
+            "explained in {paper} (Bron's reading): {} ({}..{})",
             passage.stated_in, passage.span.start, passage.span.end
         )?;
         if let Some(through) = &passage.through {
@@ -1695,7 +1695,7 @@ fn write_unit(
         let paper = change.citation.as_deref().unwrap_or(&change.paper);
         writeln!(
             out,
-            "changed by amendement {paper} (bron's reading): {} ({}..{})",
+            "changed by amendement {paper} (Bron's reading): {} ({}..{})",
             change.stated_in, change.span.start, change.span.end
         )?;
         if let Some(through) = &change.through {
@@ -2343,7 +2343,7 @@ fn beyond_the_line(found: &bron::service::DecisionSearch) -> Option<String> {
 
     match (found.close_hit, past) {
         (Some(false), past) => Some(format!(
-            "note: no ruling bron holds is close to the question, which says nothing of whether \
+            "note: no ruling Bron holds is close to the question, which says nothing of whether \
              one exists{}",
             past.map(|past| format!(": {past}")).unwrap_or_default()
         )),
@@ -2409,13 +2409,13 @@ fn caveat_line(caveat: &Caveat) -> String {
                 .to_string()
         }
         Caveat::UpstreamHashRewritten => {
-            "note: the register rewrote this rendition after bron read it, and this is the \
-                 earlier text. It stays the answer until bron reads the rendition again."
+            "note: the register rewrote this rendition after Bron read it, and this is the \
+                 earlier text. It stays the answer until Bron reads the rendition again."
                 .to_string()
         }
         Caveat::UpstreamHashAbsent => {
             "note: the manifest published no hash for this rendition, so these bytes rest \
-                 on bron's own capture alone"
+                 on Bron's own capture alone"
                 .to_string()
         }
         Caveat::SeveralReadings {
@@ -2570,7 +2570,7 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::AmbiguousRendition { chosen, discarded } => format!(
             "note: more than one published rendition covers this date. This is {chosen}, \
                  which commenced last; {} also cover(s) it. Which governs is a question of \
-                 transitional law that bron does not answer.",
+                 transitional law that Bron does not answer.",
             discarded.join(", "),
         ),
         Caveat::SupersededKnowledge { visible_until } => format!(
@@ -2613,7 +2613,7 @@ fn caveat_line(caveat: &Caveat) -> String {
              What a treaty prints so is no announcement: some treaties never enter into force."
         ),
         Caveat::NotInBwb => "note: this list holds what the BWB prints, and the acts the \
-                             Staatsblad published that the BWB does not print, as far as bron \
+                             Staatsblad published that the BWB does not print, as far as Bron \
                              holds the Staatsblad. An act published before that and never printed \
                              in the BWB, the kinds of act counted as left out, and EU regulations \
                              are not in it."
@@ -2625,7 +2625,7 @@ fn caveat_line(caveat: &Caveat) -> String {
             fields.join(", "),
         ),
         Caveat::MachineReading { articles, readings } => format!(
-            "note: the passages and amendementen shown for article(s) {} are bron's reading of \
+            "note: the passages and amendementen shown for article(s) {} are Bron's reading of \
              the parliamentary papers' headings, the amendementen's places and the bill's \
              formulas (reading {}), which no publisher states; a heading may number an article \
              as the bill did, which the act can have given to another. Each is quoted by digest \
@@ -2652,7 +2652,7 @@ fn caveat_line(caveat: &Caveat) -> String {
              the register's own remark on each says the change will not take effect."
         ),
         // Every element, the aanhef too: the count is the service's, and naming
-        // only some of it would be bron deciding which text matters.
+        // only some of it would be Bron deciding which text matters.
         Caveat::TextOutsideArticles { expression, units } => format!(
             "note: rendition {expression} prints words that no unit holds: {}. No answer \
                  covers them and no comparison compared them.",
@@ -2697,7 +2697,7 @@ fn caveat_line(caveat: &Caveat) -> String {
         ),
         Caveat::DecreesUnmatched { unlinked, decrees } => {
             let mut note = format!(
-                "note: {unlinked} held besluit(en) name no act by reference or by chain, so bron \
+                "note: {unlinked} held besluit(en) name no act by reference or by chain, so Bron \
                  cannot say what they commence."
             );
             if !decrees.is_empty() {
@@ -2717,7 +2717,7 @@ fn caveat_line(caveat: &Caveat) -> String {
         Caveat::CommencementPending { decrees } => format!(
             "note: a published besluit names the act behind a waiting unit, and no rendition \
              here names it as commenced yet. Whether its day has come stands in its own words, \
-             which bron does not read: {}.",
+             which Bron does not read: {}.",
             decrees
                 .iter()
                 .map(|d| format!(
@@ -2728,22 +2728,22 @@ fn caveat_line(caveat: &Caveat) -> String {
                 .join(", "),
         ),
         Caveat::PublicationNotHeld => "note: this publication was passed on rather than kept; \
-             its digest is of the bytes bron read, and not one /blobs can serve again"
+             its digest is of the bytes Bron read, and not one /blobs can serve again"
             .to_string(),
         Caveat::SourceTotalEstimated => "note: the publisher's own total is an estimate, so \
              walking this search to its end can read a few hits more or fewer than it stated"
             .to_string(),
         Caveat::PapersBeforeDigital => "note: every act naming this dossier is from before \
-             1995, so its papers are scans in Staten-Generaal Digitaal, which bron does not read"
+             1995, so its papers are scans in Staten-Generaal Digitaal, which Bron does not read"
             .to_string(),
         Caveat::FateUnknown { papers } => format!(
             "note: {papers} amendement(en) or motie(s) here have no besluit stated in the Tweede \
              Kamer's open data: not put to a vote, withdrawn, from before 2008 which it holds \
              nothing about, or a paper the open data files under more than one dossier, which \
-             bron does not read. No besluit is not 'verworpen'."
+             Bron does not read. No besluit is not 'verworpen'."
         ),
         Caveat::FatesNotRead { papers } => format!(
-            "note: bron has not yet asked the Tweede Kamer about {papers} amendement(en) or \
+            "note: Bron has not yet asked the Tweede Kamer about {papers} amendement(en) or \
              motie(s) here, so no besluit is shown for them."
         ),
         Caveat::PapersNotHeld { count, papers } => format!(
@@ -2751,18 +2751,18 @@ fn caveat_line(caveat: &Caveat) -> String {
              held and are left out while they are read."
         ),
         Caveat::PublicationsLeftOut { count } => format!(
-            "note: {count} hit(s) on this page are of a kind bron does not open and are left \
+            "note: {count} hit(s) on this page are of a kind Bron does not open and are left \
              out; the publisher's next page may still hold more."
         ),
         Caveat::SearchUpcoming { count } => format!(
             "note: search over case law is still to come. This ranked the {count} ruling(s) \
-             bron has read, not all case law: a ruling missing here may still exist."
+             Bron has read, not all case law: a ruling missing here may still exist."
         ),
         Caveat::LinksNotRead => "note: LiDO was not asked yet or did not answer what this ruling \
              cites, so the articles and rulings it cites are missing, and their absence says nothing"
             .to_string(),
         Caveat::LinksUnresolved { count } => format!(
-            "note: LiDO named {count} article(s) this ruling cites that bron cannot place in any \
+            "note: LiDO named {count} article(s) this ruling cites that Bron cannot place in any \
              text it holds, so they are left out"
         ),
         Caveat::RulingsFound => "note: these are the rulings LiDO found, by its computer's \
@@ -2770,7 +2770,7 @@ fn caveat_line(caveat: &Caveat) -> String {
              wrongly is not measured, so a ruling missing here may still cite the article."
             .to_string(),
         Caveat::RulingsListed => "note: these are the rulings with a text whose record \
-             rechtspraak's feed listed or changed from 30 days before bron first read it. A \
+             rechtspraak's feed listed or changed from 30 days before Bron first read it. A \
              conclusie, a ruling published as metadata alone and one the feed last listed before \
              then are not listed, so a ruling missing here may still have been decided."
             .to_string(),
@@ -2781,8 +2781,8 @@ fn caveat_line(caveat: &Caveat) -> String {
              the Official Journal, with the acts that amended it and the corrigenda."
         ),
         Caveat::WindowEndInferred { next } => format!(
-            "note: the EU states no end to this text. bron runs it to the day before {next} takes \
-             effect. An amendment the Publications Office has not yet consolidated, bron does not \
+            "note: the EU states no end to this text. Bron runs it to the day before {next} takes \
+             effect. An amendment the Publications Office has not yet consolidated, Bron does not \
              see: check that the acts amending the text are in it."
         ),
         Caveat::WindowStartFromMetadata { day } => format!(
@@ -2791,13 +2791,13 @@ fn caveat_line(caveat: &Caveat) -> String {
              force: read its final provisions."
         ),
         Caveat::StructureReadFromHtml { .. } => "note: CELLAR delivers this old text as a web \
-             page alone; the Official Journal is the authentic text. bron read its articles, \
+             page alone; the Official Journal is the authentic text. Bron read its articles, \
              paragraphs and annexes from the headings on that page, so check in the Official \
              Journal where an article ends."
             .to_string(),
         Caveat::ConsolidationsUnread { consolidations } => format!(
             "note: after this text the Publications Office made a further consolidated version \
-             that already reflects the day asked, which bron cannot read: CELLAR does not deliver \
+             that already reflects the day asked, which Bron cannot read: CELLAR does not deliver \
              it in Dutch or English as Formex or HTML. {}. The text that day can read otherwise; \
              read that version in EUR-Lex.",
             consolidations.join(", "),
@@ -2810,15 +2810,15 @@ fn caveat_line(caveat: &Caveat) -> String {
              the Netherlands is governed by the law that transposes it."
             .to_string(),
         Caveat::RelationsNotRead => "note: CELLAR states which provisions a case interprets and \
-             which rulings it cites. bron has not read that for this case yet, so an empty list \
+             which rulings it cites. Bron has not read that for this case yet, so an empty list \
              does not mean there are none."
             .to_string(),
         // Never `because`, as on the withheld line of `case show`.
-        Caveat::TextWithheld { .. } => "note: bron keeps the digests of what it held of this \
+        Caveat::TextWithheld { .. } => "note: Bron keeps the digests of what it held of this \
              text and none of its bytes, and answers none of it."
             .to_string(),
         Caveat::TextPublishedElsewhere { publisher } => format!(
-            "note: the text of this ruling is published on {publisher}, which bron does not read \
+            "note: the text of this ruling is published on {publisher}, which Bron does not read \
              yet."
         ),
         Caveat::AmbiguousNumber { number, ordinals } => {
@@ -2829,11 +2829,11 @@ fn caveat_line(caveat: &Caveat) -> String {
             );
             match ordinals.as_slice() {
                 [one] => format!(
-                    "note: paragraph {one} prints {number} too, and bron cannot tell the court's \
+                    "note: paragraph {one} prints {number} too, and Bron cannot tell the court's \
                      own number from a quotation's: read it before citing, with {read}"
                 ),
                 _ => format!(
-                    "note: paragraphs {} print {number} too, and bron cannot tell the court's own \
+                    "note: paragraphs {} print {number} too, and Bron cannot tell the court's own \
                      number from a quotation's: read them before citing, paragraph {first} with \
                      {read}",
                     listed(ordinals)
@@ -2844,12 +2844,12 @@ fn caveat_line(caveat: &Caveat) -> String {
              numbered like its own, so a number here may be a quoted court's"
             .to_string(),
         Caveat::SubjectNotRead { from } => format!(
-            "note: from {from} on, bron has not yet read under which area of law the feed lists \
+            "note: from {from} on, Bron has not yet read under which area of law the feed lists \
              the rulings, so a walk by --since stops there and --subject leaves them out until \
              the next night's walk."
         ),
         Caveat::Unrecognised { stated } => {
-            format!("note: the service stated a limit this bron has no sentence for: {stated}")
+            format!("note: the service stated a limit this Bron has no sentence for: {stated}")
         }
         Caveat::NoZichtWindow => {
             "note: the register states no zicht dates for this text, so this question cannot be \
@@ -3173,7 +3173,7 @@ mod tests {
     }
 
     /// A regulation whose WTI is unread is why a published row can list an
-    /// act the BWB does print, under a founding regulation bron has not read
+    /// act the BWB does print, under a founding regulation Bron has not read
     /// yet: the note says so rather than the row silently overclaiming.
     #[test]
     fn founding_acts_unread_names_how_many_regulations() {
@@ -3192,7 +3192,7 @@ mod tests {
     }
 
     /// The count of every unlinked besluit, and the recent ones by name:
-    /// which ones bron could not link is what tells a reader whether to look
+    /// which ones Bron could not link is what tells a reader whether to look
     /// one up by hand.
     #[test]
     fn decrees_unmatched_counts_every_besluit_and_names_the_recent_ones() {
@@ -3257,7 +3257,7 @@ mod tests {
     }
 
     /// The besluit, the act it names and when it was published: enough to
-    /// look the besluit up without bron reading its day for the reader.
+    /// look the besluit up without Bron reading its day for the reader.
     #[test]
     fn commencement_pending_names_the_besluit_and_the_act_it_commences() {
         let note = caveat_line(&Caveat::stated(&serde_json::json!({
@@ -3267,7 +3267,7 @@ mod tests {
 
         assert!(note.contains("stb-2026-8 commences stb-2025-62"), "{note}");
         assert!(note.contains("published 2026-01-21"), "{note}");
-        assert!(note.contains("bron does not read"), "{note}");
+        assert!(note.contains("Bron does not read"), "{note}");
     }
 
     #[test]
@@ -3438,7 +3438,7 @@ mod tests {
         );
         assert!(err.contains("the 1 nearest rulings shown"), "{err}");
         assert!(
-            err.contains("ranked the 7 ruling(s) bron has read"),
+            err.contains("ranked the 7 ruling(s) Bron has read"),
             "{err}"
         );
         assert!(!err.contains("filtered over a window"), "{err}");
@@ -3544,13 +3544,13 @@ mod tests {
 
         assert_eq!(
             line(serde_json::json!([42, 228, 337, 342])),
-            "note: paragraphs 42, 228, 337 and 342 print 2.2 too, and bron cannot tell the \
+            "note: paragraphs 42, 228, 337 and 342 print 2.2 too, and Bron cannot tell the \
              court's own number from a quotation's: read them before citing, paragraph 42 with \
              case show --offset 41 --limit 1, without --number"
         );
         assert_eq!(
             line(serde_json::json!([42])),
-            "note: paragraph 42 prints 2.2 too, and bron cannot tell the court's own number \
+            "note: paragraph 42 prints 2.2 too, and Bron cannot tell the court's own number \
              from a quotation's: read it before citing, with case show --offset 41 --limit 1, without \
              --number"
         );

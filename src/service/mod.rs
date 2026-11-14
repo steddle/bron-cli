@@ -1,4 +1,4 @@
-//! Reading through the bron service.
+//! Reading through the Bron service.
 //!
 //! One address, and what travels over it is the whole design.
 //!
@@ -12,7 +12,7 @@
 //! **Nothing has to be taken on trust.** Every answer names the blob it was
 //! read from, addressed by the hash of its own content, and the offsets of the
 //! article inside it. Fetch those bytes, hash them, slice them, and either they
-//! say what bron said or they do not.
+//! say what Bron said or they do not.
 //!
 //! There is no second route. `BRON_MIRROR` points this at another deployment
 //! and nothing points it at a publisher, because resolving a date against the
@@ -101,8 +101,8 @@ impl Service {
 
         if !names_a_service {
             return Err(Fault::usage(format!(
-                "{ENV} is set to [{configured}], which names no service. bron \
-                 reads the bron service and nothing else; unset it to use {DEFAULT}, or point \
+                "{ENV} is set to [{configured}], which names no service. Bron \
+                 reads the Bron service and nothing else; unset it to use {DEFAULT}, or point \
                  it at another deployment."
             )));
         }
@@ -503,7 +503,7 @@ impl Service {
     /// it is one, so text that holds a `/` or a `?` cannot become another
     /// route or a query.
     ///
-    /// The one thing only bron can refuse: an address has no way to carry a
+    /// The one thing only Bron can refuse: an address has no way to carry a
     /// segment that is empty, `.` or `..`. The URL standard reads the last two
     /// as steps through the path and drops them, so `law versions ..` would
     /// ask `/regulations/expressions`, a question nobody put.
@@ -534,7 +534,7 @@ impl Service {
     /// Where a blob is readable, for a digest that names one.
     ///
     /// The digest is the service's own word and is checked before it reaches a
-    /// URL, so an address bron prints for a reader to fetch is one that can
+    /// URL, so an address Bron prints for a reader to fetch is one that can
     /// name a document rather than whatever arrived in that field.
     pub fn blob_url(&self, digest: &str) -> Option<String> {
         is_sha256_hex(digest).then(|| format!("{}/api/v1/blobs/{digest}", self.base))
@@ -558,7 +558,7 @@ fn window<'a>(
 
 /// Trims a configured base down to what the paths above are appended to.
 ///
-/// The service versions itself in the path and bron adds `/api/v1` itself, so a
+/// The service versions itself in the path and Bron adds `/api/v1` itself, so a
 /// base copied out of a browser with `/api/v1` already on the end would ask for
 /// `/api/v1/api/v1` and get a 404. That failure is the quiet kind: the request
 /// fails, and the only trace is a lane that stopped answering. Cheaper to

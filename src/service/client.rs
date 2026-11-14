@@ -1,7 +1,7 @@
 //! Reading one answer, whatever it turns out to be.
 //!
 //! Every call to the service goes through `Service::read`, so there is one
-//! place that knows what a bron envelope is and one place that turns a failure
+//! place that knows what a Bron envelope is and one place that turns a failure
 //! into a [`Fault`]. A second path around it could report that nothing
 //! matched a question the service was never asked.
 
@@ -19,7 +19,7 @@ use crate::wire;
 use super::Service;
 
 /// What a fault from this address is attributed to.
-pub(super) const SERVICE: &str = "bron";
+pub(super) const SERVICE: &str = "Bron";
 
 /// An answer, the limits the service stated on it, and the envelope it came in.
 pub struct Answered<T> {
@@ -206,16 +206,16 @@ impl Service {
         // service being broken, and the two want different things done about
         // them. Serde says which by naming the variant it did not know, the
         // same distinction `Caveat::Unrecognised` already draws for a limit
-        // this bron has no name for.
+        // this Bron has no name for.
         let unreadable = |e: serde_json::Error| {
             let known = e.to_string();
             let context = if known.starts_with("unknown variant") {
                 format!(
-                    "{} answered a shape this bron has no name for. Upgrade to read what it says.",
+                    "{} answered a shape this Bron has no name for. Upgrade to read what it says.",
                     fetched.url,
                 )
             } else {
-                format!("{} did not answer the bron envelope", fetched.url)
+                format!("{} did not answer the Bron envelope", fetched.url)
             };
 
             Fault::Upstream {
@@ -286,7 +286,7 @@ impl Service {
                     None => Fault::Upstream {
                         service: SERVICE,
                         source: anyhow::anyhow!(
-                            "{} answered {} and no bron envelope with it",
+                            "{} answered {} and no Bron envelope with it",
                             fetched.url,
                             fetched.status
                         ),

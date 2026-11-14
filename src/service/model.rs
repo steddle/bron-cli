@@ -1,7 +1,7 @@
 //! What the service answers with.
 //!
 //! Received shapes and nothing else: no rendering, no policy, no decisions.
-//! Only the fields bron reads are named, so a field the service adds later does
+//! Only the fields Bron reads are named, so a field the service adds later does
 //! not break a build here. A named field is required exactly where the
 //! service's OpenAPI document requires it: the service leaves a null out, so a
 //! field the document does not require is absent on some row of some answer.
@@ -195,7 +195,7 @@ pub struct Consolidated {
 /// An act the Staatsblad published from 2020 that no text the corpus holds
 /// names in `amended_by`, and no regulation in `established_by`. It states no
 /// day: whether it commences is what `linked_decrees` may say, in its own
-/// words, which bron does not read.
+/// words, which Bron does not read.
 #[derive(Debug, Deserialize)]
 pub struct PublishedAct {
     /// The act, as `stb-2026-56`.
@@ -492,11 +492,11 @@ pub struct Article {
     /// Present only on a unit printed `nogniet` whose remark carries the
     /// register's fixed sentence for a change that never took effect.
     pub withdrawn: Option<Withdrawn>,
-    /// On `/articles`, the passages of the parliamentary papers bron read as
+    /// On `/articles`, the passages of the parliamentary papers Bron read as
     /// explaining the unit. Absent where no toelichting of its act's dossier
     /// was read, empty where one was and none names it.
     pub passages: Option<Vec<Passage>>,
-    /// On `/articles`, the changes of amendementen bron read as reaching the
+    /// On `/articles`, the changes of amendementen Bron read as reaching the
     /// unit. Absent where no amendement of its act's dossier was read, empty
     /// where they were and none reaches it.
     pub amendments: Option<Vec<AmendmentChange>>,
@@ -512,7 +512,7 @@ pub struct Remark {
     pub span: Span,
 }
 
-/// bron recognised, in one of a unit's remarks, the register's fixed sentence
+/// Bron recognised, in one of a unit's remarks, the register's fixed sentence
 /// for a change that never took effect. Asserted by the machine that read it:
 /// the words at `span` are the register's.
 #[derive(Debug, Clone, Deserialize)]
@@ -532,7 +532,7 @@ impl Article {
         )
     }
 
-    /// bron's reading of the unit.
+    /// Bron's reading of the unit.
     ///
     /// An article reads as its leden in order, each opened by the number the
     /// register gives it: the service's rendering of an article carries no lid
@@ -588,7 +588,7 @@ pub fn name(
     }
 }
 
-/// A passage of a kamerstuk bron read as explaining a unit: a machine
+/// A passage of a kamerstuk Bron read as explaining a unit: a machine
 /// reading, at a span of the paper's own bytes.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Passage {
@@ -605,7 +605,7 @@ pub struct Passage {
     pub earlier_text: Option<EarlierText>,
 }
 
-/// A change an amendement proposes that bron read as reaching a unit: a
+/// A change an amendement proposes that Bron read as reaching a unit: a
 /// machine reading, at a span of the amendement's own bytes.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AmendmentChange {
@@ -623,7 +623,7 @@ pub struct AmendmentChange {
     /// The paper its chain of replacements ends in, which the Tweede Kamer
     /// decides on.
     pub decided_on: Option<String>,
-    /// The besluiten on that paper. Absent where bron has not asked the
+    /// The besluiten on that paper. Absent where Bron has not asked the
     /// Tweede Kamer, empty where it states none.
     pub fates: Option<Vec<crate::service::Fate>>,
 }
@@ -669,7 +669,7 @@ impl Paragraph {
         self.rendered.as_deref().unwrap_or_default()
     }
 
-    /// One lid as bron prints it, opened by its number where it has one.
+    /// One lid as Bron prints it, opened by its number where it has one.
     pub fn cited(&self) -> String {
         match &self.number {
             Some(number) => format!("{number}. {}", self.text()),
@@ -892,7 +892,7 @@ mod tests {
     }
 
     /// An article printed without leden is one unnumbered unit, and opening it
-    /// with a number the register never printed would be bron writing text.
+    /// with a number the register never printed would be Bron writing text.
     #[test]
     fn an_article_without_leden_reads_as_itself() {
         assert_eq!(

@@ -1,8 +1,8 @@
-//! Reading the officiële publicaties through the bron service.
+//! Reading the officiële publicaties through the Bron service.
 //!
 //! The service holds what it has measured to name no person outside an
 //! office, passes on unkept what it has not measured, and refuses what it
-//! knows to name private persons. bron has no publisher client of its own: a
+//! knows to name private persons. Bron has no publisher client of its own: a
 //! lookup and a search are each one call, read the same way `law show` and
 //! `find` are.
 
@@ -18,7 +18,7 @@ use super::{Service, window};
 
 /// What a search over the officiële publicaties asks for. Mirrors the
 /// service's own body: at least one of `q`, `collection` and `dossier`, which
-/// the service refuses the absence of rather than bron.
+/// the service refuses the absence of rather than Bron.
 #[derive(Debug, Serialize)]
 pub struct PublicationQuery<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -38,7 +38,7 @@ pub struct PublicationQuery<'a> {
     pub next: Option<&'a str>,
 }
 
-/// The publisher's own ranking of a question, asked live: bron keeps no index
+/// The publisher's own ranking of a question, asked live: Bron keeps no index
 /// of the officiële publicaties.
 #[derive(Debug, Deserialize)]
 pub struct PublicationSearch {
@@ -80,7 +80,7 @@ pub struct Publication {
     pub held: bool,
     pub manifestations: Vec<Manifestation>,
     /// The dossier the publication states as its own, in its `<histnoot>`. On
-    /// a publication not held, `stated_in` is the digest of the bytes bron
+    /// a publication not held, `stated_in` is the digest of the bytes Bron
     /// read and passed on, which `/blobs` does not serve.
     pub dossiers: Vec<PublicationDossier>,
     /// The articles the XML prints, at their spans in the XML manifestation.
@@ -113,9 +113,9 @@ pub struct PublicationUnit {
     /// The heading as printed: `ARTIKEL I`, `Enig artikel`.
     pub label: Option<String>,
     pub span: Span,
-    /// SHA-256 of bron's rendering.
+    /// SHA-256 of Bron's rendering.
     pub content_hash: String,
-    /// bron's rendering, present only where `rendered` was asked.
+    /// Bron's rendering, present only where `rendered` was asked.
     pub rendered: Option<String>,
     /// The publisher's bytes at the span, present only where `raw` was asked.
     pub raw: Option<String>,

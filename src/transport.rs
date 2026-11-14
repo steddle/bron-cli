@@ -1,11 +1,11 @@
-//! The one HTTP client, and every call to the bron service goes through it.
+//! The one HTTP client, and every call to the Bron service goes through it.
 //!
 //! A failure arrives inside the service's answer rather than beside it,
 //! carrying the kind to branch on and the detail that says why, so a body
-//! is read whatever its status: refusing it on a status code would leave bron
+//! is read whatever its status: refusing it on a status code would leave Bron
 //! reporting that something is missing without the labels the service named.
 //!
-//! There is no cache here and no store behind it. bron writes nothing.
+//! There is no cache here and no store behind it. Bron writes nothing.
 
 use std::time::Duration;
 

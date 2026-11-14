@@ -1,16 +1,16 @@
-//! The JSON bron builds itself.
+//! The JSON Bron builds itself.
 //!
 //! The service's JSON is the contract, and a command that is one call to the
 //! service prints the envelope it was sent. What is defined here is the rest:
-//! the answers bron assembles, and the failure envelope.
+//! the answers Bron assembles, and the failure envelope.
 //!
-//! Everything bron serialises is defined here, so renaming a field elsewhere
+//! Everything Bron serialises is defined here, so renaming a field elsewhere
 //! cannot silently break a parser on the other side of a pipe: it breaks the
 //! build instead.
 //!
 //! Two properties every answer carries, because a caller cannot infer either:
 //!
-//! - **Grade.** Where an answer's authority comes from. Every source bron
+//! - **Grade.** Where an answer's authority comes from. Every source Bron
 //!   reads speaks with its own authority, so today this is always
 //!   `authority`; it is stated rather than left implicit so a consumer never
 //!   has to infer it.
@@ -98,7 +98,7 @@ impl Envelope<()> {
             as_known_on: None,
             data: None,
             // A failure the service stated is its error object as it arrived;
-            // one bron states itself carries its own sentence and cause chain.
+            // one Bron states itself carries its own sentence and cause chain.
             error: Some(match fault.statement() {
                 Some(statement) => ErrorBody::Stated(statement.sent.clone()),
                 None => ErrorBody::Own {
@@ -121,7 +121,7 @@ pub enum ErrorBody {
     /// kind, code, message and detail, and any field it adds later, read as
     /// the API and the MCP give them.
     Stated(Box<serde_json::value::RawValue>),
-    /// A failure bron states itself, which carries no code: presence says who
+    /// A failure Bron states itself, which carries no code: presence says who
     /// stated it.
     Own {
         /// Stable tag matching the exit code. Branch on this, not on the
@@ -157,7 +157,7 @@ pub enum Caveat {
     /// Numbers are not unique within a law: the Awb restarts at Artikel 1 in
     /// each of its annexes, and those annex articles carry no label at all,
     /// only a number. Answering twice is right, because discarding one would
-    /// be bron deciding which the caller meant. Answering twice without saying
+    /// be Bron deciding which the caller meant. Answering twice without saying
     /// so is not: a reader who sees one heading "1" twice has no way to tell
     /// an ambiguous number from a duplicated row, and `paths` is what
     /// disambiguates it.
@@ -176,7 +176,7 @@ pub enum Caveat {
         articles: Vec<String>,
         cell_separator: String,
     },
-    /// A corpus bron is meant to cover holds no vectors, so was not searched.
+    /// A corpus Bron is meant to cover holds no vectors, so was not searched.
     ///
     /// A reader who asks a question about case law and receives only statutes
     /// has to be told the difference between 'the corpus holds no answer' and
@@ -278,7 +278,7 @@ pub enum Caveat {
     /// has, or the settled text, as the Wft's 38 have. Settled text read
     /// without this is a rule that does not yet apply, quoted as though it did.
     NotCommenced { articles: Vec<String> },
-    /// An article in this answer prints an image, and bron holds no images.
+    /// An article in this answer prints an image, and Bron holds no images.
     ///
     /// Not cosmetic. Where a provision states a formula, the register renders
     /// the formula itself as an image and states only its variables as text, so
@@ -294,7 +294,7 @@ pub enum Caveat {
     /// for a large share of renditions the manifest's hash and size describe a
     /// gzip of the manifestation rather than what that manifestation's own URL
     /// serves, and BWBR0002638 is affected in every rendition it has. Refusing
-    /// would make bron unable to read a law the publisher is willing to hand
+    /// would make Bron unable to read a law the publisher is willing to hand
     /// over. So the text is answered and the disagreement is stated, which
     /// leaves the reader to decide what it is worth.
     ///
@@ -415,7 +415,7 @@ pub enum Caveat {
         fields: Vec<String>,
     },
 
-    /// The answer carries `passages` for `articles`: bron read which passage
+    /// The answer carries `passages` for `articles`: Bron read which passage
     /// of the parliamentary papers explains each out of the passage's heading
     /// and the bill's formula, and no publisher states it. `readings` are the
     /// versions of that reading. On a ruling's relations, `articles` are what
@@ -457,13 +457,13 @@ pub enum Caveat {
     /// by its own key rather than dropped.
     ActsLeftOut { counts: BTreeMap<String, u32> },
 
-    /// Regulations whose WTI bron has not read, so no `established_by` names
+    /// Regulations whose WTI Bron has not read, so no `established_by` names
     /// the act that founded each. While any is left, such an act can stand as
     /// `published` though the BWB prints it.
     FoundingActsUnread { regulations: u32 },
 
     /// Held inwerkingtredingsbesluiten that name no act by `extref` or
-    /// `ketenid`, so bron cannot say what they commence and raises no
+    /// `ketenid`, so Bron cannot say what they commence and raises no
     /// [`Caveat::CommencementPending`] for them. `unlinked` counts every one
     /// the service holds, of any age; `decrees` names the ones published in
     /// the last 15 days, and is empty where none was.
@@ -476,13 +476,13 @@ pub enum Caveat {
     /// the act behind units this answer prints as not yet in force, and no
     /// rendition the BWB holds names it as `commenced_by` yet.
     ///
-    /// Whether its day has come stands in its own words, which bron does not
+    /// Whether its day has come stands in its own words, which Bron does not
     /// read. Raised only where a besluit names its act that way: its absence
     /// does not mean no commencement is pending.
     CommencementPending { decrees: Vec<PendingDecree> },
 
     /// The publication was passed on and not kept. Its digest is of the bytes
-    /// bron read, not one `/blobs` can serve again.
+    /// Bron read, not one `/blobs` can serve again.
     PublicationNotHeld,
 
     /// The publisher's own count of matches is an estimate, so walking a
@@ -491,18 +491,18 @@ pub enum Caveat {
 
     /// Every act naming the dossier is from before 1995, where the
     /// publisher's digital Kamerstuk collection starts, so no paper answers.
-    /// Its papers are scans in Staten-Generaal Digitaal, which bron does not
+    /// Its papers are scans in Staten-Generaal Digitaal, which Bron does not
     /// read.
     PapersBeforeDigital,
 
     /// Amendementen and moties in the answer that the Tweede Kamer's open
     /// data states no besluit for: not put to a vote, withdrawn, from before
     /// 2008, which it holds nothing about, or a paper the open data files
-    /// under more than one dossier, which bron does not read. No besluit is
+    /// under more than one dossier, which Bron does not read. No besluit is
     /// not 'verworpen'.
     FateUnknown { papers: u32 },
 
-    /// Amendementen and moties of a dossier bron has not yet asked the
+    /// Amendementen and moties of a dossier Bron has not yet asked the
     /// Tweede Kamer's open data about. Their `fates` is absent: no besluit is
     /// answered, and none is said not to be stated.
     FatesNotRead { papers: u32 },
@@ -512,7 +512,7 @@ pub enum Caveat {
     /// left out of the answer while they are read again.
     PapersNotHeld { count: u32, papers: u32 },
 
-    /// Hits of a kind bron does not open, a kind bron keeps out because it
+    /// Hits of a kind Bron does not open, a kind Bron keeps out because it
     /// names private persons, or a collection it has not measured, are left
     /// out of this page and counted. `next` still walks on, past a page they
     /// emptied.
@@ -528,7 +528,7 @@ pub enum Caveat {
     /// nothing.
     LinksNotRead,
 
-    /// LiDO named `count` articles the ruling cites that bron could place in
+    /// LiDO named `count` articles the ruling cites that Bron could place in
     /// no unit it holds, so they are left out.
     LinksUnresolved { count: u32 },
 
@@ -539,7 +539,7 @@ pub enum Caveat {
     RulingsFound,
 
     /// The rulings answered are the ones with a text whose record
-    /// rechtspraak's feed listed or changed from 30 days before bron first read
+    /// rechtspraak's feed listed or changed from 30 days before Bron first read
     /// it. A conclusie, a ruling published as metadata alone and one the feed
     /// last listed before then are not listed.
     RulingsListed,
@@ -564,7 +564,7 @@ pub enum Caveat {
     StructureReadFromHtml { format: String },
 
     /// Consolidations, by CELEX, that started after the text answered and on
-    /// or before the day asked, which CELLAR serves in no form bron reads.
+    /// or before the day asked, which CELLAR serves in no form Bron reads.
     ConsolidationsUnread { consolidations: Vec<String> },
 
     /// The act had not entered into force on the day asked, and the text
@@ -575,7 +575,7 @@ pub enum Caveat {
     DirectiveBindsStates,
 
     /// CELLAR states what a case of the EU interprets, cites and was referred
-    /// by, and bron reads none of it yet: no relation answered says nothing.
+    /// by, and Bron reads none of it yet: no relation answered says nothing.
     RelationsNotRead,
 
     /// The service holds the digests of the text and none of its bytes, and
@@ -583,7 +583,7 @@ pub enum Caveat {
     TextWithheld { because: String },
 
     /// A tuchtcollege's ruling, which rechtspraak serves as its record alone:
-    /// the text is published by `publisher`, which bron does not read yet.
+    /// the text is published by `publisher`, which Bron does not read yet.
     TextPublishedElsewhere { publisher: String },
 
     /// The paragraphs at `ordinals` also print `number`, or one under it, and
@@ -600,7 +600,7 @@ pub enum Caveat {
     /// and `subject` leaves them out.
     SubjectNotRead { from: String },
 
-    /// The service stated a limit this bron has no sentence for.
+    /// The service stated a limit this Bron has no sentence for.
     ///
     /// Carried whole rather than dropped: its name and every field it came
     /// with, so a reader sees what was said even where this build cannot put it
@@ -609,7 +609,7 @@ pub enum Caveat {
 }
 
 /// One besluit [`Caveat::DecreesUnmatched`] names: published in the last 15
-/// days and naming no act bron can match.
+/// days and naming no act Bron can match.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct UnmatchedDecree {
     /// The besluit, as `stb-2026-280`.
@@ -1014,7 +1014,7 @@ impl Caveat {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case", tag = "frozen_by")]
 pub enum Frozen {
-    /// bron fetched these bytes and hashed them itself, so it states when.
+    /// Bron fetched these bytes and hashed them itself, so it states when.
     Bron { fetched_at: DateTime<Utc> },
 }
 
@@ -1030,7 +1030,7 @@ pub struct Provenance {
 }
 
 impl Provenance {
-    /// Provenance for a document bron fetched and hashed itself, stamped with
+    /// Provenance for a document Bron fetched and hashed itself, stamped with
     /// the moment it did.
     pub fn frozen(blob: BlobId, url: String, byte_len: usize, fetched_at: DateTime<Utc>) -> Self {
         Self {
@@ -1042,7 +1042,7 @@ impl Provenance {
     }
 }
 
-/// A document bron fetched by its digest and hashed itself, and the part of it
+/// A document Bron fetched by its digest and hashed itself, and the part of it
 /// that was asked for.
 #[derive(Debug, Serialize)]
 pub struct Blob {
@@ -1100,7 +1100,7 @@ mod tests {
     }
 
     /// Presence is the signal. A code is the service's word for a failure the
-    /// service stated, so a failure bron states itself carries none.
+    /// service stated, so a failure Bron states itself carries none.
     #[test]
     fn a_failure_carries_a_code_only_where_the_service_stated_one() {
         let sent = r#"{"kind":"not_found","code":"regulation_not_found","message":"no regulation BWBR0000001","detail":[]}"#;
@@ -1121,12 +1121,12 @@ mod tests {
             Fault::usage("name a window"),
             Fault::not_found("lid", "9"),
             Fault::Network {
-                service: "bron",
+                service: "Bron",
                 source: anyhow::anyhow!("connection refused"),
             },
             Fault::Upstream {
-                service: "bron",
-                source: anyhow::anyhow!("not the bron envelope"),
+                service: "Bron",
+                source: anyhow::anyhow!("not the Bron envelope"),
             },
             Fault::Local(anyhow::anyhow!("cannot build HTTP client")),
         ] {
@@ -1542,7 +1542,7 @@ mod tests {
         }
     }
 
-    /// Provenance names who froze the bytes: bron fetched them itself and
+    /// Provenance names who froze the bytes: Bron fetched them itself and
     /// stamps when, which is what a reader checks a quotation against.
     #[test]
     fn provenance_says_who_froze_the_bytes() {

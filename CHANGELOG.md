@@ -2,7 +2,7 @@
 
 ## [0.1.0] - 2026-11-14
 
-The first release. bron reads Dutch and EU legislation, case law and the officiële publicaties through the bron service at `https://bron.steddle.com/api/v1`, and every answer that quotes a text names the SHA-256 of the document it was read from and the byte range inside it. The JSON contract below holds from this version on.
+The first release. Bron reads Dutch and EU legislation, case law and the officiële publicaties through the Bron service at `https://bron.steddle.com/api/v1`, and every answer that quotes a text names the SHA-256 of the document it was read from and the byte range inside it. The JSON contract below holds from this version on.
 
 **Added**
 

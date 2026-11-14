@@ -6,7 +6,7 @@
 //! On failure with `--json`, the error still goes to stdout as JSON and the
 //! human sentence goes to stderr. A caller that has to grep stderr to tell a
 //! missing article from a dead network will get it wrong eventually. The
-//! failure envelope is bron's own, because `network` and `local` are kinds no
+//! failure envelope is Bron's own, because `network` and `local` are kinds no
 //! service can state.
 
 mod cli;

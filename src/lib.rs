@@ -1,8 +1,8 @@
 //! Dutch primary legal sources, quotable to the byte.
 //!
-//! bron reads wetgeving, court decisions and official publications through
+//! Bron reads wetgeving, court decisions and official publications through
 //! [`service`], which holds them and names the blob each answer came out of.
-//! A claim made from bron can name the document and the characters it rests
+//! A claim made from Bron can name the document and the characters it rests
 //! on, and the same question asked twice gives the same answer.
 //!
 //! Three rules run through the whole crate:

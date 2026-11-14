@@ -250,7 +250,7 @@ pub fn item<'a>(text: &'a str, letter: &str) -> Option<&'a str> {
 /// Answers which article, from a question or from a citation, by identifier.
 ///
 /// No service is a refusal rather than an empty answer: reporting nothing
-/// found would record an absence bron never established, which is the
+/// found would record an absence Bron never established, which is the
 /// distinction the whole contract rests on. A 404 read as 'nothing matched'
 /// would record that same absence, and a citation that resolves to nothing is
 /// exactly such a 404, which is why this reads the service's own envelope like
@@ -785,7 +785,7 @@ fn run_quote(cmd: &QuoteCmd, service: &Service) -> Outcome<Answer> {
         .map(|answered| Answer::Quotes(Box::new(answered)))
 }
 
-/// The quotations a file holds, as it holds them: bron reads the JSON to carry
+/// The quotations a file holds, as it holds them: Bron reads the JSON to carry
 /// it and judges nothing in it.
 fn quotations(file: &std::path::Path) -> Outcome<serde_json::Value> {
     let read = if file == std::path::Path::new("-") {

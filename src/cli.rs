@@ -59,7 +59,7 @@ pub enum Command {
     /// Answers which article, from a question or from a citation.
     ///
     /// Distinct from `law search`, which resolves a citeertitel to a BWB id and
-    /// answers which law. This answers which article, across every corpus bron
+    /// answers which law. This answers which article, across every corpus Bron
     /// holds vectors for, and its answer says which of them it searched.
     ///
     /// A term that reads as a citation is looked up rather than ranked. `3:305a`
@@ -69,7 +69,7 @@ pub enum Command {
     /// way, every reading is answered: `8:4` is Boek 8 artikel 4 and is also
     /// Awb artikel 8:4, and choosing between them is interpretation.
     ///
-    /// The ranking is the one approximate thing in bron and it only orders. A
+    /// The ranking is the one approximate thing in Bron and it only orders. A
     /// lookup carries no distance at all. Every field of either is read from a
     /// stored row, and resolving one to bytes is `law show`, which is
     /// arithmetic.
@@ -100,7 +100,7 @@ pub enum Command {
     /// The bytes a digest names, checked against it.
     ///
     /// What every answer's `source:` line invites: fetch the document, hash
-    /// it, and cut the span again. bron hashes the bytes as they arrive and
+    /// it, and cut the span again. Bron hashes the bytes as they arrive and
     /// hands them over untouched on stdout, so `bron blob D | shasum -a 256`
     /// prints D, and refuses bytes that hash to anything else. With --span the
     /// slice is cut from those bytes. A note on stderr says what was checked.
@@ -297,7 +297,7 @@ pub enum Law {
         /// Without it an answer carries the offsets and the service's reading,
         /// and no markup travels. With it each span also carries the slice
         /// itself, on the service's word: it is what the service says stands
-        /// at those offsets rather than a cut bron made from bytes it hashed,
+        /// at those offsets rather than a cut Bron made from bytes it hashed,
         /// and fetching the blob and cutting it again is how that is checked.
         ///
         /// Only --json carries the slice. A person reads the service's reading
@@ -361,7 +361,7 @@ pub enum Law {
         /// prints; untyped, the service's window.
         ///
         /// Sent to the service exactly as typed. The rendition bounds this
-        /// route, as it bounds `law show`, so bron judges nothing about the
+        /// route, as it bounds `law show`, so Bron judges nothing about the
         /// word: `none`, a negative number, a decimal all reach the service
         /// and come back as its own `invalid_parameter` where they are wrong.
         #[arg(long, allow_negative_numbers = true)]
@@ -569,9 +569,9 @@ pub enum Law {
         offset: Option<String>,
     },
 
-    /// What the register has done since a cursor, in the order bron saw it.
+    /// What the register has done since a cursor, in the order Bron saw it.
     ///
-    /// Not a window and not re-readable as one: the order is the order bron saw
+    /// Not a window and not re-readable as one: the order is the order Bron saw
     /// things, which is not the order they took effect. It is the reading that
     /// misses nothing, which is what a poller needs.
     ///
@@ -649,7 +649,7 @@ pub enum Law {
     /// answer, each from its own frozen document.
     ///
     /// Whether a change reaches conduct from before it is transitional law, and
-    /// not a question bron answers. The act that made each change is named.
+    /// not a question Bron answers. The act that made each change is named.
     Changes {
         /// BWB identifier, e.g. BWBR0005289.
         id: String,
@@ -800,7 +800,7 @@ pub enum Case {
     /// newest decided first.
     ///
     /// Not every ruling decided. The list holds the rulings with a text whose
-    /// record rechtspraak's feed listed or changed from 30 days before bron
+    /// record rechtspraak's feed listed or changed from 30 days before Bron
     /// first read it, so an older ruling can stand among them by its own day
     /// decided; it lists no conclusie and no ruling published as metadata
     /// alone, so a ruling missing here may still have been decided.
@@ -846,10 +846,10 @@ pub enum Case {
 #[derive(Debug, Subcommand)]
 pub enum Publication {
     /// The publisher's own ranking of a question over the officiële
-    /// publicaties, asked live: bron keeps no index of them.
+    /// publicaties, asked live: Bron keeps no index of them.
     ///
     /// At least one of the query, --collection and --dossier; the service
-    /// refuses the absence of all three rather than bron.
+    /// refuses the absence of all three rather than Bron.
     Search {
         query: Vec<String>,
 
@@ -878,7 +878,7 @@ pub enum Publication {
     /// One publication by identifier, e.g. stb-2026-56 or kst-36327-3.
     ///
     /// Held where the corpus keeps it, passed through where it was fetched on
-    /// demand and not kept, and refused where bron keeps it out because it
+    /// demand and not kept, and refused where Bron keeps it out because it
     /// names private persons. The Aanhangsel van de Handelingen, the
     /// Kamervragen zonder antwoord, the Niet-dossierstukken and the Agenda
     /// are refused whole. A manifestation in XML answers the articles it
@@ -886,7 +886,7 @@ pub enum Publication {
     Show {
         id: String,
 
-        /// Also carry bron's rendering of each unit, beside the span and hash
+        /// Also carry Bron's rendering of each unit, beside the span and hash
         /// that place it. See `law show`.
         #[arg(long)]
         rendered: bool,
@@ -975,7 +975,7 @@ mod tests {
     }
 
     /// `law parts --limit` is a bare string, sent to the service exactly as
-    /// typed: bron judges nothing the service judges, so `NONE`, `1.5` and
+    /// typed: Bron judges nothing the service judges, so `NONE`, `1.5` and
     /// `-1` all parse here and are the service's to refuse.
     #[test]
     fn law_parts_accepts_any_limit_text() {

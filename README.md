@@ -10,7 +10,7 @@
 
 Dutch primary legal sources, quotable to the byte.
 
-bron reads legislation, case law and official publications, and every answer names the document it rests on and the byte range inside it. It says what a law said on a given date, not only what it says today. The point isn't search. It's that a claim made here can name the document and the characters behind it, and that the same question asked twice gives the same answer.
+Bron reads legislation, case law and official publications, and every answer names the document it rests on and the byte range inside it. It says what a law said on a given date, not only what it says today. The point isn't search. It's that a claim made here can name the document and the characters behind it, and that the same question asked twice gives the same answer.
 
 Nothing is stored. Every answer is fetched, and what makes it checkable is the digest beside it rather than a copy on your disk.
 
@@ -24,7 +24,7 @@ Or `cargo install bron --locked`, or a prebuilt binary for macOS, Linux or Windo
 
 ### Requires
 
-- A network. bron holds nothing between runs, so every answer is fetched.
+- A network. Bron holds nothing between runs, so every answer is fetched.
 - To build from source: Rust 1.88 or newer. No system libraries: TLS goes through rustls, so there's no OpenSSL header to find on Linux.
 
 ## Quick start
@@ -65,7 +65,7 @@ $ bron blob c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3 --s
 1338780 bytes hash to c0c5433f5c4ca92aeee2faca17d1cfdef3597d8ec7ec1036b7b03971321af8a3; cut at 349072..361267
 ```
 
-The bytes go to stdout and what was checked to stderr, so `bron blob <digest> | shasum -a 256` prints the digest back. `--raw` sends the slice along with an answer instead. Ask what changed since, and bron names the amending act per article:
+The bytes go to stdout and what was checked to stderr, so `bron blob <digest> | shasum -a 256` prints the digest back. `--raw` sends the slice along with an answer instead. Ask what changed since, and Bron names the amending act per article:
 
 ```
 $ bron law changes BWBR0005289 --from 2019-01-01 --article 119a
@@ -154,7 +154,7 @@ $ bron law upcoming --from 2027-01-01 --to 2027-03-31 --limit 3
 2027-01-01  BWBR0005259  2026-10-29_0  1 waiting  Kadasterbesluit  acts stb-2026-338  decrees stb-2026-338  linked decrees -
 2027-01-01  BWBR0031719  2026-07-01_0  6 waiting  Regeling Waadi  acts stcrt-2026-6946  decrees stb-2026-159  linked decrees -
 [...]
-note: this list holds what the BWB prints, and the acts the Staatsblad published that the BWB does not print, as far as bron holds the Staatsblad. An act published before that and never printed in the BWB, the kinds of act counted as left out, and EU regulations are not in it.
+note: this list holds what the BWB prints, and the acts the Staatsblad published that the BWB does not print, as far as Bron holds the Staatsblad. An act published before that and never printed in the BWB, the kinds of act counted as left out, and EU regulations are not in it.
 ```
 
 Every day on it is one the register states. Without `--from` and `--to` the
@@ -198,7 +198,7 @@ It exits 0 where every quotation is found and 6 where one is not, so a script ch
 
 ## Machine use
 
-Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as every command but `blob` is, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code, and the whole `error` object is the service's as it arrived, its kind included: `throttled`, `corpus` and `source` read as the API and the MCP give them, and exit 4. A failure bron states itself carries no code, so presence says who stated it. A question goes to the service as asked, so a window that runs backwards, a `--limit` of 0, a date that names no day or an identifier that is none is refused by the service, with its code, exactly as the API and the MCP refuse it; bron refuses only what it alone can judge, such as a `--span` outside the bytes it hashed.
+Every command takes `--json` and answers in a versioned envelope. The service's JSON is the contract: where a command is one call to the service, as every command but `blob` is, `--json` prints the envelope the service answered with, byte for byte, so a field this build has never heard of still reaches you. A failure is always in Bron's own envelope, because `network` and `local` are kinds no service can state. Where the service stated the failure, `error.code` carries the service's code for it as sent, `regulation_not_found` or `rendition_withdrawn`, finer than the kind and never needed to pick an exit code, and the whole `error` object is the service's as it arrived, its kind included: `throttled`, `corpus` and `source` read as the API and the MCP give them, and exit 4. A failure Bron states itself carries no code, so presence says who stated it. A question goes to the service as asked, so a window that runs backwards, a `--limit` of 0, a date that names no day or an identifier that is none is refused by the service, with its code, exactly as the API and the MCP refuse it; Bron refuses only what it alone can judge, such as a `--span` outside the bytes it hashed.
 
 ```
 $ bron --json find 6:162 BW
@@ -213,21 +213,21 @@ Human output is rendered from the same answer the JSON came out of, so the two c
 2  not found      well-formed query, nothing of that name exists
 3  network        unreachable, timed out, refused
 4  upstream       reachable, but no answer came of it
-5  local          bron could not do its own part on this machine
+5  local          Bron could not do its own part on this machine
 6  not quoted     quote check: a quotation is not found where it cites
 ```
 
 A 404 from upstream is a 2, not a 3. It's the service answering, and reporting it as transport has a pipeline retry something that will never exist.
 
-Exit 4 covers two things, and what is printed tells them apart. **The service stated a failure**: the sentence opens 'the service could not answer:', and `--json` carries the service's `error.code`. **Nothing that could be read came back**: the sentence names the HTTP status and whoever sent it, `504 Gateway Timeout` where the service or something in front of it did not answer in time, `502` or `503` where nothing could be passed on, and `--json` carries kind `upstream` and no code because nobody stated one. A 504 is asked again later or narrowed, not filed as a bug, and bron asks once without retrying. Where the service stated why it could not answer, `error.kind` is the service's own, `throttled`, `corpus` or `source`, and `error.code` says which: `rate_limited` is your own limit and `fetch_budget_spent` a budget every caller shares, both with the delay the service named as `retry_after`, in seconds, and a `corpus` code such as `rendition_too_large` or `rendition_unreadable` is a fact about that rendition that no retry changes. A `corpus` failure that clears by itself carries `retry_after` too: `index_behind`, and `numbers_not_read` for a ruling not read for its numbers yet, both after 300 seconds, and `index_unavailable`, a `case search` none of whose indexes answered, after 30. The exit stays 4 either way, so branch on `retry_after` to know whether asking again can help. What is left, 'returned an unusable response', is an answer that came back and could not be read.
+Exit 4 covers two things, and what is printed tells them apart. **The service stated a failure**: the sentence opens 'the service could not answer:', and `--json` carries the service's `error.code`. **Nothing that could be read came back**: the sentence names the HTTP status and whoever sent it, `504 Gateway Timeout` where the service or something in front of it did not answer in time, `502` or `503` where nothing could be passed on, and `--json` carries kind `upstream` and no code because nobody stated one. A 504 is asked again later or narrowed, not filed as a bug, and Bron asks once without retrying. Where the service stated why it could not answer, `error.kind` is the service's own, `throttled`, `corpus` or `source`, and `error.code` says which: `rate_limited` is your own limit and `fetch_budget_spent` a budget every caller shares, both with the delay the service named as `retry_after`, in seconds, and a `corpus` code such as `rendition_too_large` or `rendition_unreadable` is a fact about that rendition that no retry changes. A `corpus` failure that clears by itself carries `retry_after` too: `index_behind`, and `numbers_not_read` for a ruling not read for its numbers yet, both after 300 seconds, and `index_unavailable`, a `case search` none of whose indexes answered, after 30. The exit stays 4 either way, so branch on `retry_after` to know whether asking again can help. What is left, 'returned an unusable response', is an answer that came back and could not be read.
 
-`grade` says where an answer's authority comes from. Every source bron reads speaks with its own force, so it is always `authority`; it's stated rather than left implicit because a claim's grade is the one field a consumer should never infer.
+`grade` says where an answer's authority comes from. Every source Bron reads speaks with its own force, so it is always `authority`; it's stated rather than left implicit because a claim's grade is the one field a consumer should never infer.
 
 ## Reading through the service
 
 Every command reads through `https://bron.steddle.com/api/v1`. That service holds every manifest the register publishes, so it knows which renditions exist, which windows they cover and which the publisher has withdrawn, and it does that arithmetic once for everybody. Which rendition a date resolves to is one rule, and running a second copy of it here is how a CLI comes to answer with text the register pulled months ago.
 
-Nothing has to be taken on trust. Every answer that quotes a text names the blob it was read from, addressed by the hash of its own content, and the offsets of the article or paragraph inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what bron said or they do not. A list of rulings names the frozen feed page or LiDO answer it stands on by digest too; the service holds those and serves none of them, since they go on naming rulings the court has withdrawn.
+Nothing has to be taken on trust. Every answer that quotes a text names the blob it was read from, addressed by the hash of its own content, and the offsets of the article or paragraph inside it. `bron blob` fetches those bytes, hashes them and cuts them, and either they say what Bron said or they do not. A list of rulings names the frozen feed page or LiDO answer it stands on by digest too; the service holds those and serves none of them, since they go on naming rulings the court has withdrawn.
 
 ```
 bron law show BWBR0005289 --article 162 --raw   # send the slice too, on the service's word
@@ -237,7 +237,7 @@ BRON_MIRROR=https://bron.example.org/api/v1     # another deployment
 
 The service fetches a ruling from rechtspraak on the first read that asks for it and answers every later read from the bytes it froze. A text the publisher replaced is never served again: its digest answers 410, and the ruling names the digests it replaced.
 
-Nothing is kept. bron writes nothing between runs, so every answer is fetched and without a network there is no answer. A question put to `bron find` travels in a POST body for the same reason nothing is written down: the material is public, the interest in it is not.
+Nothing is kept. Bron writes nothing between runs, so every answer is fetched and without a network there is no answer. A question put to `bron find` travels in a POST body for the same reason nothing is written down: the material is public, the interest in it is not.
 
 ## Features
 
@@ -247,13 +247,13 @@ Nothing is kept. bron writes nothing between runs, so every answer is fetched an
 - What is coming. `bron law upcoming` lists the regulations that already print provisions they do not yet apply, with the first day to come where the register states one and the acts and besluiten behind them.
 - The life of one article. `bron law history` answers every text it has had, each with the window it applied in and the act that produced it, from the renditions the corpus holds.
 - What the register states around a law. `bron law about` says how much of it is held, `bron law relations` what rests on it and what cites it, and `bron law amendments` what the act that established it did elsewhere.
-- The rulings under an article. `bron law decisions` lists the rulings LiDO found that cite one article, newest decided first, each with its court, its ECLI, whether bron holds it and the rendition of the law in force on the day it was decided, which is not necessarily the text the court applied. On an act of the EU, `celex:32016R0679`, it lists the cases CELLAR states interpret or cite the article, each with the places it cites, `art. 17(1)(a)`. It says how many were found and how many of them each court decided, and never that no ruling cites the article: how many LiDO or CELLAR misses is not measured.
+- The rulings under an article. `bron law decisions` lists the rulings LiDO found that cite one article, newest decided first, each with its court, its ECLI, whether Bron holds it and the rendition of the law in force on the day it was decided, which is not necessarily the text the court applied. On an act of the EU, `celex:32016R0679`, it lists the cases CELLAR states interpret or cite the article, each with the places it cites, `art. 17(1)(a)`. It says how many were found and how many of them each court decided, and never that no ruling cites the article: how many LiDO or CELLAR misses is not measured.
 - The structure of a law. `bron law contents` prints the table of contents of the rendition in force on a day, its boeken, titels and afdelingen with their headings as the register prints them, and under each the numbers of its articles on one line.
 - Amendment diffs. `bron law changes` compares a law between two dates unit by unit, its bijlagen and aanhef beside its articles, and matches them on upstream's own identity, so a renumbered article reads as one amendment rather than a removal plus an addition.
-- Rulings by ECLI. `bron case show` answers a ruling or a conclusie paragraph by paragraph, each at its byte range and under the number the court prints for it, `r.o. 3.2.10`. `--number 3.2` reads one rechtsoverweging of a ruling the service has read for its numbers, and answers `numbers_not_read` for one it has not: with `retry_after` where it will, and without where it could not. For a tuchtcollege's ruling it names tuchtrecht.overheid.nl, where the text is published, and a besluit of the ACM reads by `acm:{node}`. `bron case relations` answers the conclusie and the instances before and after it, in the publisher's words and never as a finding that an appeal was or was not lodged. `bron case search` ranks the rulings the service has read against a question and names each by the run of paragraphs that ranked, with that run's first words, saying how many rulings it covered: search over all case law is still to come. A hit too far from the question to answer it is held back and counted, and `--beyond-line` shows it, marked. A judgment or an opinion of the EU's courts, `ECLI:EU:C:2019:773`, reads the same way from CELLAR, in Dutch or with `--lang en` in English, each paragraph under the number the Court prints for it; `bron case relations` answers what CELLAR states it interprets and cites, each place as a reader cites it, `art. 8(2)(e)`, and `bron case search --register cellar` ranks them. `bron case recent` lists the rulings with a text rechtspraak's feed listed, newest decided first, each with its court, its ECLI, its case numbers, whether bron holds it and the summary the feed prints, which the service leaves out for a criminal case and for a ruling it withholds, and how many each court has listed. It is not every ruling decided: the feed lists no conclusie and no ruling published as metadata alone. `--subject civiel` or `straf` narrows it to an area of law, and `--since` walks the feed in the order it stamped the rulings, with the stamp to come back with.
+- Rulings by ECLI. `bron case show` answers a ruling or a conclusie paragraph by paragraph, each at its byte range and under the number the court prints for it, `r.o. 3.2.10`. `--number 3.2` reads one rechtsoverweging of a ruling the service has read for its numbers, and answers `numbers_not_read` for one it has not: with `retry_after` where it will, and without where it could not. For a tuchtcollege's ruling it names tuchtrecht.overheid.nl, where the text is published, and a besluit of the ACM reads by `acm:{node}`. `bron case relations` answers the conclusie and the instances before and after it, in the publisher's words and never as a finding that an appeal was or was not lodged. `bron case search` ranks the rulings the service has read against a question and names each by the run of paragraphs that ranked, with that run's first words, saying how many rulings it covered: search over all case law is still to come. A hit too far from the question to answer it is held back and counted, and `--beyond-line` shows it, marked. A judgment or an opinion of the EU's courts, `ECLI:EU:C:2019:773`, reads the same way from CELLAR, in Dutch or with `--lang en` in English, each paragraph under the number the Court prints for it; `bron case relations` answers what CELLAR states it interprets and cites, each place as a reader cites it, `art. 8(2)(e)`, and `bron case search --register cellar` ranks them. `bron case recent` lists the rulings with a text rechtspraak's feed listed, newest decided first, each with its court, its ECLI, its case numbers, whether Bron holds it and the summary the feed prints, which the service leaves out for a criminal case and for a ruling it withholds, and how many each court has listed. It is not every ruling decided: the feed lists no conclusie and no ruling published as metadata alone. `--subject civiel` or `straf` narrows it to an area of law, and `--since` walks the feed in the order it stamped the rulings, with the stamp to come back with.
 - Official publications. `bron publication search` asks the publisher's own ranking over the kamerstukken, the Staatsblad, the Staatscourant and the Tractatenblad, live, and `bron publication show stb-2026-56` answers one with the digest of every manifestation and, where one is XML, the span of each article it prints. A publication that names private persons is refused.
 - Quotations checked. `bron quote check` reads a quotation again in the article, lid, paragraph or unit of a kamerstuk or Staatsblad it cites and answers found, not as quoted with each difference, or found elsewhere in the same text, and exits 6 where one is not found.
-- Nothing kept between runs. bron writes nothing, so there is no store to migrate, verify or grow stale.
+- Nothing kept between runs. Bron writes nothing, so there is no store to migrate, verify or grow stale.
 
 ## Changelog
 
@@ -262,7 +262,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## Credits
 
 - [Mischa Sigtermans](https://github.com/mischasigtermans)
-- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen), [de Rechtspraak](https://www.rechtspraak.nl) and the Publications Office of the European Union ([CELLAR](https://op.europa.eu/en/web/cellar)). bron reads them through the bron service and keeps none of it. The repository holds answers of the service, frozen for its tests under `tests/`, and the crate ships none of them; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
+- Data from [KOOP](https://www.koopoverheid.nl) (Basis Wetten Bestand, Officiële Bekendmakingen), [de Rechtspraak](https://www.rechtspraak.nl) and the Publications Office of the European Union ([CELLAR](https://op.europa.eu/en/web/cellar)). Bron reads them through the Bron service and keeps none of it. The repository holds answers of the service, frozen for its tests under `tests/`, and the crate ships none of them; Auteurswet art. 11 puts wetten and rechterlijke uitspraken outside copyright.
 
 ## License
 

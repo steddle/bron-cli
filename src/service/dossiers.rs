@@ -1,4 +1,4 @@
-//! Reading a kamerstukdossier through the bron service.
+//! Reading a kamerstukdossier through the Bron service.
 //!
 //! The service answers a dossier the act behind a text it holds names: the
 //! acts that name it, and its papers oldest first, each with the kind its own
@@ -65,7 +65,7 @@ pub struct DossierPaper {
     pub replaced_by: Option<String>,
     /// On an amendement or a motie, every besluit the Tweede Kamer's latest
     /// answer states; empty where it states none. Absent on other kinds,
-    /// where bron has not asked the Kamer, and on a replaced paper it holds
+    /// where Bron has not asked the Kamer, and on a replaced paper it holds
     /// no besluit for.
     pub fates: Option<Vec<Fate>>,
 }

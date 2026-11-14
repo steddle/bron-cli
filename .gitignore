@@ -3,7 +3,7 @@
 **/*.rs.bk
 *.pdb
 
-# Cargo.lock is committed on purpose: bron ships a binary, so a build should
+# Cargo.lock is committed on purpose: Bron ships a binary, so a build should
 # resolve to the versions that were tested.
 
 # IDE files
