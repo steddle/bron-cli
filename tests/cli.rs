@@ -6842,6 +6842,42 @@ async fn case_search_sends_the_register_as_typed() {
     );
 }
 
+/// A search none of whose indexes answered is `index_unavailable`, a 503
+/// under `corpus` that asks again after 30 seconds: carried through as stated
+/// with its wait, exit 4. The body and header are what the service's
+/// `RulingSearchTest` pins for it since BRO-81; production can't be made to
+/// fail every index on purpose.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_carries_index_unavailable_with_its_wait() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"index_unavailable","message":"the index of rechtspraak and acm did not answer","detail":[],"retry_after":30}}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/decisions/search"))
+        .respond_with(
+            ResponseTemplate::new(503)
+                .insert_header("Retry-After", "30")
+                .set_body_raw(SENT, "application/json"),
+        )
+        .mount(&server)
+        .await;
+
+    let args = ["case", "search", "huurverhoging"];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert_eq!(json.status.code(), Some(4), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert_eq!(human.status.code(), Some(4), "{human:?}");
+    let said = String::from_utf8_lossy(&human.stderr);
+    assert!(
+        said.contains(
+            "the service could not answer: the index of rechtspraak and acm did not answer \
+             (the service asked for 30s)"
+        ),
+        "{said}"
+    );
+}
+
 /// A besluit of the ACM ranks beside the rulings and states no ECLI, so a
 /// hit is named by its `id`, as production answered on 2026-10-25.
 /// Each hit prints the words of the run's first paragraph under it, cut where
