@@ -6856,7 +6856,8 @@ async fn case_search_beyond_line_marks_each_hit_past_the_line() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains(
             "note: no ruling bron holds is close to the question, which says nothing of whether \
-             one exists: the 2 marked past the line at distance 0.48 do not answer it\n"
+             one exists: the 2 marked past the line at distance 0.48 do not answer the \
+             question\n"
         ),
         "{output:?}"
     );

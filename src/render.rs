@@ -2179,7 +2179,7 @@ fn beyond_the_line(found: &bron::service::DecisionSearch) -> Option<String> {
         None
     } else if found.hits.iter().any(|hit| hit.beyond_line) {
         Some(format!(
-            "the {held} marked past the line at distance {line} do not answer it"
+            "the {held} marked past the line at distance {line} do not answer the question"
         ))
     } else {
         Some(format!(
@@ -3240,6 +3240,45 @@ mod tests {
             "{err}"
         );
         assert!(!err.contains("filtered over a window"), "{err}");
+    }
+
+    /// Beside a close hit, what stood past the line is counted, held back or
+    /// marked; with no line measured, nothing is said of one.
+    #[test]
+    fn case_search_counts_what_stood_past_the_line_beside_a_close_hit() {
+        let hit = |past: bool| {
+            format!(
+                r#"{{"id":"ECLI:NL:HR:2024:1780","form":"ruling","paragraphs":{{"from":1,"to":1}},
+                  "content_hashes":["a"],"blob":"d","distance":0.5{}}}"#,
+                if past { r#","beyond_line":true"# } else { "" }
+            )
+        };
+        let found = |hits: String, line: &str| -> bron::service::DecisionSearch {
+            serde_json::from_str(&format!(r#"{{"hits":[{hits}]{line}}}"#)).unwrap()
+        };
+
+        for (search, said) in [
+            (
+                found(hit(false), r#","line":0.48,"held_back":2,"close_hit":true"#),
+                Some("note: 2 held back past the line at distance 0.48; --beyond-line shows them"),
+            ),
+            (
+                found(
+                    format!("{},{}", hit(false), hit(true)),
+                    r#","line":0.48,"held_back":1,"close_hit":true"#,
+                ),
+                Some(
+                    "note: the 1 marked past the line at distance 0.48 do not answer the question",
+                ),
+            ),
+            (
+                found(hit(false), r#","line":0.48,"held_back":0,"close_hit":true"#),
+                None,
+            ),
+            (found(hit(false), ""), None),
+        ] {
+            assert_eq!(beyond_the_line(&search).as_deref(), said);
+        }
     }
 
     /// The publisher's relations on stdout, one a row, and on stderr the one
