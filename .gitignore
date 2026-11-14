@@ -30,10 +30,3 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
-
-# A corpus built inside the checkout, when BRON_HOME points here during
-# development. It is rebuildable from the sources and the blobs are large.
-/bron-home/
-*.db
-*.db-wal
-*.db-shm
