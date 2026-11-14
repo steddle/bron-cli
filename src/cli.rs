@@ -596,10 +596,10 @@ pub enum Law {
     /// that state no day, the newest act first. Every day is one the register
     /// states, never an estimate.
     ///
-    /// Treaties are left out and counted, and an act the BWB does not print
-    /// yet is not in the list. `law parts ID --not-commenced` reads one
-    /// regulation's waiting units of every kind, and `law show ID
-    /// --not-commenced` its waiting articles.
+    /// An act the Staatsblad published from 2020 that the BWB prints nowhere
+    /// is a row of its own. Treaties are left out and counted. `law parts ID
+    /// --not-commenced` reads one regulation's waiting units of every kind,
+    /// and `law show ID --not-commenced` its waiting articles.
     Upcoming {
         /// Only regulations with a waiting unit that states a day on or after
         /// this one. Without --from and --to, regulations whose units state
@@ -688,13 +688,17 @@ pub enum Law {
 
 #[derive(Debug, Subcommand)]
 pub enum Case {
-    /// One ruling or conclusie by its ECLI, with its text.
+    /// One ruling or conclusie by its ECLI, a besluit of the ACM by
+    /// acm:{node}, or a judgment or opinion of the EU's courts by its
+    /// ECLI:EU, with its text.
     ///
     /// The service fetches a ruling from rechtspraak on the first read that
     /// asks for it and answers every later read from the bytes it froze. A
-    /// ruling rechtspraak publishes as metadata alone answers with no text. A
-    /// judgment or an opinion of the EU's courts, ECLI:EU:C:2019:773, is read
-    /// from CELLAR, each paragraph under the number the Court prints for it.
+    /// ruling rechtspraak publishes as metadata alone answers with no text,
+    /// and a tuchtcollege's names where its text is published. A ruling the
+    /// service withholds answers its court and days and no text. A case of
+    /// the EU, ECLI:EU:C:2019:773, is read from CELLAR, each paragraph under
+    /// the number the Court prints for it.
     Show {
         ecli: String,
 
@@ -864,8 +868,11 @@ pub enum Publication {
     /// One publication by identifier, e.g. stb-2026-56 or kst-36327-3.
     ///
     /// Held where the corpus keeps it, passed through where it was fetched on
-    /// demand and not kept, and refused where bron is known to keep it out. A
-    /// manifestation in XML answers the articles it prints, at their spans.
+    /// demand and not kept, and refused where bron keeps it out because it
+    /// names private persons. The Aanhangsel van de Handelingen, the
+    /// Kamervragen zonder antwoord, the Niet-dossierstukken and the Agenda
+    /// are refused whole. A manifestation in XML answers the articles it
+    /// prints, at their spans.
     Show {
         id: String,
 

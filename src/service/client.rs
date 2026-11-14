@@ -1,6 +1,6 @@
 //! Reading one answer, whatever it turns out to be.
 //!
-//! Every call to the service goes through [`Service::read`], so there is one
+//! Every call to the service goes through `Service::read`, so there is one
 //! place that knows what a bron envelope is and one place that turns a failure
 //! into a [`Fault`]. A second path around it is how `bron find` came to report
 //! that nothing matched a question the service had never been asked.
