@@ -123,8 +123,9 @@ pub enum QuoteCmd {
     /// Whether the text a quotation cites holds it, word for word once white
     /// space and quotation marks are folded alike, and never by meaning.
     ///
-    /// One quotation from the command line, citing an article of a regulation
-    /// or a ruling by its ECLI, or up to ten from --file. Each answers a
+    /// One quotation from the command line, citing an article of a regulation,
+    /// a ruling by its ECLI or a kamerstuk or Staatsblad by its identifier, or
+    /// up to ten from --file. Each answers a
     /// verdict: found, with the unit that holds it; not as quoted, with each
     /// difference; not where cited, with the unit of the same article or
     /// ruling that holds it; or citation unresolved, with what the service
@@ -165,21 +166,30 @@ pub enum QuoteCmd {
         #[arg(long)]
         number: Option<String>,
 
+        /// The publication it cites, as `publication show` takes it: kst-34608-3
+        /// or stb-2019-130. Without --ordinal the service searches its first
+        /// 1.000 units. Sent exactly as typed.
+        #[arg(long)]
+        publication: Option<String>,
+
         /// One paragraph of that ruling by its ordinal, as `case show` prints
-        /// it. Digits are sent as a number, anything else as typed.
+        /// it, or one unit of that publication, counted from 1 in the order
+        /// `publication show` prints them. Digits are sent as a number,
+        /// anything else as typed.
         #[arg(long, allow_negative_numbers = true)]
         ordinal: Option<String>,
 
         /// A JSON list of quotations, each an object as the service takes it:
         /// `text` with `regulation` and `article` (and `paragraph`, `as_of`,
-        /// `as_known_on`), or with `ecli` (and `number` or `ordinal`). `-`
-        /// reads stdin. Sent as the file holds it.
+        /// `as_known_on`), with `ecli` (and `number` or `ordinal`), or with
+        /// `publication` (and `ordinal`). `-` reads stdin. Sent as the file
+        /// holds it.
         #[arg(
             long,
             value_name = "FILE",
             conflicts_with_all = [
                 "regulation", "article", "paragraph", "as_of", "as_known_on", "ecli", "number",
-                "ordinal",
+                "publication", "ordinal",
             ]
         )]
         file: Option<std::path::PathBuf>,

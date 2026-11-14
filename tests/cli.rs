@@ -7261,6 +7261,89 @@ async fn quote_check_sends_an_ordinal_as_a_number() {
     assert!(!text.contains("matches may be missing"), "{text}");
 }
 
+/// A quotation of a kamerstuk cites the publication and, as typed, the
+/// ordinal of one of its units, sent as a number. A unit is named by the
+/// publication and its ordinal, under the heading it stands under, since
+/// several units share one. Production's verdict on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_cites_a_unit_of_a_publication() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"quotes":[{"verdict":"quote_found","cited":{"text":"Dit wetsvoorstel strekt tot invoering van een collectieve schadevergoedingsactie.","publication":"kst-34608-3","ordinal":1},"register":"op","jurisdiction":"nl","rendition":"kst-34608-3","blob":"6490ef25c1ddcfb42065443ddeb007cfc8032862882ba42f952b502b2c6c7ba0","unit":{"ordinal":1,"kind":"al","label":"1. Inleiding","span":{"start":1545,"end":2834},"content_hash":"396cd29b0d507dd5160aacf128c815f325d519fd1421022e1cf5f9dde2893a0a"},"caveats":[{"kind":"truncated","window":1}]}]}}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/quotes"))
+        .and(body_json(serde_json::json!({"quotes": [{
+            "text": "Dit wetsvoorstel strekt tot invoering van een collectieve schadevergoedingsactie.",
+            "publication": "kst-34608-3", "ordinal": 1
+        }]})))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let args = [
+        "quote",
+        "check",
+        "Dit wetsvoorstel strekt tot invoering van een collectieve schadevergoedingsactie.",
+        "--publication",
+        "kst-34608-3",
+        "--ordinal",
+        "1",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+
+    assert_eq!(json.status.code(), Some(0), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert_eq!(human.status.code(), Some(0), "{human:?}");
+    assert!(
+        text.starts_with("1  found  kst-34608-3 unit 1, under 1. Inleiding  (1545..2834)\n"),
+        "{text}"
+    );
+}
+
+/// Each verdict on a publication names the unit it cites by its ordinal: one
+/// found by searching every unit, one that departs from the unit cited, and
+/// one the unit cited does not hold that another does. Production's verdicts
+/// on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn quote_check_names_each_unit_of_a_publication_it_read() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"quotes":[{"verdict":"quote_found","cited":{"text":"Dit wetsvoorstel strekt tot invoering van een collectieve schadevergoedingsactie.","publication":"kst-34608-3"},"register":"op","jurisdiction":"nl","rendition":"kst-34608-3","blob":"6490ef25c1ddcfb42065443ddeb007cfc8032862882ba42f952b502b2c6c7ba0","unit":{"ordinal":1,"kind":"al","label":"1. Inleiding","span":{"start":1545,"end":2834},"content_hash":"396cd29b0d507dd5160aacf128c815f325d519fd1421022e1cf5f9dde2893a0a"}},{"verdict":"quote_mismatch","cited":{"text":"Het wetsvoorstel heeft tot doel een snelle en effectieve collectieve afwikkeling van massaschade te bevorderen.","publication":"kst-34608-3","ordinal":1},"register":"op","jurisdiction":"nl","rendition":"kst-34608-3","blob":"6490ef25c1ddcfb42065443ddeb007cfc8032862882ba42f952b502b2c6c7ba0","caveats":[{"kind":"truncated","window":1}],"divergence":{"unit":{"ordinal":1,"kind":"al","label":"1. Inleiding","span":{"start":1545,"end":2834},"content_hash":"396cd29b0d507dd5160aacf128c815f325d519fd1421022e1cf5f9dde2893a0a"},"differences":[{"text":"efficiënte","quoted":"snelle","at":{"start":118,"end":128}}]}},{"verdict":"quote_mismatch","cited":{"text":"Dit wetsvoorstel strekt tot invoering van een collectieve schadevergoedingsactie.","publication":"kst-34608-3","ordinal":3},"register":"op","jurisdiction":"nl","rendition":"kst-34608-3","blob":"6490ef25c1ddcfb42065443ddeb007cfc8032862882ba42f952b502b2c6c7ba0","caveats":[{"kind":"truncated","window":1}],"found_elsewhere":{"ordinal":1,"kind":"al","label":"1. Inleiding","span":{"start":1545,"end":2834},"content_hash":"396cd29b0d507dd5160aacf128c815f325d519fd1421022e1cf5f9dde2893a0a"}}]}}"#;
+    let quotes = serde_json::json!([
+        {"text": "Dit wetsvoorstel strekt tot invoering van een collectieve schadevergoedingsactie.", "publication": "kst-34608-3"},
+        {"text": "Het wetsvoorstel heeft tot doel een snelle en effectieve collectieve afwikkeling van massaschade te bevorderen.", "publication": "kst-34608-3", "ordinal": 1},
+        {"text": "Dit wetsvoorstel strekt tot invoering van een collectieve schadevergoedingsactie.", "publication": "kst-34608-3", "ordinal": 3}
+    ]);
+    let file = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("publication-quotes.json");
+    std::fs::write(&file, quotes.to_string()).unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/quotes"))
+        .and(body_json(serde_json::json!({"quotes": quotes})))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &["quote", "check", "--file", file.to_str().unwrap()],
+    )
+    .await;
+    let text = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
+    for line in [
+        "1  found  kst-34608-3 unit 1, under 1. Inleiding  (1545..2834)\n",
+        "2  not as quoted  kst-34608-3 unit 1, under 1. Inleiding  (1545..2834)\n   \
+         \"efficiënte\" where the quotation has \"snelle\"\n",
+        "3  not where cited, kst-34608-3 unit 3; found in kst-34608-3 unit 1, under 1. \
+         Inleiding  (1545..2834)\n",
+    ] {
+        assert!(text.contains(line), "{line}: {text}");
+    }
+}
+
 /// Quotations from a file are sent as the file holds them, a name the service
 /// does not take included, so its refusal is the answer. A verdict other than
 /// found exits 6, with the service's envelope on stdout as sent. Production's

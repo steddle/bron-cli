@@ -2187,10 +2187,20 @@ fn pinpoint(place: Option<&Pinpoint>, part: Option<&str>) -> Option<String> {
 fn verdict(out: &mut impl Write, at: usize, quote: &QuoteVerdict) -> io::Result<()> {
     let cited = citation(&quote.cited);
     let ruling = quote.cited.get("ecli").and_then(serde_json::Value::as_str);
+    let publication = quote
+        .cited
+        .get("publication")
+        .and_then(serde_json::Value::as_str);
     let name = |unit: &QuotedUnit| {
-        let mut name = match (&unit.label, ruling, unit.ordinal) {
-            (Some(label), ..) => label.clone(),
-            (None, Some(ecli), Some(ordinal)) => format!("{ecli} paragraph {ordinal}"),
+        // A unit of a publication is labelled by the heading it stands under,
+        // which several units share, so its ordinal names it.
+        let mut name = match (publication, &unit.label, ruling, unit.ordinal) {
+            (Some(id), label, _, Some(ordinal)) => match label {
+                Some(heading) => format!("{id} unit {ordinal}, under {heading}"),
+                None => format!("{id} unit {ordinal}"),
+            },
+            (None, Some(label), ..) => label.clone(),
+            (None, None, Some(ecli), Some(ordinal)) => format!("{ecli} paragraph {ordinal}"),
             _ => cited.clone(),
         };
         if let Some(span) = &unit.span {
@@ -2256,9 +2266,15 @@ fn verdict(out: &mut impl Write, at: usize, quote: &QuoteVerdict) -> io::Result<
         // The service reads a cited paragraph as a page of the ruling one
         // unit long: a window of the read, and no filter that missed matches.
         let line = match caveat {
-            Caveat::Truncated { window } => {
-                format!("note: the service read the {window} unit(s) cited and no more")
-            }
+            // Of a publication, a window wider than one unit is where the
+            // service stopped searching for the quotation.
+            Caveat::Truncated { window } => match publication {
+                Some(id) if window > 1 => format!(
+                    "note: the service searched the first {window} units of {id} and no \
+                     further, so a unit past them may hold the quotation"
+                ),
+                _ => format!("note: the service read the {window} unit(s) cited and no more"),
+            },
             other => caveat_line(&other),
         };
         writeln!(out, "   {line}")?;
@@ -2279,7 +2295,7 @@ fn listed(numbers: &[u32]) -> String {
 }
 
 /// What a quotation cites, as it was asked: a regulation's article and lid,
-/// or a ruling and its number or paragraph.
+/// a ruling and its number or paragraph, or a publication and its unit.
 fn citation(cited: &serde_json::Value) -> String {
     let named = |name: &str| match cited.get(name) {
         Some(serde_json::Value::String(value)) => Some(value.clone()),
@@ -2287,19 +2303,20 @@ fn citation(cited: &serde_json::Value) -> String {
         Some(value) => Some(value.to_string()),
     };
 
-    let mut citation = match named("ecli") {
-        Some(ecli) => ecli,
+    let unit = if cited.get("publication").is_some() {
+        "unit"
+    } else {
+        "paragraph"
+    };
+    let mut citation = match named("ecli").or_else(|| named("publication")) {
+        Some(id) => id,
         None => [named("regulation"), named("article")]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
             .join(" "),
     };
-    for (name, word) in [
-        ("paragraph", "lid"),
-        ("number", ""),
-        ("ordinal", "paragraph"),
-    ] {
+    for (name, word) in [("paragraph", "lid"), ("number", ""), ("ordinal", unit)] {
         if let Some(value) = named(name) {
             let _ = write!(citation, " {}", format!("{word} {value}").trim_start());
         }
@@ -3536,6 +3553,33 @@ mod tests {
             "note: paragraph 42 prints 2.2 too, and bron cannot tell the court's own number \
              from a quotation's: read it before citing, with case show --offset 41 --limit 1, without \
              --number"
+        );
+    }
+
+    /// Of a publication, the unit cited is a window of one, and a window of
+    /// 1.000 is where the search for it elsewhere stopped: a person reads that
+    /// a unit past it may hold the quotation. The caveats are those the
+    /// service's `QuoteCheckTest` pins for a kamerstuk of more than 1.000
+    /// units, which production holds none of.
+    #[test]
+    fn a_search_of_a_publication_says_where_it_stopped() {
+        let quote: bron::service::quotes::QuoteVerdict = serde_json::from_value(serde_json::json!({
+            "verdict": "quote_mismatch",
+            "cited": {"text": "x", "publication": "kst-34608-3", "ordinal": 3},
+            "register": "op",
+            "rendition": "kst-34608-3",
+            "caveats": [{"kind": "truncated", "window": 1}, {"kind": "truncated", "window": 1000}],
+        }))
+        .unwrap();
+        let mut out = Vec::new();
+
+        super::verdict(&mut out, 1, &quote).unwrap();
+
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "1  not found in kst-34608-3 unit 3\n   rendition kst-34608-3\n   note: the service \
+             read the 1 unit(s) cited and no more\n   note: the service searched the first 1000 \
+             units of kst-34608-3 and no further, so a unit past them may hold the quotation\n"
         );
     }
 

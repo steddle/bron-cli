@@ -741,6 +741,7 @@ fn run_quote(cmd: &QuoteCmd, service: &Service) -> Outcome<Answer> {
         as_known_on,
         ecli,
         number,
+        publication,
         ordinal,
         file,
     } = cmd;
@@ -758,6 +759,7 @@ fn run_quote(cmd: &QuoteCmd, service: &Service) -> Outcome<Answer> {
                 ("as_known_on", as_known_on),
                 ("ecli", ecli),
                 ("number", number),
+                ("publication", publication),
             ] {
                 if let Some(value) = value {
                     quote.insert(name.into(), value.as_str().into());
