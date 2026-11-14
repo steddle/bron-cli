@@ -6457,6 +6457,38 @@ async fn case_show_reads_one_rechtsoverweging_by_its_number() {
     );
 }
 
+/// A ruling the service has not read for its numbers answers `--number` with
+/// `numbers_not_read`, under `corpus`: carried through as stated, exit 4, and
+/// the message says to read it by offset. The body is what
+/// `DecisionController::rechtsoverweging` states.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_number_carries_numbers_not_read_as_the_service_stated_it() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","error":{"kind":"corpus","code":"numbers_not_read","message":"the paragraphs of ECLI:NL:HR:2024:1780 have not been read for the rechtsoverweging each opens; read it by offset","detail":["numbers_not_read"]}}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions/ECLI:NL:HR:2024:1780/paragraphs"))
+        .and(query_param("number", "3.2"))
+        .respond_with(ResponseTemplate::new(500).set_body_raw(SENT, "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = ["case", "show", "ECLI:NL:HR:2024:1780", "--number", "3.2"];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+
+    assert_eq!(json.status.code(), Some(4), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert_eq!(human.status.code(), Some(4), "{human:?}");
+    let said = String::from_utf8_lossy(&human.stderr);
+    assert!(
+        said.contains(
+            "the paragraphs of ECLI:NL:HR:2024:1780 have not been read for the rechtsoverweging \
+             each opens; read it by offset"
+        ),
+        "{said}"
+    );
+}
+
 /// An older case prints the report for the hearing beside its judgment, two
 /// documents: where the page crosses from one into the other, the document
 /// the spans below point into is named.
