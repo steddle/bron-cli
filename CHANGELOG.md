@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1] - 2026-11-14
+
+**Changed**
+
+- Bron is capitalised in every note, error and help text the CLI prints, and in the `message` of a `network` or `upstream` failure it states itself: 'cannot reach Bron', not 'cannot reach bron'. Keys, kinds, codes and exit codes are unchanged.
+
 ## [0.1.0] - 2026-11-14
 
 The first release. Bron reads Dutch and EU legislation, case law and the officiële publicaties through the Bron service at `https://bron.steddle.com/api/v1`, and every answer that quotes a text names the SHA-256 of the document it was read from and the byte range inside it. The JSON contract below holds from this version on.
