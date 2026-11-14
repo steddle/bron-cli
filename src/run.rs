@@ -79,6 +79,9 @@ pub enum Answer {
         /// The offset the question named, so a cut page can say where the next
         /// one starts.
         offset: Option<String>,
+        /// The rechtsoverweging the question named, which that offset counts
+        /// within.
+        number: Option<String>,
     },
     DecisionRelations(Box<Answered<service::DecisionRelations>>),
     DecisionHits(Answered<service::DecisionSearch>),
@@ -562,19 +565,24 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
             lang,
             limit,
             offset,
+            number,
         } => service
             .decision(
                 &client,
                 ecli,
-                *raw,
-                lang.as_deref(),
-                limit.as_deref(),
-                offset.as_deref(),
+                &service::RulingText {
+                    raw: *raw,
+                    lang: lang.as_deref(),
+                    number: number.as_deref(),
+                    limit: limit.as_deref(),
+                    offset: offset.as_deref(),
+                },
             )
             .map(|answered| Answer::Decision {
                 answered: Box::new(answered),
                 service: service.clone(),
                 offset: offset.clone(),
+                number: number.clone(),
             }),
 
         Case::Relations { ecli } => service

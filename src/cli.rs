@@ -640,9 +640,17 @@ pub enum Case {
         #[arg(long, allow_negative_numbers = true)]
         limit: Option<String>,
 
-        /// How many units to skip; untyped, none. Sent exactly as typed.
+        /// How many units to skip; untyped, none. With --number, counted from
+        /// the rechtsoverweging's first paragraph. Sent exactly as typed.
         #[arg(long, allow_negative_numbers = true)]
         offset: Option<String>,
+
+        /// One rechtsoverweging of a Dutch ruling as the court prints it,
+        /// e.g. 3.2.10, with the paragraphs that continue it and those
+        /// numbered under it. Sent exactly as typed: the service refuses it
+        /// for a case of the EU and a besluit of the ACM.
+        #[arg(long)]
+        number: Option<String>,
     },
 
     /// What the publisher states connects a ruling to others: its conclusie,

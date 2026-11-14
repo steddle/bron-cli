@@ -6415,6 +6415,48 @@ async fn case_show_names_a_dutch_number_as_a_rechtsoverweging() {
     assert!(!text.contains("point"), "{text}");
 }
 
+/// `--number` reads one rechtsoverweging, as typed, and a page of it says how
+/// to read on inside it: the service counts `offset` from the first paragraph
+/// the number opens. ECLI:NL:HR:2024:1780 r.o. 3.2 as production answered it
+/// on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_show_reads_one_rechtsoverweging_by_its_number() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"decision":{"id":"ECLI:NL:HR:2024:1780","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Hoge Raad","decided_on":"2024-11-29","published_on":"2024-11-29","known_since":"2026-01-16T10:06:33+01:00","has_body":true,"rendition":{"language":"nl","blob":"de3e3678909a1d2e51c4afc4ffe19139f514ca4d357083576e49fbb3eadbe1ff","blob_size":63030},"superseded":[],"native":{"type":"Uitspraak","creator":"http://standaarden.overheid.nl/owms/terms/Hoge_Raad_der_Nederlanden","procedure":["Prejudiciële beslissing"],"zaaknummer":["24/00169","24/00170"],"subject":["Civiel recht; Europees civiel recht"],"vindplaatsen":["Rechtspraak.nl","NJB 2024/2595","JHV 2024/39 met annotatie van Mr. E.P.W. Korevaar","WR 2025/1 met annotatie van C.L.J.M. de Waal","RvdW 2025/4","JOR 2025/58 met annotatie van mr. H. Scholten","BR 2025/29 met annotatie van G.C.M. Schipper","TvPP 2025/15, p. 96 met annotatie van R.D.G. de Grave","TvC 2025/8, p.50 met annotatie van mr. dr. J.J.A. Braspenning","VGR 2025/8, p.34 met annotatie van Valerie van Brouwershaven","AA20250771 met annotatie van Boom van W.H. Willem","NJ 2026/13 met annotatie van C.M.D.S. Pavillon"]}},"paragraphs":[{"ordinal":130,"kind":"para","section_path":"3","number":"3.2.1","span":{"start":41928,"end":42263},"content_hash":"90e37ced76d88e352f2c996f0a9a6d19e076a21a7c1620d342d5fa3185301cd6","rendered":"3.2.1 Vraag 1A stelt aan de orde of een opslagbeding dat de huurder verplicht tot betaling van een jaarlijkse opslag op de huurprijs van maximaal 3% bovenop de indexering volgens de consumentenprijsindex, oneerlijk is in de zin van Richtlijn 93/13. Bij de beantwoording van die vraag dient het volgende tot uitgangspunt."},{"ordinal":131,"kind":"para","section_path":"3","number":"3.2.2","span":{"start":42320,"end":44379},"content_hash":"e569b28a01ae5334230e479e94e33e21fa06e23c686cc3ee7baaa23afabc83ce","rendered":"3.2.2 Volgens vaste rechtspraak van het HvJEU is een nationale rechter die over de daartoe noodzakelijke gegevens – feitelijk en rechtens – beschikt gehouden, zo nodig ambtshalve, na te gaan of een contractueel beding valt onder Richtlijn 93/13 en, zo ja, te onderzoeken of dit beding oneerlijk is. Een beding waarover niet afzonderlijk is onderhandeld, wordt als oneerlijk beschouwd indien het, in strijd met de goede trouw, het evenwicht tussen de uit de overeenkomst voortvloeiende rechten en verplichtingen van de partijen ten nadele van de consument aanzienlijk verstoort (art. 3 lid 1 Richtlijn 93/13). Voor de beoordeling van het oneerlijke karakter van een beding in een overeenkomst moeten alle omstandigheden rond de sluiting van de overeenkomst in aanmerking worden genomen, alsmede alle andere bedingen van de overeenkomst of van een andere overeenkomst waarvan deze afhankelijk is, op het moment waarop de overeenkomst is gesloten, rekening houdend met de aard van de goederen of diensten waarop de overeenkomst betrekking heeft (art. 4 lid 1 Richtlijn 93/13). Bij de beoordeling van het oneerlijke karakter van een beding moet worden nagegaan wat het cumulatieve effect is van alle bedingen van de betrokken overeenkomst. Een dergelijke beoordeling is gerechtvaardigd, aangezien die bedingen in hun geheel moeten worden toegepast, ongeacht of de schuldeiser daadwerkelijk de volledige nakoming ervan nastreeft. De omstandigheid dat een beding voorkomt op de lijst bij Richtlijn 93/13, leidt niet automatisch en op zichzelf tot de conclusie dat het beding een oneerlijk karakter heeft. Wel is dat een wezenlijk aspect waarop de rechter zijn beoordeling van het oneerlijke karakter van dat beding kan baseren."}]},"caveats":[{"kind":"truncated","window":2}]}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/decisions/ECLI:NL:HR:2024:1780/paragraphs"))
+        .and(query_param("number", "3.2"))
+        .and(query_param("limit", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .mount(&server)
+        .await;
+
+    let args = [
+        "case",
+        "show",
+        "ECLI:NL:HR:2024:1780",
+        "--number",
+        "3.2",
+        "--limit",
+        "2",
+    ];
+    let json = bron(&server, &[&["--json"][..], &args[..]].concat()).await;
+    let human = bron(&server, &args).await;
+    let text = stdout(&human);
+
+    assert!(json.status.success(), "{json:?}");
+    assert_eq!(stdout(&json), format!("{SENT}\n"));
+    assert!(human.status.success(), "{human:?}");
+    assert!(text.contains("\nr.o. 3.2.1, "), "{text}");
+    assert!(
+        text.ends_with(
+            "\nnote: units 1 to 2 of r.o. 3.2 shown; read on with --offset 2, or the whole of \
+             it with --limit none\n"
+        ),
+        "{text}"
+    );
+}
+
 /// An older case prints the report for the hearing beside its judgment, two
 /// documents: where the page crosses from one into the other, the document
 /// the spans below point into is named.

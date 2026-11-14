@@ -191,6 +191,20 @@ pub struct DecisionQuery<'a> {
     pub limit: Option<&'a str>,
 }
 
+/// What of a ruling's text to answer. Every field the caller typed is sent as
+/// typed and judged by the service; an untyped one is left out.
+#[derive(Debug)]
+pub struct RulingText<'a> {
+    /// Also the publisher's own bytes at every span.
+    pub raw: bool,
+    /// The language a case of the EU is read in.
+    pub lang: Option<&'a str>,
+    /// One rechtsoverweging, within which `limit` and `offset` page.
+    pub number: Option<&'a str>,
+    pub limit: Option<&'a str>,
+    pub offset: Option<&'a str>,
+}
+
 /// The rulings nearest a question, by identifier.
 #[derive(Debug, Deserialize)]
 pub struct DecisionSearch {
@@ -364,25 +378,24 @@ impl Service {
         self.read(client, client.post(&url).json(ask))
     }
 
-    /// A ruling and its text, rendered. `limit` and `offset` page its units,
-    /// and `lang` names the language a case of the EU is read in.
+    /// A ruling and its text, rendered, as `ask` narrows it.
     pub fn decision(
         &self,
         client: &Client,
         ecli: &str,
-        raw: bool,
-        lang: Option<&str>,
-        limit: Option<&str>,
-        offset: Option<&str>,
+        ask: &RulingText<'_>,
     ) -> Outcome<Answered<DecisionParagraphs>> {
         let url = self.route(&["decisions", ecli, "paragraphs"])?;
 
         let mut query = vec![("rendered", "1")];
-        window(&mut query, limit, offset);
-        if raw {
+        if let Some(number) = ask.number {
+            query.push(("number", number));
+        }
+        window(&mut query, ask.limit, ask.offset);
+        if ask.raw {
             query.push(("raw", "1"));
         }
-        if let Some(lang) = lang {
+        if let Some(lang) = ask.lang {
             query.push(("lang", lang));
         }
 

@@ -903,6 +903,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
             answered: a,
             service,
             offset,
+            number,
         } => {
             let decision = &a.data.decision;
 
@@ -1053,9 +1054,13 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     .and_then(|typed| typed.parse::<u64>().ok())
                     .unwrap_or(0);
                 let shown = a.data.paragraphs.len() as u64;
+                let (of, whole) = match number {
+                    Some(number) => (format!(" of r.o. {number}"), "the whole of it"),
+                    None => (String::new(), "the whole ruling"),
+                };
                 writeln!(
                     out,
-                    "\nnote: units {} to {} shown; read on with --offset {}, or the whole ruling with --limit none",
+                    "\nnote: units {} to {}{of} shown; read on with --offset {}, or {whole} with --limit none",
                     from + 1,
                     from + shown,
                     from + u64::from(*window)
@@ -3092,6 +3097,7 @@ mod tests {
             answered: Box::new(answered(ruling)),
             service: Service::at("https://bron.steddle.com"),
             offset: None,
+            number: None,
         });
 
         assert!(
@@ -3133,6 +3139,7 @@ mod tests {
             answered: Box::new(answered),
             service: Service::at("https://bron.test"),
             offset: Some("10".into()),
+            number: None,
         });
 
         assert!(

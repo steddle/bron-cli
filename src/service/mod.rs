@@ -34,7 +34,7 @@ pub use decisions::{
     ArticleDecisions, Citing, CitingDecision, CitingLink, CourtCount, Decision, DecisionDocument,
     DecisionHit, DecisionParagraph, DecisionParagraphs, DecisionQuery, DecisionRelation,
     DecisionRelations, DecisionRendition, DecisionSearch, ListedDecision, OrdinalRange, Pinpoint,
-    RecentDecisions, Target,
+    RecentDecisions, RulingText, Target,
 };
 pub use dossiers::{DossierAct, DossierPaper, DossierPapers, DossierRegulation, Fate};
 pub use model::{
