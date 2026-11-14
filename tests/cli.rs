@@ -6677,6 +6677,76 @@ async fn case_search_sends_the_register_as_typed() {
 
 /// A besluit of the ACM ranks beside the rulings and states no ECLI, so a
 /// hit is named by its `id`, as production answered on 2026-10-25.
+/// A question no ruling bron holds is close to answers no hit, and a person
+/// reads why: how many stood past the line and were held back, and the flag
+/// that shows them. Production's answer on 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_says_no_ruling_is_close_and_how_many_it_held_back() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"hits":[],"line":0.48,"held_back":2,"close_hit":false},"caveats":[{"kind":"search_upcoming","count":132932}]}"#;
+    let server = answering("POST", "/api/v1/decisions/search", SENT).await;
+
+    let output = bron(
+        &server,
+        &["case", "search", "kernfusie", "op", "de", "maan"],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout(&output), "");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "note: no ruling bron holds is close to the question, which says nothing of whether \
+             one exists: 2 held back past the line at distance 0.48; --beyond-line shows them\n"
+        ),
+        "{output:?}"
+    );
+}
+
+/// `--beyond-line` asks for the held-back hits, and each is marked: it stands
+/// past the line and does not answer the question. Production's answer on
+/// 2026-11-14.
+#[tokio::test(flavor = "multi_thread")]
+async fn case_search_beyond_line_marks_each_hit_past_the_line() {
+    const SENT: &str = r#"{"bron":1,"grade":"authority","data":{"hits":[{"id":"ECLI:NL:GHAMS:2020:2379","ecli":"ECLI:NL:GHAMS:2020:2379","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Gerechtshof Amsterdam","decided_on":"2020-09-01","paragraphs":{"from":82,"to":82},"content_hashes":["5398cba74b474cbe9c4309afc1c5fb217cbed3b99372c1243d2bb41ec65fce6a"],"blob":"d57baa51fb2b3348f2f6b5c3eae2d21ccabb57dd559ce7104d584e609e503525","excerpt":{"ordinal":82,"text":"Op zichzelf voert Vivendi terecht aan dat de genoemde beslissingen van de Italiaanse rechter het aan dit hof niet onmogelijk maken om voorshands uit te gaan van de onverenigbaarheid van het AGCOM-besluit en de ‘Gasparri-drempelbepaling’ met het VWEU en aan te nemen dat Simon Fiduciaria ten onrechte van stemming over de fusie is uitgesloten. Het hof acht de mogelijkheid dat de Italiaanse rechters uiteindelijk, oordelend ten gronde, het standpunt van Vivendi op dit punt zullen volgen, echter te","span":{"start":50161,"end":51621},"content_hash":"5398cba74b474cbe9c4309afc1c5fb217cbed3b99372c1243d2bb41ec65fce6a","cut":true,"number":"3.13","section_path":"3/3.13."},"lookup":{"tool":"get-case","route":"GET /v1/decisions/{ecli}/paragraphs","args":{"ecli":"ECLI:NL:GHAMS:2020:2379","offset":81,"limit":1}},"distance":0.72312,"beyond_line":true},{"id":"ECLI:NL:RVS:2022:3503","ecli":"ECLI:NL:RVS:2022:3503","register":"rechtspraak","jurisdiction":"nl","form":"ruling","court":"Raad van State","decided_on":"2022-11-30","paragraphs":{"from":1,"to":1},"content_hashes":["43f9ca1bc56bbb2eb45350e41c9261d3c7af0d873c83759478ef4d6a8d072a5f"],"blob":"a0a9406d2427366a4695703d16f32ef17fa585aa5fce6b9689893254e5e63857","excerpt":{"ordinal":1,"text":"Bij besluit van 29 oktober 2019 heeft het college van burgemeester en wethouders van Heerlen het verzoek van Metroprop om op grond van de Wet openbaarheid van bestuur documenten openbaar te maken, geweigerd. Het plan Maankwartier stamt uit 2005 en heeft betrekking op de herontwikkeling van het stadscentrum van de stad Heerlen. Het stationsgebied is een belangrijk onderdeel van het stadscentrum. De ligging van het spoor vormde echter een stedenbouwkundige splitsing tussen het stadscentrum en de","span":{"start":2930,"end":4760},"content_hash":"43f9ca1bc56bbb2eb45350e41c9261d3c7af0d873c83759478ef4d6a8d072a5f","cut":true},"lookup":{"tool":"get-case","route":"GET /v1/decisions/{ecli}/paragraphs","args":{"ecli":"ECLI:NL:RVS:2022:3503","offset":0,"limit":1}},"distance":0.741452,"beyond_line":true}],"line":0.48,"held_back":2,"close_hit":false},"caveats":[{"kind":"search_upcoming","count":132935},{"kind":"truncated","window":2}]}"#;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/decisions/search"))
+        .and(body_json(serde_json::json!({
+            "q": "kernfusie op de maan", "limit": "2", "beyond_line": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SENT, "application/json"))
+        .mount(&server)
+        .await;
+
+    let output = bron(
+        &server,
+        &[
+            "case",
+            "search",
+            "kernfusie op de maan",
+            "--limit",
+            "2",
+            "--beyond-line",
+        ],
+    )
+    .await;
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        stdout(&output).starts_with(
+            "ECLI:NL:GHAMS:2020:2379  ruling  Gerechtshof Amsterdam  2020-09-01  past the line\n"
+        ),
+        "{output:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "note: no ruling bron holds is close to the question, which says nothing of whether \
+             one exists: the 2 marked past the line at distance 0.48 do not answer it\n"
+        ),
+        "{output:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn case_search_names_a_besluit_of_the_acm_by_its_id() {
     let sent = fixture("bron-decision-search-limit-5.json");

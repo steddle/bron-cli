@@ -189,6 +189,9 @@ pub struct DecisionQuery<'a> {
     pub register: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<&'a str>,
+    /// Also the hits past the service's line, each marked.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub beyond_line: bool,
 }
 
 /// What of a ruling's text to answer. Every field the caller typed is sent as
@@ -209,6 +212,14 @@ pub struct RulingText<'a> {
 #[derive(Debug, Deserialize)]
 pub struct DecisionSearch {
     pub hits: Vec<DecisionHit>,
+    /// The distance past which a hit no longer answers the question; absent
+    /// where the service measured none, and then nothing is held back.
+    pub line: Option<f64>,
+    /// Of the window's hits, how many stood past `line`: held back, or with
+    /// `beyond_line` answered and marked.
+    pub held_back: Option<u32>,
+    /// Whether a hit of the window stands within `line`.
+    pub close_hit: Option<bool>,
 }
 
 /// One ruling a question ranked, named by the run of its units that ranked
@@ -225,6 +236,9 @@ pub struct DecisionHit {
     pub content_hashes: Vec<String>,
     pub blob: String,
     pub distance: f64,
+    /// The hit stands past the line, answered because `beyond_line` was asked.
+    #[serde(default)]
+    pub beyond_line: bool,
 }
 
 /// A run of a ruling's units, by their ordinals.

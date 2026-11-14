@@ -619,6 +619,7 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
             form,
             register,
             limit,
+            beyond_line,
         } => service
             .decision_search(
                 &client,
@@ -630,6 +631,7 @@ fn run_case(case_cmd: &Case, service: &Service) -> Outcome<Answer> {
                     form: form.as_deref(),
                     register: register.as_deref(),
                     limit: limit.as_deref(),
+                    beyond_line: *beyond_line,
                 },
             )
             .map(Answer::DecisionHits),

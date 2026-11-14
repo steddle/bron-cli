@@ -699,6 +699,12 @@ pub enum Case {
         /// exactly as typed.
         #[arg(long, allow_negative_numbers = true)]
         limit: Option<String>,
+
+        /// Also the hits past the service's line, each marked: they stand too
+        /// far from the question to answer it, and are otherwise held back
+        /// and counted.
+        #[arg(long)]
+        beyond_line: bool,
     },
 
     /// The newest rulings with a text, as rechtspraak's feed listed them,

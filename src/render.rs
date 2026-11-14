@@ -1236,6 +1236,9 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                 if let Some(day) = hit.decided_on {
                     let _ = write!(row, "  {day}");
                 }
+                if hit.beyond_line {
+                    row.push_str("  past the line");
+                }
                 writeln!(out, "{row}")?;
 
                 let units = if hit.paragraphs.from == hit.paragraphs.to {
@@ -1265,6 +1268,7 @@ pub fn answer(answer: &Answer, out: &mut impl Write, err: &mut impl Write) -> io
                     other => caveat_line(other),
                 })
                 .collect();
+            notes.extend(beyond_the_line(&a.data));
             notes.extend(rest.iter().map(caveat_line));
             if !notes.is_empty() {
                 writeln!(err, "\n{}", notes.join("\n"))?;
@@ -2145,6 +2149,34 @@ fn pinpoint(place: Option<&Pinpoint>, part: Option<&str>) -> Option<String> {
     });
 
     read.or_else(|| part.map(str::to_string))
+}
+
+/// What the service's line did to a search: which hits it held back, or
+/// marked where `--beyond-line` asked for them, and whether any is close.
+fn beyond_the_line(found: &bron::service::DecisionSearch) -> Option<String> {
+    let line = found.line?;
+    let held = found.held_back.unwrap_or(0);
+    let past = if held == 0 {
+        None
+    } else if found.hits.iter().any(|hit| hit.beyond_line) {
+        Some(format!(
+            "the {held} marked past the line at distance {line} do not answer it"
+        ))
+    } else {
+        Some(format!(
+            "{held} held back past the line at distance {line}; --beyond-line shows them"
+        ))
+    };
+
+    match (found.close_hit, past) {
+        (Some(false), past) => Some(format!(
+            "note: no ruling bron holds is close to the question, which says nothing of whether \
+             one exists{}",
+            past.map(|past| format!(": {past}")).unwrap_or_default()
+        )),
+        (_, Some(past)) => Some(format!("note: {past}")),
+        (_, None) => None,
+    }
 }
 
 /// Where the next page of a list of rulings starts, from the `truncated`
